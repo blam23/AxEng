@@ -142,11 +142,16 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="AxEng.cpp" />
+    <ClCompile Include="main.cpp" />
     <ClCompile Include="glfw3webgpu.c" />
+    <ClCompile Include="scripting.cpp" />
+    <ClCompile Include="window.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="glfw3webgpu.h" />
+    <ClInclude Include="helpers.h" />
+    <ClInclude Include="scripting.h" />
+    <ClInclude Include="window.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

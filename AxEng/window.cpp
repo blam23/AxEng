@@ -1,70 +1,66 @@
-#include <iostream>
-#include <chrono>
+#include "window.h"
 
-// Logging
 #include "spdlog/spdlog.h"
-#include "spdlog/stopwatch.h"
 
-// Lua
-#define SOL_ALL_SAFETIES_ON 1
-#include <sol/sol.hpp>
-
-// GFX
-#include "glfw3webgpu.h"
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
-#include <webgpu/webgpu_cpp.h>
-#include <webgpu/webgpu_cpp_print.h>
-
-int main()
+void glfw_error_callback(int error, const char* description)
 {
+	spdlog::error("glfw error {}: {}", error, description);
+}
 
-    sol::state mainState;
-	spdlog::stopwatch lua_timer;
+ax::Window::Window(int width, int height, const std::string_view title)
+{
+	m_window = glfwCreateWindow(width, height, title.data(), NULL, NULL);
+}
 
-	mainState.open_libraries
-	(
-		sol::lib::base,
-		sol::lib::package,
-		sol::lib::math,
-		sol::lib::string,
-		sol::lib::table,
-		sol::lib::bit32
-	);
+ax::Window::~Window()
+{
+	if (m_window)
+		glfwDestroyWindow(m_window);
 
-	const auto res{ mainState.do_string("x = 4 * 9") };
-	if (res.valid())
+	m_surface.Unconfigure();
+}
+
+bool ax::Window::setup_glfw()
+{
+	glfwSetErrorCallback(glfw_error_callback);
+
+	if (!glfwInit())
 	{
-		spdlog::info("Initialised lua, time taken: {}ms", std::chrono::duration_cast<std::chrono::nanoseconds>(lua_timer.elapsed()).count() / 1000000.);
-	}
-	else
-	{
-		sol::error err = res;
-		spdlog::error("Failed to load init script: {}", err.what());
-		return 1;
+		spdlog::error("glfw init failed");
+		return false;
 	}
 
-	spdlog::stopwatch wgpu_timer;
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	
+	return true;
+}
 
+void ax::Window::teardown_glfw()
+{
+	glfwTerminate();
+}
+
+bool ax::Window::init_wegbpu()
+{
 	// Init WebGPU
 	wgpu::InstanceDescriptor desc{};
 	desc.nextInChain = nullptr;
 	wgpu::Instance instance;
-	wgpu::RequestAdapterOptions options {
+	wgpu::RequestAdapterOptions options{
 		.featureLevel = wgpu::FeatureLevel::Core
 	};
 	wgpu::Adapter adapter;
-	wgpu::Device device;
 	wgpu::DeviceDescriptor deviceDescriptor{};
 
 	static const auto kTimedWaitAny = wgpu::InstanceFeatureName::TimedWaitAny;
-	wgpu::InstanceDescriptor instanceDesc {
+	wgpu::InstanceDescriptor instanceDesc{
 		.requiredFeatureCount = 1,
 		.requiredFeatures = &kTimedWaitAny
 	};
 	instance = wgpu::CreateInstance(&instanceDesc);
 
-	auto adapter_callback = 
+	auto adapter_callback =
 		[](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message, void* userdata)
 		{
 			if (status != wgpu::RequestAdapterStatus::Success) {
@@ -79,7 +75,7 @@ int main()
 	instance.WaitAny(instance.RequestAdapter(&options, callbackMode, adapter_callback, userdata), UINT64_MAX);
 	if (adapter == nullptr) {
 		spdlog::error("RequestAdapter failed");
-		return 2;
+		return false;
 	}
 
 	auto device_callback =
@@ -92,31 +88,25 @@ int main()
 			*static_cast<wgpu::Device*>(userData) = device;
 		};
 
-	instance.WaitAny(adapter.RequestDevice(&deviceDescriptor, callbackMode, device_callback, (void*)&device), UINT64_MAX);
-	if (device == nullptr) {
+	instance.WaitAny(adapter.RequestDevice(&deviceDescriptor, callbackMode, device_callback, (void*)&m_device), UINT64_MAX);
+	if (m_device == nullptr) {
 		spdlog::error("RequestDevice failed");
-		return 3;
+		return false;
 	}
 
-	wgpu::Queue queue{ device.GetQueue() };
-
-	// Init GLFW
-	glfwInit();
-	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
-	GLFWwindow* window{ glfwCreateWindow(1240, 720, "AxEng", NULL, NULL) };
+	m_queue = m_device.GetQueue();
 
 	// Here we create our WebGPU surface from the window!
-	wgpu::Surface surface{ glfwGetWGPUSurface(instance.Get(), window) };
+	m_surface = wgpu::Surface{ glfwGetWGPUSurface(instance.Get(), m_window) };
 
 	wgpu::SurfaceCapabilities capabilities;
-	surface.GetCapabilities(adapter, &capabilities);
+	m_surface.GetCapabilities(adapter, &capabilities);
 	wgpu::TextureFormat surfaceFormat = capabilities.formats[0];
 
 	wgpu::SurfaceConfiguration config
 	{
 		.nextInChain = nullptr,
-		.device = device,
+		.device = m_device,
 		.format = surfaceFormat,
 		.usage = wgpu::TextureUsage::RenderAttachment,
 		.width = 1240,
@@ -126,17 +116,16 @@ int main()
 		.alphaMode = wgpu::CompositeAlphaMode::Auto,
 		.presentMode = wgpu::PresentMode::Fifo,
 	};
-	surface.Configure(&config);
 
-	spdlog::info("Initialised glfw window, time taken: {}ms", std::chrono::duration_cast<std::chrono::nanoseconds>(wgpu_timer.elapsed()).count() / 1000000.);
+	m_surface.Configure(&config);
 
-	// Terminate GLFW
-	while (!glfwWindowShouldClose(window))
+	return true;
+}
+
+void ax::Window::run_loop()
+{
+	while (!glfwWindowShouldClose(m_window))
 	{
 		glfwPollEvents();
 	}
-
-	surface.Unconfigure();
-	glfwDestroyWindow(window);
-	glfwTerminate();
 }
