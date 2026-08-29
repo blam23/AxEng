@@ -20,12 +20,20 @@ namespace ax
 	bool setup_glfw();
 	void teardown_glfw();
 
+	struct WindowDefinition
+	{
+		uint32_t width{ 1920 };
+		uint32_t height{ 1080 };
+		std::string title{ "AxEng" };
+		bool vsync{ true };
+	};
+
 	class Window
 	{
 	public:
 		DISABLE_COPY_AND_MOVE(Window);
 
-		Window(uint32_t width, uint32_t height, const std::string_view title);
+		Window(const WindowDefinition&);
 		~Window();
 
 		GLFWwindow* glfw_handle() const
@@ -43,7 +51,7 @@ namespace ax
 		wgpu::Device m_device;
 		wgpu::Queue m_queue;
 		wgpu::Surface m_surface;
-		wgpu::TextureFormat m_surfaceFormat;
+		wgpu::TextureFormat m_surfaceFormat{};
 		wgpu::Color m_clearColor{ 0.0, 0.0, 0.0, 1.0 };
 		wgpu::Texture m_depthTexture;
 		wgpu::TextureView m_depthTextureView;
@@ -51,5 +59,6 @@ namespace ax
 
 		uint32_t m_width;
 		uint32_t m_height;
+		bool m_vsync;
 	};
 }

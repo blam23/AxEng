@@ -147,6 +147,7 @@
     <ClCompile Include="main.cpp" />
     <ClCompile Include="glfw3webgpu.c" />
     <ClCompile Include="scripting.cpp" />
+    <ClCompile Include="log_timer.cpp" />
     <ClCompile Include="window.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -156,6 +157,7 @@
     <ClInclude Include="helpers.h" />
     <ClInclude Include="imgui_style.h" />
     <ClInclude Include="scripting.h" />
+    <ClInclude Include="log_timer.h" />
     <ClInclude Include="window.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

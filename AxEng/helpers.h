@@ -15,7 +15,8 @@
 namespace ax
 {
 	template <typename T>
-	class Badge {
+	class Badge
+	{
 		friend T;
 		Badge() = default;
 	};

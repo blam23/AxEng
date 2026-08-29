@@ -3,7 +3,6 @@
 
 // Logging
 #include "spdlog/spdlog.h"
-#include "spdlog/stopwatch.h"
 
 int main()
 {
@@ -15,15 +14,19 @@ int main()
 
 	ax::setup_glfw();
 	{
-		ax::Script script;
-		auto& state{ script.get_state() };
-		auto res{ state.do_string("return 1 + 4") };
-
-		spdlog::debug("Result: {}", res.get<int>());
-
-		ax::Window window{ 1920, 1080, "AxEng - Test" };
+		ax::Window window
+		{ 
+			ax::WindowDefinition
+			{
+				.width = 1920,
+				.height = 1080,
+				.title = "AxEng",
+				.vsync = true,
+			}
+		};
 		window.init_wegbpu();
 		window.init_imgui();
+
 		window.run_loop();
 	}
 	ax::teardown_glfw();

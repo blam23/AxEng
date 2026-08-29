@@ -1,5 +1,6 @@
 #include "window.h"
 #include "imgui_style.h"
+#include "log_timer.h"
 
 #include "spdlog/spdlog.h"
 #include "backends/imgui_impl_wgpu.h"
@@ -11,11 +12,13 @@ void glfw_error_callback(int error, const char* description)
 	spdlog::error("glfw error {}: {}", error, description);
 }
 
-ax::Window::Window(uint32_t width, uint32_t height, const std::string_view title)
-	: m_width{ width },
-	m_height{ height }
+ax::Window::Window(const WindowDefinition& def)
+	: m_width{ def.width },
+	m_height{ def.height },
+	m_vsync{ def.vsync }
 {
-	m_window = glfwCreateWindow(m_width, m_height, title.data(), NULL, NULL);
+	LogTimer _timer{ "create window" };
+	m_window = glfwCreateWindow(m_width, m_height, def.title.data(), NULL, NULL);
 }
 
 ax::Window::~Window()
@@ -28,6 +31,8 @@ ax::Window::~Window()
 
 bool ax::setup_glfw()
 {
+	LogTimer _timer{ "glfw setup" };
+
 	glfwSetErrorCallback(glfw_error_callback);
 
 	if (!glfwInit())
@@ -36,6 +41,7 @@ bool ax::setup_glfw()
 		return false;
 	}
 
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 	
@@ -51,6 +57,8 @@ void ax::teardown_glfw()
 
 bool ax::Window::init_wegbpu()
 {
+	LogTimer _timer{ "wgpu setup" };
+
 	//
 	// Get wgpu Instance
 	//
@@ -160,7 +168,7 @@ bool ax::Window::init_wegbpu()
 		.viewFormatCount = 0,
 		.viewFormats = nullptr,
 		.alphaMode = wgpu::CompositeAlphaMode::Auto,
-		.presentMode = wgpu::PresentMode::Fifo,
+		.presentMode = m_vsync ? wgpu::PresentMode::Mailbox : wgpu::PresentMode::Immediate,
 	};
 
 	m_surface.Configure(&config);
@@ -198,6 +206,8 @@ bool ax::Window::init_wegbpu()
 
 bool ax::Window::init_imgui()
 {
+	LogTimer _timer{ "imgui setup" };
+
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 	ImGui::GetIO();
@@ -312,9 +322,7 @@ void ax::Window::run_loop()
 
 				ImGui::Begin("Test Window");
 				{
-					ImGui::ColorEdit3("clear color", (float*)&clear_color);
-
-					
+					ImGui::ColorEdit3("Clear Color", (float*)&clear_color);
 
 					m_clearColor.r = clear_color.x;
 					m_clearColor.g = clear_color.y;
