@@ -1,6 +1,10 @@
 #include "window.h"
+#include "imgui_style.h"
 
 #include "spdlog/spdlog.h"
+#include "backends/imgui_impl_wgpu.h"
+#include "backends/imgui_impl_glfw.h"
+#include <imgui.h>
 
 void glfw_error_callback(int error, const char* description)
 {
@@ -40,12 +44,16 @@ bool ax::setup_glfw()
 
 void ax::teardown_glfw()
 {
+	ImGui_ImplGlfw_Shutdown();
+	ImGui_ImplWGPU_Shutdown();
 	glfwTerminate();
 }
 
 bool ax::Window::init_wegbpu()
 {
-	// Init WebGPU
+	//
+	// Get wgpu Instance
+	//
 	wgpu::InstanceDescriptor desc{};
 	desc.nextInChain = nullptr;
 	wgpu::Instance instance;
@@ -54,7 +62,16 @@ bool ax::Window::init_wegbpu()
 		.featureLevel = wgpu::FeatureLevel::Core
 	};
 	wgpu::Adapter adapter;
+	wgpu::Limits limits
+	{
+		.nextInChain = nullptr,
+		.maxBindGroups = 2,
+		.maxVertexBuffers = 1,
+		.maxBufferSize = 150000 * sizeof(wgpu::VertexAttribute),
+		.maxVertexAttributes = 4,
+	};
 	wgpu::DeviceDescriptor deviceDescriptor{};
+	deviceDescriptor.requiredLimits = &limits;
 	deviceDescriptor.SetUncapturedErrorCallback
 	(
 		[](const wgpu::Device&, wgpu::ErrorType error_type, wgpu::StringView message)
@@ -79,6 +96,9 @@ bool ax::Window::init_wegbpu()
 	};
 	instance = wgpu::CreateInstance(&instanceDesc);
 
+	//
+	// Get Adapter
+	//
 	auto adapter_callback =
 		[](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message, void* userdata)
 		{
@@ -98,6 +118,9 @@ bool ax::Window::init_wegbpu()
 		return false;
 	}
 
+	//
+	// Get Device
+	//
 	auto device_callback =
 		[](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message, void* userData)
 		{
@@ -117,17 +140,20 @@ bool ax::Window::init_wegbpu()
 
 	m_queue = m_device.GetQueue();
 
+	//
+	// Main Surface
+	//
 	m_surface = wgpu::Surface{ glfwGetWGPUSurface(instance.Get(), m_window) };
 
 	wgpu::SurfaceCapabilities capabilities;
 	m_surface.GetCapabilities(adapter, &capabilities);
-	wgpu::TextureFormat surfaceFormat = capabilities.formats[0];
+	m_surfaceFormat = capabilities.formats[0];
 
 	wgpu::SurfaceConfiguration config
 	{
 		.nextInChain = nullptr,
 		.device = m_device,
-		.format = surfaceFormat,
+		.format = m_surfaceFormat,
 		.usage = wgpu::TextureUsage::RenderAttachment,
 		.width = m_width,
 		.height = m_height,
@@ -138,6 +164,55 @@ bool ax::Window::init_wegbpu()
 	};
 
 	m_surface.Configure(&config);
+
+	//
+	// Depth Texture
+	//
+	wgpu::TextureDescriptor depthTextureDesc
+	{
+		.usage = wgpu::TextureUsage::RenderAttachment,
+		.dimension = wgpu::TextureDimension::e2D,
+		.size = { m_width, m_height },
+		.format = m_depthTextureFormat,
+		.mipLevelCount = 1,
+		.sampleCount = 1,
+		.viewFormatCount = 1,
+		.viewFormats = &m_depthTextureFormat,
+	};
+	m_depthTexture = m_device.CreateTexture(&depthTextureDesc);
+
+	wgpu::TextureViewDescriptor depthTextureViewDesc
+	{
+		.format = m_depthTextureFormat,
+		.dimension = wgpu::TextureViewDimension::e2D,
+		.baseMipLevel = 0,
+		.mipLevelCount = 1,
+		.baseArrayLayer = 0,
+		.arrayLayerCount = 1,
+		.aspect = wgpu::TextureAspect::DepthOnly,
+	};
+	m_depthTextureView = m_depthTexture.CreateView(&depthTextureViewDesc);
+
+	return true;
+}
+
+bool ax::Window::init_imgui()
+{
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGui::GetIO();
+
+	ImGui_ImplGlfw_InitForOther(m_window, true);
+
+	ImGui_ImplWGPU_InitInfo info{};
+	info.Device = m_device.Get();
+	info.DepthStencilFormat = static_cast<WGPUTextureFormat>(m_depthTextureFormat);
+	info.RenderTargetFormat = static_cast<WGPUTextureFormat>(m_surfaceFormat);
+	ImGui_ImplWGPU_Init(&info);
+
+	ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+	ImGui::GetIO().Fonts->AddFontDefaultVector();
+	ax::setup_imgui_style();
 
 	return true;
 }
@@ -171,6 +246,103 @@ void ax::Window::run_loop()
 		};
 		wgpu::TextureView targetView{ surfaceTexture.texture.CreateView(&view) };
 
+		wgpu::CommandEncoderDescriptor encoderDesc
+		{
+			.nextInChain = nullptr,
+			.label = "frame encoder",
+		};
+		wgpu::CommandEncoder encoder = m_device.CreateCommandEncoder(&encoderDesc);
+
+		// Setup Render pass
+		{
+			// Clear frame
+			wgpu::RenderPassColorAttachment colorAttachment
+			{
+				.view = targetView,
+				.depthSlice = wgpu::kDepthSliceUndefined,
+				.loadOp = wgpu::LoadOp::Clear,
+				.storeOp = wgpu::StoreOp::Store,
+				.clearValue = m_clearColor,
+			};
+
+			// Clear depth
+			wgpu::RenderPassDepthStencilAttachment depthAttachment
+			{
+				.view = m_depthTextureView,
+				.depthLoadOp = wgpu::LoadOp::Clear,
+				.depthStoreOp = wgpu::StoreOp::Store,
+				.depthClearValue = 1.0f,
+				.depthReadOnly = false,
+				.stencilLoadOp = wgpu::LoadOp::Undefined,
+				.stencilStoreOp = wgpu::StoreOp::Undefined,
+				.stencilClearValue = 0,
+				.stencilReadOnly = true,
+			};
+
+			wgpu::RenderPassDescriptor passDesc
+			{
+				.nextInChain = nullptr,
+				.colorAttachmentCount = 1,
+				.colorAttachments = &colorAttachment,
+				.depthStencilAttachment = &depthAttachment,
+				.timestampWrites = nullptr,
+			};
+			wgpu::RenderPassEncoder pass{ encoder.BeginRenderPass(&passDesc) };
+
+			static ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+
+			ImGui_ImplWGPU_NewFrame();
+			ImGui_ImplGlfw_NewFrame();
+
+			ImGui::NewFrame();
+			{
+				//ImGui::DockSpaceOverViewport();
+
+				ImGui::PushFont(nullptr, 16.0f);
+
+				ImGui::BeginMainMenuBar();
+				{
+					ImGui::Text("AxEng");
+
+					ImGuiIO& io = ImGui::GetIO();
+					ImGui::SameLine(ImGui::GetWindowWidth() - 425);
+					ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+				}
+				ImGui::EndMainMenuBar();
+
+				ImGui::Begin("Test Window");
+				{
+					ImGui::ColorEdit3("clear color", (float*)&clear_color);
+
+					
+
+					m_clearColor.r = clear_color.x;
+					m_clearColor.g = clear_color.y;
+					m_clearColor.b = clear_color.z;
+				}
+				ImGui::End();
+
+				ImGui::PopFont();
+			}
+			ImGui::EndFrame();
+			ImGui::Render();
+
+			ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), pass.Get());
+
+			pass.End();
+		}
+
+		wgpu::CommandBufferDescriptor bufferDesc
+		{
+			.nextInChain = nullptr,
+			.label = "frame cmd buffer",
+		};
+		wgpu::CommandBuffer command{ encoder.Finish(&bufferDesc) };
+
+		m_queue.Submit(1, &command);
+
 		m_surface.Present();
+
+		m_device.Tick();
 	}
 }

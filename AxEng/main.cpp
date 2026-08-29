@@ -23,6 +23,7 @@ int main()
 
 		ax::Window window{ 1920, 1080, "AxEng - Test" };
 		window.init_wegbpu();
+		window.init_imgui();
 		window.run_loop();
 	}
 	ax::teardown_glfw();

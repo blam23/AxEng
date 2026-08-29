@@ -34,6 +34,7 @@ namespace ax
 		}
 
 		bool init_wegbpu();
+		bool init_imgui();
 		void run_loop();
 
 	private:
@@ -42,6 +43,11 @@ namespace ax
 		wgpu::Device m_device;
 		wgpu::Queue m_queue;
 		wgpu::Surface m_surface;
+		wgpu::TextureFormat m_surfaceFormat;
+		wgpu::Color m_clearColor{ 0.0, 0.0, 0.0, 1.0 };
+		wgpu::Texture m_depthTexture;
+		wgpu::TextureView m_depthTextureView;
+		wgpu::TextureFormat m_depthTextureFormat{ wgpu::TextureFormat::Depth24Plus };
 
 		uint32_t m_width;
 		uint32_t m_height;
