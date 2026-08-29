@@ -113,7 +113,8 @@ int main()
 	surface.GetCapabilities(adapter, &capabilities);
 	wgpu::TextureFormat surfaceFormat = capabilities.formats[0];
 
-	wgpu::SurfaceConfiguration config {
+	wgpu::SurfaceConfiguration config
+	{
 		.nextInChain = nullptr,
 		.device = device,
 		.format = surfaceFormat,
