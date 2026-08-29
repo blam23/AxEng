@@ -17,16 +17,16 @@
 
 namespace ax
 {
+	bool setup_glfw();
+	void teardown_glfw();
+
 	class Window
 	{
 	public:
 		DISABLE_COPY_AND_MOVE(Window);
 
-		Window(int width, int height, const std::string_view title);
+		Window(uint32_t width, uint32_t height, const std::string_view title);
 		~Window();
-
-		static bool setup_glfw();
-		static void teardown_glfw();
 
 		GLFWwindow* glfw_handle() const
 		{
@@ -42,5 +42,8 @@ namespace ax
 		wgpu::Device m_device;
 		wgpu::Queue m_queue;
 		wgpu::Surface m_surface;
+
+		uint32_t m_width;
+		uint32_t m_height;
 	};
 }
