@@ -10,7 +10,7 @@
 #include <iostream>
 #include <fstream>
 
-void glfw_error_callback(int error, const char* description)
+static void glfw_error_callback(int error, const char* description)
 {
 	spdlog::error("glfw error {}: {}", error, description);
 }
