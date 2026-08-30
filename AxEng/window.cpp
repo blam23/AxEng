@@ -7,6 +7,9 @@
 #include "backends/imgui_impl_glfw.h"
 #include <imgui.h>
 
+#include <iostream>
+#include <fstream>
+
 void glfw_error_callback(int error, const char* description)
 {
 	spdlog::error("glfw error {}: {}", error, description);
@@ -201,7 +204,133 @@ bool ax::Window::init_wegbpu()
 	};
 	m_depthTextureView = m_depthTexture.CreateView(&depthTextureViewDesc);
 
+
+
+
+	init_pipeline();
+
 	return true;
+}
+
+void ax::Window::init_pipeline()
+{
+	LogTimer _timer{ "pipeline setup" };
+
+	// Load shader
+	std::string shaderCode;
+	std::ifstream file{ "shaders/basic_shader.wgsl" };
+	if (file)
+	{
+		std::ostringstream stream;
+		stream << file.rdbuf();
+		shaderCode = stream.str();
+	}
+	else
+	{
+		spdlog::warn("Could not load shader file, using fallback.");
+		shaderCode = s_shader_source;
+	}
+
+	wgpu::ShaderModuleDescriptor shaderDesc{};
+	wgpu::ShaderSourceWGSL shaderCodeDesc;
+	shaderCodeDesc.code = shaderCode.data();
+	shaderDesc.nextInChain = &shaderCodeDesc;
+	m_shader = m_device.CreateShaderModule(&shaderDesc);
+
+	wgpu::RenderPipelineDescriptor pipelineDesc{};
+
+	// Depth buffer
+	wgpu::DepthStencilState depthStencilState = {};
+	depthStencilState.format = m_depthTextureFormat;
+	depthStencilState.depthWriteEnabled = wgpu::OptionalBool::False;
+	depthStencilState.depthCompare = wgpu::CompareFunction::Always;
+	depthStencilState.stencilFront.compare = wgpu::CompareFunction::Always;
+	depthStencilState.stencilFront.failOp = wgpu::StencilOperation::Keep;
+	depthStencilState.stencilFront.depthFailOp = wgpu::StencilOperation::Keep;
+	depthStencilState.stencilFront.passOp = wgpu::StencilOperation::Keep;
+	depthStencilState.stencilBack.compare = wgpu::CompareFunction::Always;
+	depthStencilState.stencilBack.failOp = wgpu::StencilOperation::Keep;
+	depthStencilState.stencilBack.depthFailOp = wgpu::StencilOperation::Keep;
+	depthStencilState.stencilBack.passOp = wgpu::StencilOperation::Keep;
+	pipelineDesc.depthStencil = &depthStencilState;
+
+	// Vertex
+	pipelineDesc.vertex.bufferCount = 0;
+	pipelineDesc.vertex.buffers = nullptr;
+	pipelineDesc.vertex.module = m_shader;
+	pipelineDesc.vertex.entryPoint = "vs_main";
+	pipelineDesc.vertex.constantCount = 0;
+	pipelineDesc.vertex.constants = nullptr;
+
+	// Topology
+	pipelineDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+	pipelineDesc.primitive.stripIndexFormat = wgpu::IndexFormat::Undefined;
+	pipelineDesc.primitive.frontFace = wgpu::FrontFace::CCW;
+	pipelineDesc.primitive.cullMode = wgpu::CullMode::None;
+
+	// Fragment Setup
+	wgpu::FragmentState fragmentState;
+	fragmentState.module = m_shader;
+	fragmentState.entryPoint = "fs_main";
+	fragmentState.constantCount = 0;
+	fragmentState.constants = nullptr;
+	wgpu::BlendState blendState;
+	wgpu::ColorTargetState colorTarget;
+	colorTarget.format = m_surfaceFormat;
+	colorTarget.blend = &blendState;
+	colorTarget.writeMask = wgpu::ColorWriteMask::All;
+	fragmentState.targetCount = 1;
+	fragmentState.targets = &colorTarget;
+	pipelineDesc.fragment = &fragmentState;
+	blendState.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
+	blendState.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+	blendState.color.operation = wgpu::BlendOperation::Add;
+
+	// Multisampling (off)
+	pipelineDesc.multisample.count = 1;
+	pipelineDesc.multisample.mask = ~0u;
+	pipelineDesc.multisample.alphaToCoverageEnabled = false;
+
+	// Uniforms
+	wgpu::BufferDescriptor bufferDesc{};
+	bufferDesc.size = 4 * sizeof(float);
+	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
+	bufferDesc.mappedAtCreation = false;
+	bufferDesc.label = "Uniforms";
+	m_uniforms = m_device.CreateBuffer(&bufferDesc);
+
+	wgpu::BindGroupEntry uniformBinding{};
+	uniformBinding.binding = 0;
+	uniformBinding.buffer = m_uniforms;
+	uniformBinding.offset = 0;
+	uniformBinding.size = bufferDesc.size;
+
+	// Layout
+	wgpu::BindGroupLayoutEntry uniformEntry{};
+	uniformEntry.binding = 0;
+	uniformEntry.visibility = wgpu::ShaderStage::Fragment;
+	uniformEntry.buffer.type = wgpu::BufferBindingType::Uniform;
+	uniformEntry.buffer.minBindingSize = bufferDesc.size;
+
+	wgpu::BindGroupLayoutDescriptor uniformLayoutDesc{};
+	uniformLayoutDesc.entryCount = 1;
+	uniformLayoutDesc.entries = &uniformEntry;
+	wgpu::BindGroupLayout uniformLayout{ m_device.CreateBindGroupLayout(&uniformLayoutDesc) };
+
+	wgpu::BindGroupDescriptor uniformGroupDesc{};
+	uniformGroupDesc.layout = uniformLayout;
+	uniformGroupDesc.entryCount = 1;
+	uniformGroupDesc.entries = &uniformBinding;
+	m_uniformGroup = m_device.CreateBindGroup(&uniformGroupDesc);
+
+	wgpu::PipelineLayoutDescriptor pipelineLayoutDesc{};
+	pipelineLayoutDesc.bindGroupLayoutCount = 1;
+	pipelineLayoutDesc.bindGroupLayouts = &uniformLayout;
+	wgpu::PipelineLayout layout{ m_device.CreatePipelineLayout(&pipelineLayoutDesc) };
+
+	pipelineDesc.layout = layout;
+
+	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
 }
 
 bool ax::Window::init_imgui()
@@ -232,125 +361,163 @@ void ax::Window::run_loop()
 	while (!glfwWindowShouldClose(m_window))
 	{
 		glfwPollEvents();
-
-		wgpu::SurfaceTexture surfaceTexture;
-		m_surface.GetCurrentTexture(&surfaceTexture);
-
-		if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal)
-		{
-			spdlog::error("Failed to create new frame surface");
-			return;
-		}
-
-		wgpu::TextureViewDescriptor view
-		{
-			.nextInChain = nullptr,
-			.label = "frame view",
-			.format = surfaceTexture.texture.GetFormat(),
-			.dimension = wgpu::TextureViewDimension::e2D,
-			.baseMipLevel = 0,
-			.mipLevelCount = 1,
-			.baseArrayLayer = 0,
-			.arrayLayerCount = 1,
-			.aspect = wgpu::TextureAspect::All,
-		};
-		wgpu::TextureView targetView{ surfaceTexture.texture.CreateView(&view) };
-
-		wgpu::CommandEncoderDescriptor encoderDesc
-		{
-			.nextInChain = nullptr,
-			.label = "frame encoder",
-		};
-		wgpu::CommandEncoder encoder = m_device.CreateCommandEncoder(&encoderDesc);
-
-		// Setup Render pass
-		{
-			// Clear frame
-			wgpu::RenderPassColorAttachment colorAttachment
-			{
-				.view = targetView,
-				.depthSlice = wgpu::kDepthSliceUndefined,
-				.loadOp = wgpu::LoadOp::Clear,
-				.storeOp = wgpu::StoreOp::Store,
-				.clearValue = m_clearColor,
-			};
-
-			// Clear depth
-			wgpu::RenderPassDepthStencilAttachment depthAttachment
-			{
-				.view = m_depthTextureView,
-				.depthLoadOp = wgpu::LoadOp::Clear,
-				.depthStoreOp = wgpu::StoreOp::Store,
-				.depthClearValue = 1.0f,
-				.depthReadOnly = false,
-				.stencilLoadOp = wgpu::LoadOp::Undefined,
-				.stencilStoreOp = wgpu::StoreOp::Undefined,
-				.stencilClearValue = 0,
-				.stencilReadOnly = true,
-			};
-
-			wgpu::RenderPassDescriptor passDesc
-			{
-				.nextInChain = nullptr,
-				.colorAttachmentCount = 1,
-				.colorAttachments = &colorAttachment,
-				.depthStencilAttachment = &depthAttachment,
-				.timestampWrites = nullptr,
-			};
-			wgpu::RenderPassEncoder pass{ encoder.BeginRenderPass(&passDesc) };
-
-			static ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
-
-			ImGui_ImplWGPU_NewFrame();
-			ImGui_ImplGlfw_NewFrame();
-
-			ImGui::NewFrame();
-			{
-				//ImGui::DockSpaceOverViewport();
-
-				ImGui::PushFont(nullptr, 16.0f);
-
-				ImGui::BeginMainMenuBar();
-				{
-					ImGui::Text("AxEng");
-
-					ImGuiIO& io = ImGui::GetIO();
-					ImGui::SameLine(ImGui::GetWindowWidth() - 425);
-					ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-				}
-				ImGui::EndMainMenuBar();
-
-				ImGui::Begin("Test Window");
-				{
-					ImGui::ColorEdit3("Clear Color", (float*)&clear_color);
-
-					m_clearColor.r = clear_color.x;
-					m_clearColor.g = clear_color.y;
-					m_clearColor.b = clear_color.z;
-				}
-				ImGui::End();
-
-				ImGui::PopFont();
-			}
-			ImGui::EndFrame();
-			ImGui::Render();
-
-			ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), pass.Get());
-
-			pass.End();
-		}
-
-		wgpu::CommandBufferDescriptor bufferDesc
-		{
-			.nextInChain = nullptr,
-			.label = "frame cmd buffer",
-		};
-		wgpu::CommandBuffer command{ encoder.Finish(&bufferDesc) };
-
-		m_queue.Submit(1, &command);
-
-		m_surface.Present();
-
-		m_device.Tick();
+		run_wgpu_render_pass();
 	}
 }
+
+void ax::Window::run_wgpu_render_pass()
+{
+	wgpu::SurfaceTexture surfaceTexture;
+	m_surface.GetCurrentTexture(&surfaceTexture);
+
+	if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal)
+	{
+		spdlog::error("Failed to create new frame surface");
+		return;
+	}
+
+	wgpu::TextureViewDescriptor view
+	{
+		.nextInChain = nullptr,
+		.label = "frame view",
+		.format = surfaceTexture.texture.GetFormat(),
+		.dimension = wgpu::TextureViewDimension::e2D,
+		.baseMipLevel = 0,
+		.mipLevelCount = 1,
+		.baseArrayLayer = 0,
+		.arrayLayerCount = 1,
+		.aspect = wgpu::TextureAspect::All,
+	};
+	wgpu::TextureView targetView{ surfaceTexture.texture.CreateView(&view) };
+
+	wgpu::CommandEncoderDescriptor encoderDesc
+	{
+		.nextInChain = nullptr,
+		.label = "frame encoder",
+	};
+	wgpu::CommandEncoder encoder = m_device.CreateCommandEncoder(&encoderDesc);
+
+	// Setup Render pass
+	{
+		// Clear frame
+		wgpu::RenderPassColorAttachment colorAttachment
+		{
+			.view = targetView,
+			.depthSlice = wgpu::kDepthSliceUndefined,
+			.loadOp = wgpu::LoadOp::Clear,
+			.storeOp = wgpu::StoreOp::Store,
+			.clearValue = m_clearColor,
+		};
+
+		// Clear depth
+		wgpu::RenderPassDepthStencilAttachment depthAttachment
+		{
+			.view = m_depthTextureView,
+			.depthLoadOp = wgpu::LoadOp::Clear,
+			.depthStoreOp = wgpu::StoreOp::Store,
+			.depthClearValue = 1.0f,
+			.depthReadOnly = false,
+			.stencilLoadOp = wgpu::LoadOp::Undefined,
+			.stencilStoreOp = wgpu::StoreOp::Undefined,
+			.stencilClearValue = 0,
+			.stencilReadOnly = true,
+		};
+
+		wgpu::RenderPassDescriptor passDesc
+		{
+			.nextInChain = nullptr,
+			.colorAttachmentCount = 1,
+			.colorAttachments = &colorAttachment,
+			.depthStencilAttachment = &depthAttachment,
+			.timestampWrites = nullptr,
+		};
+		wgpu::RenderPassEncoder pass{ encoder.BeginRenderPass(&passDesc) };
+
+		handle_render_pass(pass);
+
+		pass.End();
+	}
+
+	wgpu::CommandBufferDescriptor bufferDesc
+	{
+		.nextInChain = nullptr,
+		.label = "frame cmd buffer",
+	};
+	wgpu::CommandBuffer command{ encoder.Finish(&bufferDesc) };
+
+	m_queue.Submit(1, &command);
+
+	m_surface.Present();
+
+	m_device.Tick();
+}
+
+
+static ImVec4 s_triColor{ 0.30f, 0.30f, 0.30f, 1.00f };
+void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass)
+{
+	// TODO: Do a drawing callback here.
+
+	// Update Uniforms
+	m_queue.WriteBuffer(m_uniforms, 0, &s_triColor, sizeof(float)*3);
+	pass.SetBindGroup(0, m_uniformGroup, 0, nullptr);
+
+	// Draw Triangles
+	pass.SetPipeline(m_pipeline);
+	pass.Draw(3, 1, 0, 0);
+
+	// Draw imgui
+	render_gui(pass);
+}
+
+void ax::Window::render_gui(wgpu::RenderPassEncoder& pass)
+{
+	static ImVec4 clearColor{ 0.45f, 0.55f, 0.60f, 1.00f };
+
+	ImGui_ImplWGPU_NewFrame();
+	ImGui_ImplGlfw_NewFrame();
+
+	ImGui::NewFrame();
+	{
+		//ImGui::DockSpaceOverViewport();
+
+		// TODO: Do a GUI callback here.
+
+		ImGui::PushFont(nullptr, 16.0f);
+
+		ImGui::BeginMainMenuBar();
+		{
+			ImGui::Text("AxEng");
+
+			if (ImGui::Button("Reload Pipeline"))
+			{
+				init_pipeline();
+			}
+
+			ImGuiIO& io = ImGui::GetIO();
+			ImGui::SameLine(ImGui::GetWindowWidth() - 425);
+			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+		}
+		ImGui::EndMainMenuBar();
+
+		ImGui::Begin("Test Window");
+		{
+			ImGui::ColorEdit3("Clear Color", (float*)&clearColor);
+
+			m_clearColor.r = clearColor.x;
+			m_clearColor.g = clearColor.y;
+			m_clearColor.b = clearColor.z;
+
+			ImGui::ColorEdit3("Triangle Color", (float*)&s_triColor);
+
+		}
+		ImGui::End();
+
+		ImGui::PopFont();
+	}
+	ImGui::EndFrame();
+	ImGui::Render();
+
+	ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), pass.Get());
+}
+
