@@ -14,6 +14,8 @@
 
 // AxEng
 #include "helpers.h"
+#include "scripting.h"
+#include "event.h"
 
 namespace ax
 {
@@ -28,6 +30,17 @@ namespace ax
 		bool vsync{ true };
 	};
 
+	struct WindowUpdateEvent
+	{
+		double delta;
+	};
+
+	struct WindowRenderEvent
+	{
+		double delta;
+		wgpu::RenderPassEncoder& pass;
+	};
+
 	class Window
 	{
 	public:
@@ -36,23 +49,58 @@ namespace ax
 		Window(const WindowDefinition&);
 		~Window();
 
+		bool init_wegbpu();
+		bool init_imgui();
+		void run_loop();
+
 		GLFWwindow* glfw_handle() const
 		{
 			return m_window;
 		}
 
-		bool init_wegbpu();
-		bool init_imgui();
-		void run_loop();
+		using UpdateEventHandler = EventHandler<WindowUpdateEvent>;
+		UpdateEventHandler& get_update_event_handler()
+		{
+			return m_updateEventHandler;
+		}
+
+		using RenderEventHandler = EventHandler<WindowRenderEvent>;
+		RenderEventHandler& get_render_event_handler()
+		{
+			return m_renderEventHandler;
+		}
+
+		wgpu::Queue& get_queue()
+		{
+			return m_queue;
+		}
+
+		void set_clear_color(wgpu::Color& color)
+		{
+			m_clearColor = color;
+		}
 
 	private:
-		void handle_render_pass(wgpu::RenderPassEncoder& pass);
+		// Rendering
+		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
 		void render_gui(wgpu::RenderPassEncoder& pass);
-		void run_wgpu_render_pass();
+		void run_wgpu_render_pass(double delta);
 		void init_pipeline();
 
-		GLFWwindow* m_window{ nullptr };
+		// Logic
+		void handle_tick(double delta);
 
+		// Properties
+		uint32_t m_width;
+		uint32_t m_height;
+		bool m_vsync;
+
+		// Events
+		UpdateEventHandler m_updateEventHandler;
+		RenderEventHandler m_renderEventHandler;
+
+		// WGPU / GLFW
+		GLFWwindow* m_window{ nullptr };
 		wgpu::Device m_device;
 		wgpu::Queue m_queue;
 		wgpu::Surface m_surface;
@@ -65,10 +113,6 @@ namespace ax
 		wgpu::RenderPipeline m_pipeline;
 		wgpu::Buffer m_uniforms;
 		wgpu::BindGroup m_uniformGroup;
-
-		uint32_t m_width;
-		uint32_t m_height;
-		bool m_vsync;
 
 		const char* s_shader_source =
 		R"(

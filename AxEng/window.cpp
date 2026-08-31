@@ -10,6 +10,8 @@
 #include <iostream>
 #include <fstream>
 
+static ImVec4 s_triColor{ 0.30f, 0.30f, 0.30f, 1.00f };
+
 static void glfw_error_callback(int error, const char* description)
 {
 	spdlog::error("glfw error {}: {}", error, description);
@@ -204,11 +206,7 @@ bool ax::Window::init_wegbpu()
 	};
 	m_depthTextureView = m_depthTexture.CreateView(&depthTextureViewDesc);
 
-
-
-
 	init_pipeline();
-
 	return true;
 }
 
@@ -333,6 +331,14 @@ void ax::Window::init_pipeline()
 	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
 }
 
+void ax::Window::handle_tick(double delta)
+{
+	// Update Uniforms
+	m_queue.WriteBuffer(m_uniforms, 0, &s_triColor, sizeof(float) * 3);
+
+	m_updateEventHandler.fire({ .delta = delta });
+}
+
 bool ax::Window::init_imgui()
 {
 	LogTimer _timer{ "imgui setup" };
@@ -356,16 +362,23 @@ bool ax::Window::init_imgui()
 	return true;
 }
 
+double updatePrev{ 0 };
+double updateDelta{ 0 };
 void ax::Window::run_loop()
 {
 	while (!glfwWindowShouldClose(m_window))
 	{
 		glfwPollEvents();
-		run_wgpu_render_pass();
+
+		updateDelta = glfwGetTime() - updatePrev;
+		updatePrev = glfwGetTime();
+
+		handle_tick(updateDelta);
+		run_wgpu_render_pass(updateDelta);
 	}
 }
 
-void ax::Window::run_wgpu_render_pass()
+void ax::Window::run_wgpu_render_pass(double delta)
 {
 	wgpu::SurfaceTexture surfaceTexture;
 	m_surface.GetCurrentTexture(&surfaceTexture);
@@ -433,7 +446,7 @@ void ax::Window::run_wgpu_render_pass()
 		};
 		wgpu::RenderPassEncoder pass{ encoder.BeginRenderPass(&passDesc) };
 
-		handle_render_pass(pass);
+		handle_render_pass(pass, delta);
 
 		pass.End();
 	}
@@ -453,18 +466,20 @@ void ax::Window::run_wgpu_render_pass()
 }
 
 
-static ImVec4 s_triColor{ 0.30f, 0.30f, 0.30f, 1.00f };
-void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass)
+void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 {
-	// TODO: Do a drawing callback here.
-
-	// Update Uniforms
-	m_queue.WriteBuffer(m_uniforms, 0, &s_triColor, sizeof(float)*3);
+	// Set Bindings
 	pass.SetBindGroup(0, m_uniformGroup, 0, nullptr);
 
 	// Draw Triangles
 	pass.SetPipeline(m_pipeline);
-	pass.Draw(3, 1, 0, 0);
+
+	// Send out the draw event
+	m_renderEventHandler.fire
+	({
+		.delta = delta,
+		.pass = pass
+	});
 
 	// Draw imgui
 	render_gui(pass);

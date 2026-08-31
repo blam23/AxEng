@@ -144,6 +144,8 @@
   <ItemGroup>
     <ClCompile Include="backends\imgui_impl_glfw.cpp" />
     <ClCompile Include="backends\imgui_impl_wgpu.cpp" />
+    <ClCompile Include="event.cpp" />
+    <ClCompile Include="module.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="glfw3webgpu.c" />
     <ClCompile Include="scripting.cpp" />
@@ -153,6 +155,8 @@
   <ItemGroup>
     <ClInclude Include="backends\imgui_impl_glfw.h" />
     <ClInclude Include="backends\imgui_impl_wgpu.h" />
+    <ClInclude Include="event.h" />
+    <ClInclude Include="module.h" />
     <ClInclude Include="glfw3webgpu.h" />
     <ClInclude Include="helpers.h" />
     <ClInclude Include="imgui_style.h" />
