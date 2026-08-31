@@ -3,6 +3,8 @@
 
 #include <numbers>
 
+#include <imgui.h>
+
 // Logging
 #include "spdlog/spdlog.h"
 
@@ -18,13 +20,17 @@ int main()
 	{
 		ax::Module gameModule;
 
+		// Setup window
 		ax::Window window({
 			.width = 1920,
 			.height = 1080,
 			.title = "AxEng",
 			.vsync = true,
 		});
+		window.init_wegbpu();
+		window.init_imgui();
 
+		// Setup event handlers
 		double time{ 0.0 };
 		window.get_update_event_handler().subscribe(
 			[&window, &time](ax::WindowUpdateEvent& e) {
@@ -40,9 +46,21 @@ int main()
 			}
 		);
 
-		window.init_wegbpu();
-		window.init_imgui();
+		window.get_ui_event_handler().subscribe(
+			[](ax::WindowUIEvent& e) {
+				ImGui::Begin("Random Stuff");
+				{
+					static float deltaTimes[512]{ 0 };
+					static std::size_t deltaPtr = 0;
+					deltaTimes[deltaPtr++] = (float)e.delta * 1000.0f;
+					deltaPtr %= 512;
+					ImGui::PlotLines("Delta Times (ms)", deltaTimes, 512);
+				}
+				ImGui::End();
+			}
+		);
 
+		// Run main loop
 		window.run_loop();
 	}
 	ax::teardown_glfw();

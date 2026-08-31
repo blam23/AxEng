@@ -496,8 +496,6 @@ void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
 	{
 		//ImGui::DockSpaceOverViewport();
 
-		// TODO: Do a GUI callback here.
-
 		ImGui::PushFont(nullptr, 16.0f);
 
 		ImGui::BeginMainMenuBar();
@@ -509,13 +507,6 @@ void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
 				init_pipeline();
 			}
 
-			//static float deltaTimes[512];
-			//static std::size_t deltaPtr = 0;
-			//deltaTimes[deltaPtr++] = (float)delta;
-			//deltaPtr %= 512;
-
-			//ImGui::PlotLines("", deltaTimes, 512);
-
 			ImGuiIO& io = ImGui::GetIO();
 			ImGui::SameLine(ImGui::GetWindowWidth() - 425);
 			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
@@ -524,16 +515,17 @@ void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
 
 		ImGui::Begin("Test Window");
 		{
-			ImGui::ColorEdit3("Clear Color", (float*)&clearColor);
-
-			m_clearColor.r = clearColor.x;
-			m_clearColor.g = clearColor.y;
-			m_clearColor.b = clearColor.z;
+			//ImGui::ColorEdit3("Clear Color", (float*)&clearColor);
+			//m_clearColor.r = clearColor.x;
+			//m_clearColor.g = clearColor.y;
+			//m_clearColor.b = clearColor.z;
 
 			ImGui::ColorEdit3("Triangle Color", (float*)&s_triColor);
 
 		}
 		ImGui::End();
+
+		m_uiEventHandler.fire({ .delta = delta });
 
 		ImGui::PopFont();
 	}

@@ -41,6 +41,11 @@ namespace ax
 		wgpu::RenderPassEncoder& pass;
 	};
 
+	struct WindowUIEvent
+	{
+		double delta;
+	};
+
 	class Window
 	{
 	public:
@@ -68,6 +73,12 @@ namespace ax
 		RenderEventHandler& get_render_event_handler()
 		{
 			return m_renderEventHandler;
+		}
+
+		using UIEventHandler = EventHandler<WindowUIEvent>;
+		UIEventHandler& get_ui_event_handler()
+		{
+			return m_uiEventHandler;
 		}
 
 		wgpu::Queue& get_queue()
@@ -98,6 +109,7 @@ namespace ax
 		// Events
 		UpdateEventHandler m_updateEventHandler;
 		RenderEventHandler m_renderEventHandler;
+		UIEventHandler m_uiEventHandler;
 
 		// WGPU / GLFW
 		GLFWwindow* m_window{ nullptr };
