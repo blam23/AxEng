@@ -25,12 +25,6 @@ namespace ax
 			m_subscriptions.emplace_back(handler);
 			return m_subscriptions[m_subscriptions.size() - 1];
 		}
-
-		void unsubscribe(const T_FUNC& handler)
-		{
-			std::unique_lock<std::mutex> waitLock{ m_subscriptionMutex };
-			m_subscriptions.erase(handler);
-		}
 		
 		void fire(T_EVENT&& eventData)
 		{

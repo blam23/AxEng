@@ -124,7 +124,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
@@ -132,6 +132,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -148,6 +149,7 @@
     <ClCompile Include="module.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="glfw3webgpu.c" />
+    <ClCompile Include="resource_loader.cpp" />
     <ClCompile Include="scripting.cpp" />
     <ClCompile Include="log_timer.cpp" />
     <ClCompile Include="window.cpp" />
@@ -160,8 +162,10 @@
     <ClInclude Include="glfw3webgpu.h" />
     <ClInclude Include="helpers.h" />
     <ClInclude Include="imgui_style.h" />
+    <ClInclude Include="resource_loader.h" />
     <ClInclude Include="scripting.h" />
     <ClInclude Include="log_timer.h" />
+    <ClInclude Include="stb_image.h" />
     <ClInclude Include="window.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

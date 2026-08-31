@@ -1,9 +1,15 @@
+#include <windows.h>
+
 #include "module.h"
+#include "resource_loader.h"
 #include "window.h"
 
 #include <numbers>
 
 #include <imgui.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 // Logging
 #include "spdlog/spdlog.h"
@@ -18,7 +24,18 @@ int main()
 
 	ax::setup_glfw();
 	{
-		ax::Module gameModule;
+		ax::Module gameModule(ax::ModuleDefinition{
+			.name = "Editor",
+			.moduleType = ax::ModuleType::Application,
+			.loader = std::make_unique<ax::FileResourceLoader>("D:\\axeng")
+		});
+
+		ax::FileResourceLoader test("D:\\axeng");
+		const auto image_data{ test.load("shipBeige_manned.png") };
+
+		int width, height, channels;
+		void* data{ nullptr };
+		data = stbi_load_from_memory(image_data.data(), image_data.size(), &width, &height, &channels, 0);
 
 		// Setup window
 		ax::Window window({
