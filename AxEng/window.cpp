@@ -482,10 +482,10 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 	});
 
 	// Draw imgui
-	render_gui(pass);
+	render_gui(pass, delta);
 }
 
-void ax::Window::render_gui(wgpu::RenderPassEncoder& pass)
+void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
 {
 	static ImVec4 clearColor{ 0.45f, 0.55f, 0.60f, 1.00f };
 
@@ -508,6 +508,13 @@ void ax::Window::render_gui(wgpu::RenderPassEncoder& pass)
 			{
 				init_pipeline();
 			}
+
+			//static float deltaTimes[512];
+			//static std::size_t deltaPtr = 0;
+			//deltaTimes[deltaPtr++] = (float)delta;
+			//deltaPtr %= 512;
+
+			//ImGui::PlotLines("", deltaTimes, 512);
 
 			ImGuiIO& io = ImGui::GetIO();
 			ImGui::SameLine(ImGui::GetWindowWidth() - 425);

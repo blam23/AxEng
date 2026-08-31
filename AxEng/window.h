@@ -83,7 +83,7 @@ namespace ax
 	private:
 		// Rendering
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
-		void render_gui(wgpu::RenderPassEncoder& pass);
+		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
 		void run_wgpu_render_pass(double delta);
 		void init_pipeline();
 
