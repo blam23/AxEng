@@ -56,7 +56,7 @@
       <Filter>core</Filter>
     </ClCompile>
     <ClCompile Include="lua_engine.cpp">
-      <Filter>main</Filter>
+      <Filter>core</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>

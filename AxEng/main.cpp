@@ -22,10 +22,11 @@ int main()
 	spdlog::set_level(spdlog::level::debug);
 #endif
 
-	ax::FileSystemModuleDefinition moduleDef{
-			.name = "Editor",
-			.moduleType = ax::ModuleType::Application,
-			.loader = { "D:\\axeng" }
+	ax::FileSystemModuleDefinition moduleDef
+	{
+		.name = "Editor",
+		.moduleType = ax::ModuleType::Application,
+		.loader = { "D:\\axeng" }
 	};
 	ax::FileSystemModule gameModule{ moduleDef };
 	
@@ -43,7 +44,8 @@ int main()
 		data = stbi_load_from_memory(image_data.data(), (int)image_data.size(), &width, &height, &channels, 0);
 
 		// Setup window
-		ax::Window window({
+		ax::Window window
+		({
 			.width = 1920,
 			.height = 1080,
 			.title = "AxEng",
@@ -54,7 +56,8 @@ int main()
 
 		// Setup event handlers
 		double time{ 0.0 };
-		window.get_update_event_handler().subscribe(
+		window.get_update_event_handler().subscribe
+		(
 			[&window, &time](ax::WindowUpdateEvent& e) {
 				time += e.delta;
 				wgpu::Color clearColor{ std::sin(time), std::cos(time), 0.0, 1.0};
@@ -62,13 +65,15 @@ int main()
 			}
 		);
 
-		window.get_render_event_handler().subscribe(
+		window.get_render_event_handler().subscribe
+		(
 			[](ax::WindowRenderEvent& e) {
 				e.pass.Draw(3, 1, 0, 0);
 			}
 		);
 
-		window.get_ui_event_handler().subscribe(
+		window.get_ui_event_handler().subscribe
+		(
 			[](ax::WindowUIEvent& e) {
 				ImGui::Begin("Random Stuff");
 				{
