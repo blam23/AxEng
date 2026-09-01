@@ -20,6 +20,15 @@
     <Filter Include="core\asset_loaders">
       <UniqueIdentifier>{6a368dfa-7e07-4064-962e-20e5994ec3da}</UniqueIdentifier>
     </Filter>
+    <Filter Include="core\lua">
+      <UniqueIdentifier>{71c9e9aa-7305-4aed-9794-189bff5f844d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="core\lua\headers">
+      <UniqueIdentifier>{1379cf0f-bb26-454d-99fb-fcd84918215c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="core\lua\bindings">
+      <UniqueIdentifier>{37f249af-47d8-4a43-805c-c8d41704bb4d}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -29,9 +38,6 @@
       <Filter>core</Filter>
     </ClCompile>
     <ClCompile Include="resource_loader.cpp">
-      <Filter>core</Filter>
-    </ClCompile>
-    <ClCompile Include="script.cpp">
       <Filter>core</Filter>
     </ClCompile>
     <ClCompile Include="window.cpp">
@@ -55,8 +61,17 @@
     <ClCompile Include="asset.cpp">
       <Filter>core</Filter>
     </ClCompile>
+    <ClCompile Include="script.cpp">
+      <Filter>core\lua</Filter>
+    </ClCompile>
     <ClCompile Include="lua_engine.cpp">
-      <Filter>core</Filter>
+      <Filter>core\lua</Filter>
+    </ClCompile>
+    <ClCompile Include="lua_bindings.cpp">
+      <Filter>core\lua</Filter>
+    </ClCompile>
+    <ClCompile Include="lua_log_bindings.cpp">
+      <Filter>core\lua\bindings</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -67,9 +82,6 @@
       <Filter>core\headers</Filter>
     </ClInclude>
     <ClInclude Include="module.h">
-      <Filter>core\headers</Filter>
-    </ClInclude>
-    <ClInclude Include="script.h">
       <Filter>core\headers</Filter>
     </ClInclude>
     <ClInclude Include="window.h">
@@ -103,7 +115,13 @@
       <Filter>core\headers</Filter>
     </ClInclude>
     <ClInclude Include="lua_engine.h">
-      <Filter>core\headers</Filter>
+      <Filter>core\lua\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="script.h">
+      <Filter>core\lua\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_bindings.h">
+      <Filter>core\lua\headers</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

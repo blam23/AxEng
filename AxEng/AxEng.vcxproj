@@ -147,7 +147,9 @@
     <ClCompile Include="backends\imgui_impl_glfw.cpp" />
     <ClCompile Include="backends\imgui_impl_wgpu.cpp" />
     <ClCompile Include="event.cpp" />
+    <ClCompile Include="lua_bindings.cpp" />
     <ClCompile Include="lua_engine.cpp" />
+    <ClCompile Include="lua_log_bindings.cpp" />
     <ClCompile Include="module.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="glfw3webgpu.c" />
@@ -162,6 +164,7 @@
     <ClInclude Include="backends\imgui_impl_glfw.h" />
     <ClInclude Include="backends\imgui_impl_wgpu.h" />
     <ClInclude Include="event.h" />
+    <ClInclude Include="lua_bindings.h" />
     <ClInclude Include="lua_engine.h" />
     <ClInclude Include="module.h" />
     <ClInclude Include="glfw3webgpu.h" />

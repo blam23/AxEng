@@ -6,7 +6,7 @@
 #include "helpers.h"
 #include "asset_manager.h"
 
-namespace ax
+namespace ax::lua
 {
 	class Script : public Asset
 	{

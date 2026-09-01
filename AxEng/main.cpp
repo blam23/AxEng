@@ -33,7 +33,7 @@ int main()
 	ax::lua::global_setup(gameModule.loader());
 	ax::lua::init_current_thread();
 	auto env{ ax::lua::create_env() };
-	auto script{ ax::ScriptManager::load(gameModule.loader(), "Test Script", "test.lua") };
+	auto script{ ax::lua::ScriptManager::load(gameModule.loader(), "Test Script", "test.lua") };
 
 	ax::setup_glfw();
 	{
@@ -58,10 +58,12 @@ int main()
 		double time{ 0.0 };
 		window.get_update_event_handler().subscribe
 		(
-			[&window, &time](ax::WindowUpdateEvent& e) {
+			[&window, &time, script, &env](ax::WindowUpdateEvent& e) {
 				time += e.delta;
 				wgpu::Color clearColor{ std::sin(time), std::cos(time), 0.0, 1.0};
 				window.set_clear_color(clearColor);
+
+				script->run(env);
 			}
 		);
 
@@ -87,7 +89,6 @@ int main()
 			}
 		);
 
-		script->run(env);
 
 		// Run main loop
 		window.run_loop();
@@ -96,5 +97,5 @@ int main()
 
 	// Specifically unload all scripts before the lua environments are destroyed.
 	// TODO: This sucks
-	ax::ScriptManager::unload_all();
+	ax::lua::ScriptManager::unload_all();
 }

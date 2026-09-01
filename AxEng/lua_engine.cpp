@@ -1,4 +1,5 @@
 #include "lua_engine.h"
+#include "lua_bindings.h"
 #include "log_timer.h"
 
 thread_local sol::state mainState;
@@ -26,14 +27,14 @@ void ax::lua::init_current_thread()
 		sol::lib::bit32
 	);
 
+	bindings::setup_all(mainState);
+
 	const auto res{ mainState.do_string(init_script, "Init Script")};
 	if (!res.valid())
 	{
 		sol::error err = res;
 		spdlog::error("Failed to load init script {}", err.what());
 	}
-
-	//bindings::setup_all(mainState);
 
 	attemptedSetup = true;
 }
