@@ -22,6 +22,12 @@
     <Filter Include="Header Files\imgui">
       <UniqueIdentifier>{3ab015f8-88d6-469e-b9aa-4ff993ea4596}</UniqueIdentifier>
     </Filter>
+    <Filter Include="core">
+      <UniqueIdentifier>{12f658e9-130a-4cfb-90bb-873de94b2503}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="core\headers">
+      <UniqueIdentifier>{85267c10-4283-49dc-a20d-164ae6844dc0}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -30,42 +36,33 @@
     <ClCompile Include="glfw3webgpu.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="window.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="scripting.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="backends\imgui_impl_glfw.cpp">
       <Filter>Source Files\imgui</Filter>
     </ClCompile>
     <ClCompile Include="backends\imgui_impl_wgpu.cpp">
       <Filter>Source Files\imgui</Filter>
     </ClCompile>
-    <ClCompile Include="log_timer.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="module.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="event.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>core</Filter>
     </ClCompile>
     <ClCompile Include="resource_loader.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="scripting.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="window.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="log_timer.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="event.cpp">
+      <Filter>core</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="glfw3webgpu.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="window.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="helpers.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="scripting.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="backends\imgui_impl_glfw.h">
@@ -77,20 +74,29 @@
     <ClInclude Include="imgui_style.h">
       <Filter>Header Files\imgui</Filter>
     </ClInclude>
-    <ClInclude Include="log_timer.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="module.h">
+    <ClInclude Include="stb_image.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="event.h">
-      <Filter>Header Files</Filter>
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="helpers.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="module.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="scripting.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="window.h">
+      <Filter>core\headers</Filter>
     </ClInclude>
     <ClInclude Include="resource_loader.h">
-      <Filter>Header Files</Filter>
+      <Filter>core\headers</Filter>
     </ClInclude>
-    <ClInclude Include="stb_image.h">
-      <Filter>Header Files</Filter>
+    <ClInclude Include="log_timer.h">
+      <Filter>core\headers</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
