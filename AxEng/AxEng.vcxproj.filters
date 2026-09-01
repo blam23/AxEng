@@ -1,46 +1,29 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <Filter Include="Source Files">
-      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
-      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
-    </Filter>
-    <Filter Include="Header Files">
-      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
-      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
-    </Filter>
-    <Filter Include="Resource Files">
-      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
-      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
-    </Filter>
-    <Filter Include="Source Files\imgui">
-      <UniqueIdentifier>{679cc603-5c30-4d9e-a17d-03a9e4789e80}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\backends">
-      <UniqueIdentifier>{9194c4c8-9799-450d-8f04-78705dd4bfe9}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Header Files\imgui">
-      <UniqueIdentifier>{3ab015f8-88d6-469e-b9aa-4ff993ea4596}</UniqueIdentifier>
-    </Filter>
     <Filter Include="core">
       <UniqueIdentifier>{12f658e9-130a-4cfb-90bb-873de94b2503}</UniqueIdentifier>
     </Filter>
     <Filter Include="core\headers">
       <UniqueIdentifier>{85267c10-4283-49dc-a20d-164ae6844dc0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="exterrnal">
+      <UniqueIdentifier>{6ac13698-6744-49e3-a65f-1585e4f26c0c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="exterrnal\headers">
+      <UniqueIdentifier>{c081c647-16e6-46d2-a791-b9a5559a054b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="main">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="core\asset_loaders">
+      <UniqueIdentifier>{6a368dfa-7e07-4064-962e-20e5994ec3da}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="glfw3webgpu.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="backends\imgui_impl_glfw.cpp">
-      <Filter>Source Files\imgui</Filter>
-    </ClCompile>
-    <ClCompile Include="backends\imgui_impl_wgpu.cpp">
-      <Filter>Source Files\imgui</Filter>
+      <Filter>main</Filter>
     </ClCompile>
     <ClCompile Include="module.cpp">
       <Filter>core</Filter>
@@ -48,7 +31,7 @@
     <ClCompile Include="resource_loader.cpp">
       <Filter>core</Filter>
     </ClCompile>
-    <ClCompile Include="scripting.cpp">
+    <ClCompile Include="script.cpp">
       <Filter>core</Filter>
     </ClCompile>
     <ClCompile Include="window.cpp">
@@ -60,23 +43,23 @@
     <ClCompile Include="event.cpp">
       <Filter>core</Filter>
     </ClCompile>
+    <ClCompile Include="glfw3webgpu.c">
+      <Filter>exterrnal</Filter>
+    </ClCompile>
+    <ClCompile Include="backends\imgui_impl_glfw.cpp">
+      <Filter>exterrnal</Filter>
+    </ClCompile>
+    <ClCompile Include="backends\imgui_impl_wgpu.cpp">
+      <Filter>exterrnal</Filter>
+    </ClCompile>
+    <ClCompile Include="asset.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="lua_engine.cpp">
+      <Filter>main</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="glfw3webgpu.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="backends\imgui_impl_glfw.h">
-      <Filter>Header Files\backends</Filter>
-    </ClInclude>
-    <ClInclude Include="backends\imgui_impl_wgpu.h">
-      <Filter>Header Files\backends</Filter>
-    </ClInclude>
-    <ClInclude Include="imgui_style.h">
-      <Filter>Header Files\imgui</Filter>
-    </ClInclude>
-    <ClInclude Include="stb_image.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
     <ClInclude Include="event.h">
       <Filter>core\headers</Filter>
     </ClInclude>
@@ -86,7 +69,7 @@
     <ClInclude Include="module.h">
       <Filter>core\headers</Filter>
     </ClInclude>
-    <ClInclude Include="scripting.h">
+    <ClInclude Include="script.h">
       <Filter>core\headers</Filter>
     </ClInclude>
     <ClInclude Include="window.h">
@@ -96,6 +79,30 @@
       <Filter>core\headers</Filter>
     </ClInclude>
     <ClInclude Include="log_timer.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="glfw3webgpu.h">
+      <Filter>exterrnal</Filter>
+    </ClInclude>
+    <ClInclude Include="stb_image.h">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="backends\imgui_impl_glfw.h">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="backends\imgui_impl_wgpu.h">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="imgui_style.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="asset_manager.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="asset.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_engine.h">
       <Filter>core\headers</Filter>
     </ClInclude>
   </ItemGroup>

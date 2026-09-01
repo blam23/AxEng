@@ -2,6 +2,9 @@
 
 #include "module.h"
 #include "resource_loader.h"
+#include "log_timer.h"
+#include "lua_engine.h"
+#include "script.h"
 #include "window.h"
 
 #include <numbers>
@@ -11,9 +14,6 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-// Logging
-#include "spdlog/spdlog.h"
-
 int main()
 {
 	// TODO: parse args
@@ -22,20 +22,25 @@ int main()
 	spdlog::set_level(spdlog::level::debug);
 #endif
 
-	ax::setup_glfw();
-	{
-		ax::Module gameModule(ax::ModuleDefinition{
+	ax::FileSystemModuleDefinition moduleDef{
 			.name = "Editor",
 			.moduleType = ax::ModuleType::Application,
-			.loader = std::make_unique<ax::FileResourceLoader>("D:\\axeng")
-		});
+			.loader = { "D:\\axeng" }
+	};
+	ax::FileSystemModule gameModule{ moduleDef };
+	
+	ax::lua::global_setup(gameModule.loader());
+	ax::lua::init_current_thread();
+	auto env{ ax::lua::create_env() };
+	auto script{ ax::ScriptManager::load(gameModule.loader(), "Test Script", "test.lua") };
 
-		ax::FileResourceLoader test("D:\\axeng");
-		const auto image_data{ test.load("shipBeige_manned.png") };
+	ax::setup_glfw();
+	{
+		const auto image_data{ gameModule.loader().load("shipBeige_manned.png") };
 
 		int width, height, channels;
 		void* data{ nullptr };
-		data = stbi_load_from_memory(image_data.data(), image_data.size(), &width, &height, &channels, 0);
+		data = stbi_load_from_memory(image_data.data(), (int)image_data.size(), &width, &height, &channels, 0);
 
 		// Setup window
 		ax::Window window({
@@ -77,8 +82,14 @@ int main()
 			}
 		);
 
+		script->run(env);
+
 		// Run main loop
 		window.run_loop();
 	}
 	ax::teardown_glfw();
+
+	// Specifically unload all scripts before the lua environments are destroyed.
+	// TODO: This sucks
+	ax::ScriptManager::unload_all();
 }

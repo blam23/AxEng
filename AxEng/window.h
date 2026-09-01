@@ -1,5 +1,8 @@
 #pragma once
 
+// Windows
+#include <windows.h>
+
 // STD
 #include <string_view>
 
@@ -14,7 +17,6 @@
 
 // AxEng
 #include "helpers.h"
-#include "scripting.h"
 #include "event.h"
 
 namespace ax

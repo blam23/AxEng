@@ -29,4 +29,10 @@ namespace ax
 	private:
 		std::filesystem::path m_root;
 	};
+
+	template <typename T>
+	concept ValidLoader = requires
+	{
+		std::derived_from<T, IResourceLoader>;
+	};
 }

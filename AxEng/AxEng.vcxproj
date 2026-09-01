@@ -130,7 +130,7 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;IMGUI_IMPL_WEBGPU_BACKEND_DAWN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard>stdcpp23</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
@@ -143,27 +143,32 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="asset.cpp" />
     <ClCompile Include="backends\imgui_impl_glfw.cpp" />
     <ClCompile Include="backends\imgui_impl_wgpu.cpp" />
     <ClCompile Include="event.cpp" />
+    <ClCompile Include="lua_engine.cpp" />
     <ClCompile Include="module.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="glfw3webgpu.c" />
     <ClCompile Include="resource_loader.cpp" />
-    <ClCompile Include="scripting.cpp" />
+    <ClCompile Include="script.cpp" />
     <ClCompile Include="log_timer.cpp" />
     <ClCompile Include="window.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="asset.h" />
+    <ClInclude Include="asset_manager.h" />
     <ClInclude Include="backends\imgui_impl_glfw.h" />
     <ClInclude Include="backends\imgui_impl_wgpu.h" />
     <ClInclude Include="event.h" />
+    <ClInclude Include="lua_engine.h" />
     <ClInclude Include="module.h" />
     <ClInclude Include="glfw3webgpu.h" />
     <ClInclude Include="helpers.h" />
     <ClInclude Include="imgui_style.h" />
     <ClInclude Include="resource_loader.h" />
-    <ClInclude Include="scripting.h" />
+    <ClInclude Include="script.h" />
     <ClInclude Include="log_timer.h" />
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="window.h" />

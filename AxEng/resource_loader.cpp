@@ -19,7 +19,7 @@ std::vector<uint8_t> ax::FileResourceLoader::load(ResourceID id)
 
 	std::vector<uint8_t> ret{};
 
-	const auto path{ m_root.append(id) };
+	const auto path{ m_root / id };
 	if (!std::filesystem::exists(path))
 	{
 		spdlog::error("File does not exist: {}", id);
