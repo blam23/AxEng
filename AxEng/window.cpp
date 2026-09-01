@@ -173,7 +173,7 @@ bool ax::Window::init_wegbpu()
 		.viewFormatCount = 0,
 		.viewFormats = nullptr,
 		.alphaMode = wgpu::CompositeAlphaMode::Auto,
-		.presentMode = m_vsync ? wgpu::PresentMode::Mailbox : wgpu::PresentMode::Immediate,
+		.presentMode = m_vsync ? wgpu::PresentMode::Fifo : wgpu::PresentMode::Immediate,
 	};
 
 	m_surface.Configure(&config);
