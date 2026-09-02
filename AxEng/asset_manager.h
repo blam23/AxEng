@@ -21,23 +21,28 @@ namespace ax
 	class AssetManager
 	{
 	public:
-		static TAsset* load(IResourceLoader& loader, const std::string& name, const TAsset::Descriptor& description);
-		static TAsset* get(const std::string& name);
-		static void mark_for_removal(const std::string& name);
-		static void for_each(std::function<void(const std::string& name, TAsset const*)> func);
-		static void for_each_name(std::function<void(const std::string& name)> func);
-		static void unload_all();
+		AssetManager(IResourceLoader& loader)
+			: m_loader{ loader }
+		{
+		}
+		
+		TAsset* load(const std::string& name, const TAsset::Descriptor& description);
+		TAsset* get(const std::string& name);
+		void mark_for_removal(const std::string& name);
+		void for_each(std::function<void(const std::string& name, TAsset const*)> func);
+		void for_each_name(std::function<void(const std::string& name)> func);
+		void unload_all();
 
 	protected:
-		static std::unique_ptr<TAsset> inner_load(IResourceLoader& loader, const std::string& name, const TAsset::Descriptor& description);
-		static inline std::map<std::string, std::pair<typename TAsset::Descriptor, std::unique_ptr<TAsset>>> m_store{};
-		static inline std::recursive_mutex m_loadMutex{};
+		virtual std::unique_ptr<TAsset> inner_load(const std::string& name, const TAsset::Descriptor& description) = 0;
+		std::map<std::string, std::pair<typename TAsset::Descriptor, std::unique_ptr<TAsset>>> m_store{};
+		std::recursive_mutex m_loadMutex{};
+		IResourceLoader& m_loader;
 	};
 
 	template<typename TAsset>
 		requires ValidAsset<TAsset>
 	TAsset* AssetManager<TAsset>::load(
-		IResourceLoader& loader,
 		const std::string& name,
 		const TAsset::Descriptor& description
 	)
@@ -50,7 +55,7 @@ namespace ax
 			return itr->second.second.get();
 
 		// Try and load the asset
-		auto asset{ inner_load(loader, name, description) };
+		auto asset{ inner_load(name, description) };
 
 		// Only emplace if the asset was loaded successfully
 		if (asset && asset->is_loaded())

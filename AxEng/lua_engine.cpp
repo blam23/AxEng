@@ -2,22 +2,23 @@
 #include "lua_bindings.h"
 #include "log_timer.h"
 
-thread_local sol::state mainState;
-thread_local bool attemptedSetup;
-
-std::string init_script;
-
-void ax::lua::global_setup(IResourceLoader& loader)
+ax::lua::Manager::Manager(IResourceLoader& loader)
+	: m_initScript{}
 {
-	const auto& raw_data{ loader.load("lua/init.lua") };
-	init_script = { raw_data.begin(), raw_data.end() };
-}
+	LogTimer _timer{ "init lua" };
 
-void ax::lua::init_current_thread()
-{
-	LogTimer _timer{ "init lua on thread" };
+	const auto initLoad{ loader.load_as_text("lua/init.lua") };
+	if (initLoad.has_value())
+	{
+		m_initScript = initLoad.value();
+	}
+	else
+	{
+		spdlog::error("Failed to load init script: ResourceLoadError::{}", (int)initLoad.error());
+		return;
+	}
 
-	mainState.open_libraries
+	m_state.open_libraries
 	(
 		sol::lib::base,
 		sol::lib::package,
@@ -27,36 +28,22 @@ void ax::lua::init_current_thread()
 		sol::lib::bit32
 	);
 
-	bindings::setup_all(mainState);
+	bindings::setup_all(m_state);
 
-	const auto res{ mainState.do_string(init_script, "Init Script")};
+	const auto res{ m_state.do_string(m_initScript, "Init Script") };
 	if (!res.valid())
 	{
 		sol::error err = res;
-		spdlog::error("Failed to load init script {}", err.what());
+		spdlog::error("Failed to run init script {}", err.what());
 	}
-
-	attemptedSetup = true;
 }
 
-void ax::lua::teardown_current_thread()
+sol::environment ax::lua::Manager::create_env()
 {
-	mainState = nullptr;
-	attemptedSetup = false;
+	return { m_state, sol::create, m_state.globals() };
 }
 
-sol::environment ax::lua::create_env()
+sol::load_result ax::lua::Manager::load(const std::string& code, const std::string& file)
 {
-	if (!attemptedSetup)
-		init_current_thread();
-
-	return { mainState, sol::create, mainState.globals() };
-}
-
-sol::load_result ax::lua::load(const std::string& code, const std::string& file)
-{
-	if (!attemptedSetup)
-		init_current_thread();
-
-	return mainState.load(code, file);
+	return m_state.load(code, file);
 }

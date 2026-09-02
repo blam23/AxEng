@@ -123,5 +123,8 @@
     <ClInclude Include="lua_bindings.h">
       <Filter>core\lua\headers</Filter>
     </ClInclude>
+    <ClInclude Include="argparse\argparse.hpp">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

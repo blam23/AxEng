@@ -8,5 +8,5 @@ ax::LogTimer::LogTimer(std::string_view message)
 
 ax::LogTimer::~LogTimer()
 {
-	spdlog::info("{}: {}s", m_message, m_timer);
+	spdlog::debug("{}: {}s", m_message, m_timer);
 }

@@ -5,6 +5,7 @@
 
 #include "helpers.h"
 #include "asset_manager.h"
+#include "lua_engine.h"
 
 namespace ax::lua
 {
@@ -15,7 +16,7 @@ namespace ax::lua
 		using Descriptor = std::string;
 
 	public:
-		Script(Badge<AssetManager<Script>>, const std::string& name, const std::string& code);
+		Script(ax::lua::Manager& m_lua, const std::string& name, const std::string& code);
 
 		sol::function_result run(sol::environment& env);
 		sol::function_result run_no_cache(sol::environment& env);
@@ -25,8 +26,19 @@ namespace ax::lua
 		sol::function m_code;
 		sol::load_result m_res;
 		std::string m_strCode;
-
+		ax::lua::Manager& m_lua;
 	};
 
-	using ScriptManager = AssetManager<Script>;
+	class ScriptManager : public AssetManager<Script>
+	{
+	public:
+		ScriptManager(IResourceLoader& loader);
+
+		virtual std::unique_ptr<Script> inner_load(const std::string& name, const Script::Descriptor& description) override;
+
+		sol::environment create_env();
+
+	private:
+		ax::lua::Manager m_lua;
+	};
 }

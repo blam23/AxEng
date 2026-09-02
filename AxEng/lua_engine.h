@@ -10,9 +10,15 @@
 
 namespace ax::lua
 {
-	void global_setup(IResourceLoader& loader);
-	void init_current_thread();
-	void teardown_current_thread();
-	sol::environment create_env();
-	sol::load_result load(const std::string& code, const std::string& file);
+	class Manager
+	{
+	public:
+		Manager(IResourceLoader& loader);
+		sol::environment create_env();
+		sol::load_result load(const std::string& code, const std::string& file);
+
+	private:
+		sol::state m_state;
+		std::string m_initScript;
+	};
 }

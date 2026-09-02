@@ -1,15 +1,15 @@
 #include "script.h"
-#include "lua_engine.h"
 
 // Logging
 #include "spdlog/spdlog.h"
 #include "spdlog/stopwatch.h"
 
-ax::lua::Script::Script(Badge<ScriptManager>, const std::string& name, const std::string& code)
+ax::lua::Script::Script(ax::lua::Manager& lua, const std::string& name, const std::string& code)
 	: ax::Asset{ name }
 	, m_strCode{ code }
+	, m_lua{ lua }
 {
-	sol::load_result res{ lua::load(code, name) };
+	sol::load_result res{ m_lua.load(code, name) };
 
 	if (res.valid())
 	{
@@ -31,7 +31,7 @@ sol::function_result ax::lua::Script::run(sol::environment& env)
 
 sol::function_result ax::lua::Script::run_no_cache(sol::environment& env)
 {
-	sol::function res{ lua::load(m_strCode, m_name) };
+	sol::function res{ m_lua.load(m_strCode, m_name) };
 
 	if (res.valid())
 	{
@@ -42,11 +42,23 @@ sol::function_result ax::lua::Script::run_no_cache(sol::environment& env)
 	return {};
 }
 
-template <>
-std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::inner_load(IResourceLoader& loader, const std::string& name, const Script::Descriptor& description)
+std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::inner_load(const std::string& name, const Script::Descriptor& description)
 {
-	const auto& raw_data{ loader.load(description) };
-	const std::string init_script { raw_data.begin(), raw_data.end() };
+	auto res{ m_loader.load_as_text(description) };
 
-	return std::make_unique<ax::lua::Script>(Badge<ax::lua::ScriptManager>{}, name, init_script);
+	if (res.has_value())
+		return std::make_unique<ax::lua::Script>(m_lua, name, res.value());
+	else
+		return nullptr;
+}
+
+ax::lua::ScriptManager::ScriptManager(IResourceLoader& loader)
+	: m_lua{ loader }
+	, ax::AssetManager<Script>{ loader }
+{
+}
+
+sol::environment ax::lua::ScriptManager::create_env()
+{
+	return m_lua.create_env();
 }

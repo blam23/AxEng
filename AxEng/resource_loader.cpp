@@ -8,12 +8,12 @@
 
 #include "log_timer.h"
 
-ax::FileResourceLoader::FileResourceLoader(std::filesystem::path rootDirectory)
+ax::DirectoryResourceLoader::DirectoryResourceLoader(std::filesystem::path rootDirectory)
 	: m_root{ rootDirectory }
 {
 }
 
-std::vector<uint8_t> ax::FileResourceLoader::load(ResourceID id)
+std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::DirectoryResourceLoader::load(ResourceID id)
 {
 	LogTimer _timer{ id };
 
@@ -23,7 +23,7 @@ std::vector<uint8_t> ax::FileResourceLoader::load(ResourceID id)
 	if (!std::filesystem::exists(path))
 	{
 		spdlog::error("File does not exist: {}", id);
-		return ret;
+		return std::unexpected{ ax::ResourceLoadError::NotFound };
 	}
 
 	// Open file at END of stream (ios::ate)
@@ -43,7 +43,7 @@ std::vector<uint8_t> ax::FileResourceLoader::load(ResourceID id)
 			spdlog::error("IO error: {}", strerror_s(err, 1024, errno));
 		}
 
-		return ret;
+		return std::unexpected{ ax::ResourceLoadError::CantOpen };
 	}
 
 	// Create byte vector of length <EOF>
@@ -54,4 +54,14 @@ std::vector<uint8_t> ax::FileResourceLoader::load(ResourceID id)
 	file.read(reinterpret_cast<char*>(ret.data()), ret.size());
 
 	return ret;
+}
+
+std::expected<std::string, ax::ResourceLoadError>  ax::IResourceLoader::load_as_text(ResourceID id)
+{
+	const auto ret{ load(id) };
+
+	if (ret.has_value())
+		return std::string{ ret.value().begin(), ret.value().end() };
+	else
+		return std::unexpected{ ret.error() };
 }

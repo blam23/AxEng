@@ -14,34 +14,55 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
-int main()
-{
-	// TODO: parse args
+#include "argparse/argparse.hpp"
 
+int main(int argc, char* argv[])
+{
 #ifdef _DEBUG
 	spdlog::set_level(spdlog::level::debug);
 #endif
 
-	ax::FileSystemModuleDefinition moduleDef
+	//
+	// Parse Args
+	//
+
+	argparse::ArgumentParser program("AxEng");
+
+	std::string rootDirectory;
+	program.add_argument("-r", "--root")
+		.store_into(rootDirectory)
+		.required()
+		.help("Loads an application from the given root directory");
+
+	//std::string zipPath;
+	//program.add_argument("-z", "--zip")
+	//	.store_into(zipPath)
+	//	.help("Loads an application from the given zip file");
+
+	try
 	{
-		.name = "Editor",
-		.moduleType = ax::ModuleType::Application,
-		.loader = { "D:\\axeng" }
-	};
-	ax::FileSystemModule gameModule{ moduleDef };
-	
-	ax::lua::global_setup(gameModule.loader());
-	ax::lua::init_current_thread();
-	auto env{ ax::lua::create_env() };
-	auto script{ ax::lua::ScriptManager::load(gameModule.loader(), "Test Script", "test.lua") };
+		program.parse_args(argc, argv);
+	}
+	catch (const std::exception& err)
+	{
+		spdlog::error("Failed to parse arguments: {}", err.what());
+		spdlog::error("{}", program.help().str());
+	}
+
+	//
+	// Setup module
+	//
+
+	ax::DirectoryModule gameModule(rootDirectory);
+	gameModule.try_load();
 
 	ax::setup_glfw();
 	{
-		const auto image_data{ gameModule.loader().load("shipBeige_manned.png") };
+		//const auto image_data{ gameModule.loader().load("shipBeige_manned.png") };
 
-		int width, height, channels;
-		void* data{ nullptr };
-		data = stbi_load_from_memory(image_data.data(), (int)image_data.size(), &width, &height, &channels, 0);
+		//int width, height, channels;
+		//void* data{ nullptr };
+		//data = stbi_load_from_memory(image_data.data(), (int)image_data.size(), &width, &height, &channels, 0);
 
 		// Setup window
 		ax::Window window
@@ -58,12 +79,12 @@ int main()
 		double time{ 0.0 };
 		window.get_update_event_handler().subscribe
 		(
-			[&window, &time, script, &env](ax::WindowUpdateEvent& e) {
+			[&window, &time](ax::WindowUpdateEvent& e) {
 				time += e.delta;
 				wgpu::Color clearColor{ std::sin(time), std::cos(time), 0.0, 1.0};
 				window.set_clear_color(clearColor);
 
-				script->run(env);
+				//script->run(env);
 			}
 		);
 
@@ -83,7 +104,7 @@ int main()
 					static std::size_t deltaPtr = 0;
 					deltaTimes[deltaPtr++] = (float)e.delta * 1000.0f;
 					deltaPtr %= 512;
-					ImGui::PlotLines("Delta Times (ms)", deltaTimes, 512);
+					ImGui::PlotHistogram("Delta Times (ms)", deltaTimes, 512);
 				}
 				ImGui::End();
 			}
@@ -94,8 +115,4 @@ int main()
 		window.run_loop();
 	}
 	ax::teardown_glfw();
-
-	// Specifically unload all scripts before the lua environments are destroyed.
-	// TODO: This sucks
-	ax::lua::ScriptManager::unload_all();
 }
