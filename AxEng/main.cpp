@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include "forward.h"
 #include "module.h"
 #include "resource_loader.h"
 #include "log_timer.h"
@@ -47,13 +48,14 @@ int main(int argc, char* argv[])
 	{
 		spdlog::error("Failed to parse arguments: {}", err.what());
 		spdlog::error("{}", program.help().str());
+		return -1;
 	}
 
 	//
 	// Setup module
 	//
 
-	ax::DirectoryModule gameModule(rootDirectory);
+	auto gameModule{ ax::Module::from_directory(rootDirectory) };
 	gameModule.try_load();
 
 	ax::setup_glfw();

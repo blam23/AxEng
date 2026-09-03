@@ -165,6 +165,7 @@
     <ClInclude Include="backends\imgui_impl_glfw.h" />
     <ClInclude Include="backends\imgui_impl_wgpu.h" />
     <ClInclude Include="event.h" />
+    <ClInclude Include="forward.h" />
     <ClInclude Include="lua_bindings.h" />
     <ClInclude Include="lua_engine.h" />
     <ClInclude Include="module.h" />

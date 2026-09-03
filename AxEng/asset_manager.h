@@ -9,9 +9,12 @@
 #include "helpers.h"
 #include "asset.h"
 #include "resource_loader.h"
+#include "forward.h"
 
 namespace ax
 {
+	class Module;
+
 	/// <summary>
 	/// For managing loadable assets such as shaders, scripts and textures
 	/// </summary>
@@ -28,10 +31,9 @@ namespace ax
 		
 		TAsset* load(const std::string& name, const TAsset::Descriptor& description);
 		TAsset* get(const std::string& name);
-		void mark_for_removal(const std::string& name);
 		void for_each(std::function<void(const std::string& name, TAsset const*)> func);
 		void for_each_name(std::function<void(const std::string& name)> func);
-		void unload_all();
+		void unload_all(Badge<Module>);
 
 	protected:
 		virtual std::unique_ptr<TAsset> inner_load(const std::string& name, const TAsset::Descriptor& description) = 0;
@@ -81,7 +83,7 @@ namespace ax
 
 	template<typename TAsset>
 		requires ValidAsset<TAsset>
-	void AssetManager<TAsset>::unload_all()
+	void AssetManager<TAsset>::unload_all(Badge<Module>)
 	{
 		std::lock_guard lock{ m_loadMutex };
 		m_store.clear();
@@ -105,24 +107,5 @@ namespace ax
 
 		const auto& idx = m_store.find(name);
 		return idx != m_store.end() ? idx->second.second.get() : nullptr;
-	}
-
-	template<typename TAsset>
-		requires ValidAsset<TAsset>
-	void AssetManager<TAsset>::mark_for_removal(const std::string& name)
-	{
-		std::lock_guard lock{ m_loadMutex };
-
-		const auto& idx = m_store.find(name);
-
-		if (idx != m_store.end())
-		{
-			const auto ptr = idx->second.second.get();
-			if (ptr)
-			{
-				ptr->tag_outdated();
-				m_store.erase(idx);
-			}
-		}
 	}
 }

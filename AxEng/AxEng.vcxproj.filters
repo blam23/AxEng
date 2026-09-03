@@ -126,5 +126,8 @@
     <ClInclude Include="argparse\argparse.hpp">
       <Filter>exterrnal\headers</Filter>
     </ClInclude>
+    <ClInclude Include="forward.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

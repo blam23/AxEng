@@ -6,6 +6,7 @@
 #include "script.h"
 #include "resource_loader.h"
 #include "log_timer.h"
+#include <memory>
 
 namespace ax
 {
@@ -16,22 +17,19 @@ namespace ax
 		Library     = 2,
 	};
 
-	template <typename T_Loader>
-		requires ValidLoader<T_Loader>
 	class Module final
 	{
 	public:
-		DISABLE_COPY_AND_MOVE(Module<T_Loader>);
+		DISABLE_COPY_AND_MOVE(Module);
 
-		Module(std::string_view root)
-			: m_loader{ T_Loader{ root } }
-			, m_scripts{ m_loader }
+		static Module from_directory(std::string_view root)
 		{
+			return { std::make_unique<DirectoryResourceLoader>(root) };
 		}
 
 		~Module()
 		{
-			m_scripts.unload_all();
+			m_scripts.unload_all({});
 		}
 
 		bool try_load()
@@ -73,10 +71,17 @@ namespace ax
 			return m_loaded;
 		}
 		
-		T_Loader& loader() { return m_loader; }
+		IResourceLoader& loader() noexcept { return *m_loader; }
+		const IResourceLoader& loader() const noexcept { return *m_loader; }
 
 	private:
-		T_Loader m_loader;
+		Module(std::unique_ptr<IResourceLoader> loader)
+			: m_loader{ std::move(loader) }
+			, m_scripts{ *m_loader }
+		{
+		}
+
+		std::unique_ptr<IResourceLoader> m_loader;
 		ax::lua::ScriptManager m_scripts;
 
 		std::string m_name{};
@@ -85,6 +90,4 @@ namespace ax
 
 		bool m_loaded{ false };
 	};
-
-	using DirectoryModule = Module<DirectoryResourceLoader>;
 }
