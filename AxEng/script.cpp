@@ -52,9 +52,9 @@ std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::inner_load(const std::s
 		return nullptr;
 }
 
-ax::lua::ScriptManager::ScriptManager(IResourceLoader& loader)
+ax::lua::ScriptManager::ScriptManager(Badge<Module> badge, IResourceLoader& loader)
 	: m_lua{ loader }
-	, ax::AssetManager<Script>{ loader }
+	, ax::AssetManager<Script>{ badge, loader }
 {
 }
 

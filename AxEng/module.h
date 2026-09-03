@@ -77,7 +77,7 @@ namespace ax
 	private:
 		Module(std::unique_ptr<IResourceLoader> loader)
 			: m_loader{ std::move(loader) }
-			, m_scripts{ *m_loader }
+			, m_scripts{ {}, * m_loader }
 		{
 		}
 

@@ -13,8 +13,6 @@
 
 namespace ax
 {
-	class Module;
-
 	/// <summary>
 	/// For managing loadable assets such as shaders, scripts and textures
 	/// </summary>
@@ -24,7 +22,7 @@ namespace ax
 	class AssetManager
 	{
 	public:
-		AssetManager(IResourceLoader& loader)
+		AssetManager(Badge<Module>, IResourceLoader& loader)
 			: m_loader{ loader }
 		{
 		}
