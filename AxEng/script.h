@@ -16,7 +16,7 @@ namespace ax::lua
 		using Descriptor = std::string;
 
 	public:
-		Script(ax::lua::Manager& m_lua, const std::string& name, const std::string& code);
+		Script(Badge<ScriptManager>,ax::lua::Manager& m_lua, const std::string& name, const std::string& code);
 
 		sol::function_result run(sol::environment& env);
 		sol::function_result run_no_cache(sol::environment& env);

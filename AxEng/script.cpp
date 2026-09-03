@@ -4,7 +4,7 @@
 #include "spdlog/spdlog.h"
 #include "spdlog/stopwatch.h"
 
-ax::lua::Script::Script(ax::lua::Manager& lua, const std::string& name, const std::string& code)
+ax::lua::Script::Script(Badge<ScriptManager>, ax::lua::Manager& lua, const std::string& name, const std::string& code)
 	: ax::Asset{ name }
 	, m_strCode{ code }
 	, m_lua{ lua }
@@ -47,7 +47,7 @@ std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::inner_load(const std::s
 	auto res{ m_loader.load_as_text(description) };
 
 	if (res.has_value())
-		return std::make_unique<ax::lua::Script>(m_lua, name, res.value());
+		return std::make_unique<ax::lua::Script>(Badge<ScriptManager>{}, m_lua, name, res.value());
 	else
 		return nullptr;
 }
