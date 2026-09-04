@@ -156,6 +156,7 @@
     <ClCompile Include="resource_loader.cpp" />
     <ClCompile Include="script.cpp" />
     <ClCompile Include="log_timer.cpp" />
+    <ClCompile Include="texture.cpp" />
     <ClCompile Include="window.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -176,6 +177,7 @@
     <ClInclude Include="script.h" />
     <ClInclude Include="log_timer.h" />
     <ClInclude Include="stb_image.h" />
+    <ClInclude Include="texture.h" />
     <ClInclude Include="window.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

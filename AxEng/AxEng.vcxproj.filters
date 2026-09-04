@@ -73,6 +73,9 @@
     <ClCompile Include="lua_log_bindings.cpp">
       <Filter>core\lua\bindings</Filter>
     </ClCompile>
+    <ClCompile Include="texture.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -127,6 +130,9 @@
       <Filter>exterrnal\headers</Filter>
     </ClInclude>
     <ClInclude Include="forward.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="texture.h">
       <Filter>core\headers</Filter>
     </ClInclude>
   </ItemGroup>

@@ -12,9 +12,6 @@
 
 #include <imgui.h>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
 #include "argparse/argparse.hpp"
 
 int main(int argc, char* argv[])
@@ -48,56 +45,41 @@ int main(int argc, char* argv[])
 	{
 		spdlog::error("Failed to parse arguments: {}", err.what());
 		spdlog::error("{}", program.help().str());
-		return -1;
+		return 1;
 	}
-
-	//
-	// Setup module
-	//
-
-	auto gameModule{ ax::Module::from_directory(rootDirectory) };
-	gameModule.try_load();
 
 	ax::setup_glfw();
 	{
-		//const auto image_data{ gameModule.loader().load("shipBeige_manned.png") };
+		//
+		// Setup module
+		//
+		auto application{ ax::Module::from_directory(rootDirectory) };
+		auto loaded{ application.try_load() };
 
-		//int width, height, channels;
-		//void* data{ nullptr };
-		//data = stbi_load_from_memory(image_data.data(), (int)image_data.size(), &width, &height, &channels, 0);
-
-		// Setup window
-		ax::Window window
-		({
-			.width = 1920,
-			.height = 1080,
-			.title = "AxEng",
-			.vsync = true,
-		});
-		window.init_wegbpu();
-		window.init_imgui();
+		if (!loaded)
+			return 2;
 
 		// Setup event handlers
 		double time{ 0.0 };
-		window.get_update_event_handler().subscribe
+		application.window()->get_update_event_handler().subscribe
 		(
-			[&window, &time](ax::WindowUpdateEvent& e) {
+			[&application, &time](ax::WindowUpdateEvent& e) {
 				time += e.delta;
 				wgpu::Color clearColor{ std::sin(time), std::cos(time), 0.0, 1.0};
-				window.set_clear_color(clearColor);
+				application.window()->set_clear_color(clearColor);
 
 				//script->run(env);
 			}
 		);
 
-		window.get_render_event_handler().subscribe
+		application.window()->get_render_event_handler().subscribe
 		(
 			[](ax::WindowRenderEvent& e) {
 				e.pass.Draw(3, 1, 0, 0);
 			}
 		);
 
-		window.get_ui_event_handler().subscribe
+		application.window()->get_ui_event_handler().subscribe
 		(
 			[](ax::WindowUIEvent& e) {
 				ImGui::Begin("Random Stuff");
@@ -112,9 +94,9 @@ int main(int argc, char* argv[])
 			}
 		);
 
-
 		// Run main loop
-		window.run_loop();
+		application.window()->run_loop();
 	}
+
 	ax::teardown_glfw();
 }

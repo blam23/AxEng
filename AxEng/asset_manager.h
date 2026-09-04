@@ -26,6 +26,8 @@ namespace ax
 			: m_loader{ loader }
 		{
 		}
+
+		virtual ~AssetManager() = default;
 		
 		TAsset* load(const std::string& name, const TAsset::Descriptor& description);
 		TAsset* get(const std::string& name);

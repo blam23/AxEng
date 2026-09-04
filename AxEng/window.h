@@ -56,7 +56,7 @@ namespace ax
 		Window(const WindowDefinition&);
 		~Window();
 
-		bool init_wegbpu();
+		bool init_webgpu();
 		bool init_imgui();
 		void run_loop();
 
@@ -83,10 +83,10 @@ namespace ax
 			return m_uiEventHandler;
 		}
 
-		wgpu::Queue& get_queue()
-		{
-			return m_queue;
-		}
+		wgpu::Device& device() noexcept { return m_device; }
+		const wgpu::Device& device() const noexcept { return m_device; }
+		wgpu::Queue& queue() noexcept { return m_queue; }
+		const wgpu::Queue& queue() const noexcept { return m_queue; }
 
 		void set_clear_color(wgpu::Color& color)
 		{

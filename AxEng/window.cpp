@@ -60,10 +60,8 @@ void ax::teardown_glfw()
 	glfwTerminate();
 }
 
-bool ax::Window::init_wegbpu()
+bool ax::Window::init_webgpu()
 {
-	LogTimer _timer{ "wgpu setup" };
-
 	//
 	// Get wgpu Instance
 	//
@@ -158,9 +156,14 @@ bool ax::Window::init_wegbpu()
 	//
 	m_surface = wgpu::Surface{ glfwGetWGPUSurface(instance.Get(), m_window) };
 
-	wgpu::SurfaceCapabilities capabilities;
-	m_surface.GetCapabilities(adapter, &capabilities);
-	m_surfaceFormat = capabilities.formats[0];
+	wgpu::SurfaceCapabilities capabilities{};
+	if(m_surface.GetCapabilities(adapter, &capabilities))
+		m_surfaceFormat = capabilities.formats[0];
+	else
+	{
+		spdlog::error("Failed to get surface capabilities..");
+		return false;
+	}
 
 	wgpu::SurfaceConfiguration config
 	{

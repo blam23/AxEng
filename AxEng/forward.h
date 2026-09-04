@@ -14,4 +14,6 @@ namespace ax
 	class IResourceLoader;
 	class FileResourceLoader;
 	class Window;
+	class Texture;
+	class TextureManager;
 }
