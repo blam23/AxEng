@@ -22,14 +22,29 @@ ax::Texture::Texture(Badge<TextureManager>, const std::string& name, const std::
 		// Create texture
 		wgpu::TextureDescriptor textureDesc
 		{
+			.label = name.data(),
 			.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst,
 			.dimension = wgpu::TextureDimension::e2D,
-			.size = { width, height },
-			.format = wgpu::TextureFormat::BC1RGBAUnorm,
+			.size = { .width = width, .height = height, .depthOrArrayLayers = 1 },
+			.format = wgpu::TextureFormat::RGBA8Unorm,
 			.mipLevelCount = 1,
 			.sampleCount = 1,
 		};
 		m_texture = device.CreateTexture(&textureDesc);
+
+		// Create view
+		wgpu::TextureViewDescriptor viewDesc
+		{
+			.label = name.data(),
+			.format = wgpu::TextureFormat::RGBA8Unorm,
+			.dimension = wgpu::TextureViewDimension::e2D,
+			.baseMipLevel = 0,
+			.mipLevelCount = 1,
+			.baseArrayLayer = 0,
+			.arrayLayerCount = 1,
+			.aspect = wgpu::TextureAspect::All
+		};
+		m_view = m_texture.CreateView(&viewDesc);
 
 		// Copy data to texture
 		wgpu::TexelCopyTextureInfo copyInfo
@@ -42,12 +57,12 @@ ax::Texture::Texture(Badge<TextureManager>, const std::string& name, const std::
 		wgpu::TexelCopyBufferLayout layout
 		{
 			.offset = 0,
-			.bytesPerRow = 4 * width,
+			.bytesPerRow = channels * width,
 			.rowsPerImage = height
 		};
 
 		wgpu::Extent3D writeSize { width, height, 1 };
-		device.GetQueue().WriteTexture(&copyInfo, data, width * height * 4, &layout, &writeSize);
+		device.GetQueue().WriteTexture(&copyInfo, data, static_cast<size_t>(layout.bytesPerRow) * layout.rowsPerImage, &layout, &writeSize);
 
 		m_loaded = true;
 	}

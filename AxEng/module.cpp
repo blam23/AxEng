@@ -1,5 +1,7 @@
 #include "module.h"
 
+#include <imgui.h>
+
 ax::Module ax::Module::from_directory(std::string_view root)
 {
 	return { std::make_unique<DirectoryResourceLoader>(root) };
@@ -88,6 +90,23 @@ bool ax::Module::try_load()
 	}
 
 	m_loaded = true;
+
+	window()->get_ui_event_handler().subscribe
+	(
+		[this](ax::WindowUIEvent& e) {
+			ImGui::Begin("Image Test");
+			{
+				const auto texture{ m_textures.get("ship") };
+
+				//if (texture == nullptr)
+				//	spdlog::error("Unable to load texture 'ship'");
+				//else
+				//ImGui::Image((ImTextureID)(intptr_t)texture->texture().Get(), ImVec2(texture->width(), texture->height()));
+			}
+			ImGui::End();
+		}
+	);
+
 	return m_loaded;
 }
 

@@ -25,9 +25,18 @@ namespace ax
 		Texture(Badge<TextureManager>, const std::string& name, const std::vector<uint8_t> data, wgpu::Device& device);
 		~Texture();
 
+		const wgpu::Texture& texture() const { return m_texture; }
+		const wgpu::TextureView& view() const { return m_view; }
+		uint32_t width() const { return m_width; }
+		uint32_t height() const { return m_height; }
+
 	private:
 		wgpu::Texture m_texture;
+		wgpu::TextureView m_view;
 		void* m_stbiPtr{ nullptr };
+
+		uint32_t m_width{ 0 };
+		uint32_t m_height{ 0 };
 	};
 
 	class TextureManager : public AssetManager<Texture>
