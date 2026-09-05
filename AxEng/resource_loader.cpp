@@ -28,7 +28,7 @@ std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::DirectoryResource
 
 	// Open file at END of stream (ios::ate)
 	std::ifstream file{};
-	file.open(path, std::ios::binary | std::ios::ate);
+	file.open(path, std::ios::binary | std::ios::ate | std::ios::in);
 
 	if (!file.is_open())
 	{
