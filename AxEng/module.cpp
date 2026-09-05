@@ -94,10 +94,10 @@ bool ax::Module::try_load()
 			{
 				const auto texture{ m_textures.get("ship") };
 
-				//if (texture == nullptr)
-				//	spdlog::error("Unable to load texture 'ship'");
-				//else
-				//ImGui::Image((ImTextureID)(intptr_t)texture->texture().Get(), ImVec2(texture->width(), texture->height()));
+				if (texture == nullptr)
+					spdlog::error("Unable to load texture 'ship'");
+				else
+					ImGui::Image((ImTextureID)(intptr_t)texture->view().Get(), ImVec2(texture->width(), texture->height()));
 			}
 			ImGui::End();
 		}
