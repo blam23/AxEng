@@ -1,7 +1,7 @@
 #include <windows.h>
 
 #include "forward.h"
-#include "module.h"
+#include "application.h"
 #include "resource_loader.h"
 #include "log_timer.h"
 #include "lua_engine.h"
@@ -53,7 +53,7 @@ int main(int argc, char* argv[])
 		//
 		// Setup module
 		//
-		auto application{ ax::Module::from_directory(rootDirectory) };
+		auto application{ ax::Application::from_directory(rootDirectory) };
 		auto loaded{ application.try_load() };
 
 		if (!loaded)

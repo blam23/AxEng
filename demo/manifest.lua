@@ -9,5 +9,6 @@ app = {
     },
     ["textures"] = {
         ["ship"] = "assets/icon.png",
+        ["tower"] = "assets/tower-sheet.png",
     },
 }

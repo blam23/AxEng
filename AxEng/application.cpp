@@ -1,18 +1,18 @@
-#include "module.h"
+#include "application.h"
 
 #include <imgui.h>
 
-ax::Module ax::Module::from_directory(std::string_view root)
+ax::Application ax::Application::from_directory(std::string_view root)
 {
 	return { std::make_unique<DirectoryResourceLoader>(root) };
 }
 
-ax::Module::~Module()
+ax::Application::~Application()
 {
 	m_scripts.unload_all({});
 }
 
-bool ax::Module::init_window(const sol::environment& env)
+bool ax::Application::init_window(const sol::environment& env)
 {
 	LogTimer _timer{ "wgpu initial setup" };
 
@@ -37,13 +37,13 @@ bool ax::Module::init_window(const sol::environment& env)
 	return success;
 }
 
-void ax::Module::add_manifest_bindings(sol::environment&)
+void ax::Application::add_manifest_bindings(sol::environment&)
 {
 }
 
-bool ax::Module::try_load()
+bool ax::Application::try_load()
 {
-	LogTimer _timer{ "Module Load" };
+	LogTimer _timer{ "Application Load" };
 
 	ax::lua::Script* manifest{ m_scripts.load("!manifest", "manifest.lua") };
 	auto env{ m_scripts.create_env() };
@@ -106,9 +106,9 @@ bool ax::Module::try_load()
 	return m_loaded;
 }
 
-ax::Module::Module(std::unique_ptr<IResourceLoader> loader)
+ax::Application::Application(std::unique_ptr<IResourceLoader> loader)
 	: m_loader{ std::move(loader) }
 	, m_scripts{ {}, *m_loader }
-	, m_textures{ Badge<Module>{}, *m_loader }
+	, m_textures{ Badge<Application>{}, *m_loader }
 {
 }

@@ -34,7 +34,7 @@
     <ClCompile Include="main.cpp">
       <Filter>main</Filter>
     </ClCompile>
-    <ClCompile Include="module.cpp">
+    <ClCompile Include="application.cpp">
       <Filter>core</Filter>
     </ClCompile>
     <ClCompile Include="resource_loader.cpp">
@@ -84,7 +84,7 @@
     <ClInclude Include="helpers.h">
       <Filter>core\headers</Filter>
     </ClInclude>
-    <ClInclude Include="module.h">
+    <ClInclude Include="application.h">
       <Filter>core\headers</Filter>
     </ClInclude>
     <ClInclude Include="window.h">

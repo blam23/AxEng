@@ -78,7 +78,7 @@ ax::Texture::~Texture()
 		stbi_image_free(m_stbiPtr);
 }
 
-ax::TextureManager::TextureManager(Badge<Module> badge, IResourceLoader& loader)
+ax::TextureManager::TextureManager(Badge<Application> badge, IResourceLoader& loader)
 	: AssetManager<Texture>{ badge, loader }
 {
 }

@@ -10,7 +10,7 @@ namespace ax
 	}
 
 	class Asset;
-	class Module;
+	class Application;
 	class IResourceLoader;
 	class FileResourceLoader;
 	class Window;

@@ -22,7 +22,7 @@ namespace ax
 	class AssetManager
 	{
 	public:
-		AssetManager(Badge<Module>, IResourceLoader& loader)
+		AssetManager(Badge<Application>, IResourceLoader& loader)
 			: m_loader{ loader }
 		{
 		}
@@ -33,7 +33,7 @@ namespace ax
 		TAsset* get(const std::string& name);
 		void for_each(std::function<void(const std::string& name, TAsset const*)> func);
 		void for_each_name(std::function<void(const std::string& name)> func);
-		void unload_all(Badge<Module>);
+		void unload_all(Badge<Application>);
 
 	protected:
 		virtual std::unique_ptr<TAsset> inner_load(const std::string& name, const TAsset::Descriptor& description) = 0;
@@ -83,7 +83,7 @@ namespace ax
 
 	template<typename TAsset>
 		requires ValidAsset<TAsset>
-	void AssetManager<TAsset>::unload_all(Badge<Module>)
+	void AssetManager<TAsset>::unload_all(Badge<Application>)
 	{
 		std::lock_guard lock{ m_loadMutex };
 		m_store.clear();

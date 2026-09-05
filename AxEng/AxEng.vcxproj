@@ -150,7 +150,7 @@
     <ClCompile Include="lua_bindings.cpp" />
     <ClCompile Include="lua_engine.cpp" />
     <ClCompile Include="lua_log_bindings.cpp" />
-    <ClCompile Include="module.cpp" />
+    <ClCompile Include="application.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="glfw3webgpu.c" />
     <ClCompile Include="resource_loader.cpp" />
@@ -169,7 +169,7 @@
     <ClInclude Include="forward.h" />
     <ClInclude Include="lua_bindings.h" />
     <ClInclude Include="lua_engine.h" />
-    <ClInclude Include="module.h" />
+    <ClInclude Include="application.h" />
     <ClInclude Include="glfw3webgpu.h" />
     <ClInclude Include="helpers.h" />
     <ClInclude Include="imgui_style.h" />

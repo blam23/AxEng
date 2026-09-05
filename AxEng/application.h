@@ -19,14 +19,14 @@
 
 namespace ax
 {
-	class Module final
+	class Application final
 	{
 	public:
-		DISABLE_COPY_AND_MOVE(Module);
+		DISABLE_COPY_AND_MOVE(Application);
 
-		static Module from_directory(std::string_view root);
+		static Application from_directory(std::string_view root);
 
-		~Module();
+		~Application();
 
 		bool try_load();
 		
@@ -38,7 +38,7 @@ namespace ax
 		const Window* window() const noexcept { return m_window.get(); }
 
 	private:
-		Module(std::unique_ptr<IResourceLoader> loader);
+		Application(std::unique_ptr<IResourceLoader> loader);
 
 		bool init_window(const sol::environment& env);
 		void add_manifest_bindings(sol::environment& env);
