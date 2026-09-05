@@ -16,11 +16,7 @@ namespace ax
 	public:
 		DISABLE_COPY(Texture);
 
-		struct Descriptor
-		{
-			std::string path;
-			wgpu::Device& device;
-		};
+		using Descriptor = std::string;
 
 		Texture(Badge<TextureManager>, const std::string& name, const std::vector<uint8_t> data, wgpu::Device& device);
 		~Texture();
@@ -44,5 +40,9 @@ namespace ax
 	public:
 		TextureManager(Badge<Module>, IResourceLoader& loader);
 		virtual std::unique_ptr<Texture> inner_load(const std::string& name, const Texture::Descriptor& description) override;
+		void set_device(wgpu::Device& device);
+
+	private:
+		wgpu::Device* m_device;
 	};
 }

@@ -79,16 +79,27 @@ ax::Texture::~Texture()
 }
 
 ax::TextureManager::TextureManager(Badge<Module> badge, IResourceLoader& loader)
-	: AssetManager<Texture> { badge, loader }
+	: AssetManager<Texture>{ badge, loader }
 {
 }
 
 std::unique_ptr<ax::Texture> ax::TextureManager::inner_load(const std::string& name, const Texture::Descriptor& description)
 {
-	auto res{ m_loader.load(description.path) };
+	if (m_device == nullptr)
+	{
+		spdlog::error("TextureManager device not set.");
+		return nullptr;
+	}
+
+	auto res{ m_loader.load(description) };
 
 	if (res.has_value())
-		return std::make_unique<Texture>(Badge<TextureManager>{}, name, res.value(), description.device);
+		return std::make_unique<Texture>(Badge<TextureManager>{}, name, res.value(), *m_device);
 	else
 		return nullptr;
+}
+
+void ax::TextureManager::set_device(wgpu::Device& device)
+{
+	m_device = &device;
 }

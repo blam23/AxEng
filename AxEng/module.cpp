@@ -28,12 +28,12 @@ bool ax::Module::init_window(const sol::environment& env)
 
 	bool success{ true };
 	success = m_window->init_webgpu();
-
 	if (!success)
 		return false;
 
-	success = m_window->init_imgui();
+	m_textures.set_device(m_window->device());
 
+	success = m_window->init_imgui();
 	return success;
 }
 
@@ -82,11 +82,7 @@ bool ax::Module::try_load()
 	const sol::table& textures{ app["textures"].get<sol::table>() };
 	for (const auto& entry : textures)
 	{
-		m_textures.load(entry.first.as<std::string>(), 
-			{
-				.path = entry.second.as<std::string>(),
-				.device = m_window->device()
-			});
+		m_textures.load(entry.first.as<std::string>(), entry.second.as<std::string>());
 	}
 
 	m_loaded = true;
