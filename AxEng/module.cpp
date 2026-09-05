@@ -93,7 +93,7 @@ bool ax::Module::try_load()
 
 	window()->get_ui_event_handler().subscribe
 	(
-		[this](ax::WindowUIEvent& e) {
+		[this](const ax::WindowUIEvent& e) {
 			ImGui::Begin("Image Test");
 			{
 				const auto texture{ m_textures.get("ship") };

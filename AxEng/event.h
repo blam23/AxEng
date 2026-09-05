@@ -13,7 +13,7 @@ namespace ax
 	{
 		DISABLE_COPY_AND_MOVE(EventHandler<T_EVENT>);
 
-		using T_FUNC = std::function<void(T_EVENT&)>;
+		using T_FUNC = std::function<void(const T_EVENT&)>;
 
 	public:
 		EventHandler<T_EVENT>() = default;
@@ -21,13 +21,14 @@ namespace ax
 
 		T_FUNC& subscribe(T_FUNC&& handler)
 		{
-			std::unique_lock<std::mutex> waitLock{ m_subscriptionMutex };
+			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
 			m_subscriptions.emplace_back(handler);
 			return m_subscriptions[m_subscriptions.size() - 1];
 		}
 		
 		void fire(T_EVENT&& eventData)
 		{
+			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
 			for (auto& handler : m_subscriptions)
 				handler(eventData);
 		}
