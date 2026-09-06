@@ -37,6 +37,9 @@ namespace ax
 		Window* window() noexcept { return m_window.get(); }
 		const Window* window() const noexcept { return m_window.get(); }
 
+		const TextureManager& textures() const noexcept { return m_textures; }
+		TextureManager& textures() noexcept { return m_textures; }
+
 	private:
 		Application(std::unique_ptr<IResourceLoader> loader);
 
@@ -46,11 +49,11 @@ namespace ax
 		std::unique_ptr<Window> m_window;
 
 		std::unique_ptr<IResourceLoader> m_loader;
-		ax::lua::ScriptManager m_scripts;
-		ax::TextureManager m_textures;
+		lua::ScriptManager m_scripts;
+		TextureManager m_textures;
 
 		std::string m_name{};
-		ax::lua::Script* m_entryPoint{};
+		lua::Script* m_entryPoint{};
 
 		bool m_loaded{ false };
 	};

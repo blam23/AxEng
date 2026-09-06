@@ -7,6 +7,7 @@
 #include "lua_engine.h"
 #include "script.h"
 #include "window.h"
+#include "debug_view.h"
 
 #include <numbers>
 
@@ -93,6 +94,8 @@ int main(int argc, char* argv[])
 				ImGui::End();
 			}
 		);
+
+		ax::debug::View::register_debug_view(application);
 
 		// Run main loop
 		application.window()->run_loop();

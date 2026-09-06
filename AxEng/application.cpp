@@ -1,7 +1,5 @@
 #include "application.h"
 
-#include <imgui.h>
-
 ax::Application ax::Application::from_directory(std::string_view root)
 {
 	return { std::make_unique<DirectoryResourceLoader>(root) };
@@ -81,28 +79,9 @@ bool ax::Application::try_load()
 
 	const sol::table& textures{ app["textures"].get<sol::table>() };
 	for (const auto& entry : textures)
-	{
 		m_textures.load(entry.first.as<std::string>(), entry.second.as<std::string>());
-	}
 
 	m_loaded = true;
-
-	window()->get_ui_event_handler().subscribe
-	(
-		[this](const ax::WindowUIEvent& e) {
-			ImGui::Begin("Image Test");
-			{
-				const auto texture{ m_textures.get("ship") };
-
-				if (texture == nullptr)
-					spdlog::error("Unable to load texture 'ship'");
-				else
-					ImGui::Image((ImTextureID)(intptr_t)texture->view().Get(), ImVec2(texture->width(), texture->height()));
-			}
-			ImGui::End();
-		}
-	);
-
 	return m_loaded;
 }
 

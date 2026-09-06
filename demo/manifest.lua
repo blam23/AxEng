@@ -8,7 +8,7 @@ app = {
         ["v-sync"] = true,
     },
     ["textures"] = {
-        ["ship"] = "assets/icon.png",
+        ["icon"] = "assets/icon.png",
         ["tower"] = "assets/tower-sheet.png",
     },
 }

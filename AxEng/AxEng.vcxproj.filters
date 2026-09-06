@@ -29,6 +29,12 @@
     <Filter Include="core\lua\bindings">
       <UniqueIdentifier>{37f249af-47d8-4a43-805c-c8d41704bb4d}</UniqueIdentifier>
     </Filter>
+    <Filter Include="debug">
+      <UniqueIdentifier>{0361b4e9-7361-42ad-914f-69cb2c084b00}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="debug\headers">
+      <UniqueIdentifier>{f2233ab2-2af3-4748-8002-1e67ccb8157f}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
@@ -75,6 +81,9 @@
     </ClCompile>
     <ClCompile Include="texture.cpp">
       <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="debug_view.cpp">
+      <Filter>debug</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -134,6 +143,12 @@
     </ClInclude>
     <ClInclude Include="texture.h">
       <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="imgui_zoomable_image.h">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="debug_view.h">
+      <Filter>debug\headers</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
