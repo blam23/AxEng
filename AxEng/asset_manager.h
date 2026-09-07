@@ -31,6 +31,7 @@ namespace ax
 		
 		TAsset* load(const std::string& name, const TAsset::Descriptor& description);
 		TAsset* get(const std::string& name);
+		const TAsset* get(const std::string& name) const;
 		void for_each(std::function<void(const std::string& name, TAsset const*)> func);
 		void for_each_name(std::function<void(const std::string& name)> func);
 		void unload_all(Badge<Application>);
@@ -102,6 +103,16 @@ namespace ax
 	template<typename TAsset>
 		requires ValidAsset<TAsset>
 	TAsset* AssetManager<TAsset>::get(const std::string& name)
+	{
+		std::lock_guard lock{ m_loadMutex };
+
+		const auto& idx = m_store.find(name);
+		return idx != m_store.end() ? idx->second.second.get() : nullptr;
+	}
+
+	template<typename TAsset>
+		requires ValidAsset<TAsset>
+	const TAsset* AssetManager<TAsset>::get(const std::string& name) const
 	{
 		std::lock_guard lock{ m_loadMutex };
 

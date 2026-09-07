@@ -37,6 +37,13 @@ namespace ax
 		double delta;
 	};
 
+	// Before the render pass is setup
+	struct WindowPreRenderEvent
+	{
+		double delta;
+	};
+
+	// After the render pass is setup
 	struct WindowRenderEvent
 	{
 		double delta;
@@ -71,6 +78,12 @@ namespace ax
 			return m_updateEventHandler;
 		}
 
+		using PreRenderEventHandler = EventHandler<WindowPreRenderEvent>;
+		PreRenderEventHandler& get_pre_render_event_handler()
+		{
+			return m_preRenderEventHandler;
+		}
+
 		using RenderEventHandler = EventHandler<WindowRenderEvent>;
 		RenderEventHandler& get_render_event_handler()
 		{
@@ -93,6 +106,8 @@ namespace ax
 			m_clearColor = color;
 		}
 
+		void setup_bind_groups(const wgpu::TextureView& view);
+
 	private:
 		// Rendering
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
@@ -110,11 +125,14 @@ namespace ax
 
 		// Events
 		UpdateEventHandler m_updateEventHandler;
+		PreRenderEventHandler m_preRenderEventHandler;
 		RenderEventHandler m_renderEventHandler;
 		UIEventHandler m_uiEventHandler;
 
-		// WGPU / GLFW
+		// GLFW
 		GLFWwindow* m_window{ nullptr };
+
+		// WGPU
 		wgpu::Device m_device;
 		wgpu::Queue m_queue;
 		wgpu::Surface m_surface;
@@ -126,7 +144,9 @@ namespace ax
 		wgpu::ShaderModule m_shader;
 		wgpu::RenderPipeline m_pipeline;
 		wgpu::Buffer m_uniforms;
-		wgpu::BindGroup m_uniformGroup;
+		wgpu::BindGroup m_binds;
+		wgpu::Sampler m_nearestSampler;
+		wgpu::BindGroupLayout m_groupLayout;
 
 		const char* s_shader_source =
 		R"(

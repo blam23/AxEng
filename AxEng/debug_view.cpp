@@ -28,7 +28,7 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 					size_t n{ 0 };
 					app.textures().for_each_name
 					(
-						[&n, &app](const std::string& name) -> void
+						[&n, &app](const std::string& name)
 						{
 							if (ImGui::Selectable(name.c_str(), current == n))
 							{

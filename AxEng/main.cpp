@@ -64,7 +64,8 @@ int main(int argc, char* argv[])
 		double time{ 0.0 };
 		application.window()->get_update_event_handler().subscribe
 		(
-			[&application, &time](const ax::WindowUpdateEvent& e) {
+			[&application, &time](const ax::WindowUpdateEvent& e)
+			{
 				time += e.delta;
 				wgpu::Color clearColor{ std::sin(time), std::cos(time), 0.0, 1.0};
 				application.window()->set_clear_color(clearColor);
@@ -73,16 +74,36 @@ int main(int argc, char* argv[])
 			}
 		);
 
+		application.window()->get_pre_render_event_handler().subscribe
+		(
+			[&application](const ax::WindowPreRenderEvent& e)
+			{
+				static bool flip{ false };
+				static float tmr{ 1.0 };
+				tmr -= e.delta;
+
+				if (tmr < 0.0)
+				{
+					tmr = 1.0;
+					flip = !flip;
+				}
+
+				application.window()->setup_bind_groups(application.textures().get(flip ? "icon" : "tower")->view());
+			}
+		);
+
 		application.window()->get_render_event_handler().subscribe
 		(
-			[](const ax::WindowRenderEvent& e) {
-				e.pass.Draw(3, 1, 0, 0);
+			[](const ax::WindowRenderEvent& e)
+			{
+				e.pass.Draw(4, 1, 0, 0);
 			}
 		);
 
 		application.window()->get_ui_event_handler().subscribe
 		(
-			[](const ax::WindowUIEvent& e) {
+			[](const ax::WindowUIEvent& e)
+			{
 				ImGui::Begin("Random Stuff");
 				{
 					static float deltaTimes[512]{ 0 };

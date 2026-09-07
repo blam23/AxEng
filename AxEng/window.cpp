@@ -209,6 +209,20 @@ bool ax::Window::init_webgpu()
 	};
 	m_depthTextureView = m_depthTexture.CreateView(&depthTextureViewDesc);
 
+	//
+	// Setup Default Samplers
+	//
+	wgpu::SamplerDescriptor samplerDesc
+	{
+		.addressModeU = wgpu::AddressMode::ClampToEdge,
+		.addressModeV = wgpu::AddressMode::ClampToEdge,
+		.addressModeW = wgpu::AddressMode::ClampToEdge,
+		.magFilter = wgpu::FilterMode::Nearest,
+		.minFilter = wgpu::FilterMode::Nearest,
+		.mipmapFilter = wgpu::MipmapFilterMode::Nearest,
+	};
+	m_nearestSampler = m_device.CreateSampler(&samplerDesc);
+
 	init_pipeline();
 	return true;
 }
@@ -264,7 +278,7 @@ void ax::Window::init_pipeline()
 	pipelineDesc.vertex.constants = nullptr;
 
 	// Topology
-	pipelineDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+	pipelineDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleStrip;
 	pipelineDesc.primitive.stripIndexFormat = wgpu::IndexFormat::Undefined;
 	pipelineDesc.primitive.frontFace = wgpu::FrontFace::CCW;
 	pipelineDesc.primitive.cullMode = wgpu::CullMode::None;
@@ -300,45 +314,75 @@ void ax::Window::init_pipeline()
 	bufferDesc.label = "Uniforms";
 	m_uniforms = m_device.CreateBuffer(&bufferDesc);
 
-	wgpu::BindGroupEntry uniformBinding{};
-	uniformBinding.binding = 0;
-	uniformBinding.buffer = m_uniforms;
-	uniformBinding.offset = 0;
-	uniformBinding.size = bufferDesc.size;
-
+	//
 	// Layout
-	wgpu::BindGroupLayoutEntry uniformEntry{};
-	uniformEntry.binding = 0;
-	uniformEntry.visibility = wgpu::ShaderStage::Fragment;
-	uniformEntry.buffer.type = wgpu::BufferBindingType::Uniform;
-	uniformEntry.buffer.minBindingSize = bufferDesc.size;
+	//
 
-	wgpu::BindGroupLayoutDescriptor uniformLayoutDesc{};
-	uniformLayoutDesc.entryCount = 1;
-	uniformLayoutDesc.entries = &uniformEntry;
-	wgpu::BindGroupLayout uniformLayout{ m_device.CreateBindGroupLayout(&uniformLayoutDesc) };
+	auto bindGroupEntries{ std::vector<wgpu::BindGroupLayoutEntry>{ 3 } };
 
-	wgpu::BindGroupDescriptor uniformGroupDesc{};
-	uniformGroupDesc.layout = uniformLayout;
-	uniformGroupDesc.entryCount = 1;
-	uniformGroupDesc.entries = &uniformBinding;
-	m_uniformGroup = m_device.CreateBindGroup(&uniformGroupDesc);
+	// Uniforms
+	bindGroupEntries[0].binding = 0;
+	bindGroupEntries[0].visibility = wgpu::ShaderStage::Fragment;
+	bindGroupEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+	bindGroupEntries[0].buffer.minBindingSize = bufferDesc.size;
+	
+
+	// Texture
+	bindGroupEntries[1].binding = 1;
+	bindGroupEntries[1].visibility = wgpu::ShaderStage::Fragment;
+	bindGroupEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+	bindGroupEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+	
+	// Sampler
+	bindGroupEntries[2].binding = 2;
+	bindGroupEntries[2].visibility = wgpu::ShaderStage::Fragment;
+	bindGroupEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+
+	// Bind em all up
+	wgpu::BindGroupLayoutDescriptor layoutDesc{};
+	layoutDesc.entryCount = bindGroupEntries.size();
+	layoutDesc.entries = bindGroupEntries.data();
+	m_groupLayout = m_device.CreateBindGroupLayout(&layoutDesc);
 
 	wgpu::PipelineLayoutDescriptor pipelineLayoutDesc{};
 	pipelineLayoutDesc.bindGroupLayoutCount = 1;
-	pipelineLayoutDesc.bindGroupLayouts = &uniformLayout;
+	pipelineLayoutDesc.bindGroupLayouts = &m_groupLayout;
 	wgpu::PipelineLayout layout{ m_device.CreatePipelineLayout(&pipelineLayoutDesc) };
 
+	// Create the pipeline
 	pipelineDesc.layout = layout;
-
 	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+}
+
+void ax::Window::setup_bind_groups(const wgpu::TextureView& view)
+{
+	auto bindGroups{ std::vector<wgpu::BindGroupEntry>{ 3 } };
+
+	// Uniforms
+	bindGroups[0].binding = 0;
+	bindGroups[0].buffer = m_uniforms;
+	bindGroups[0].offset = 0;
+	bindGroups[0].size = m_uniforms.GetSize();
+
+	// Texture
+	bindGroups[1].binding = 1;
+	bindGroups[1].textureView = view;
+
+	// Sampler
+	bindGroups[2].binding = 2;
+	bindGroups[2].sampler = m_nearestSampler;
+
+	wgpu::BindGroupDescriptor bindGroupDesc{};
+	bindGroupDesc.layout = m_groupLayout;
+	bindGroupDesc.entryCount = bindGroups.size();
+	bindGroupDesc.entries = bindGroups.data();
+	m_binds = m_device.CreateBindGroup(&bindGroupDesc);
 }
 
 void ax::Window::handle_tick(double delta)
 {
 	// Update Uniforms
-	m_queue.WriteBuffer(m_uniforms, 0, &s_triColor, sizeof(float) * 3);
-
+	m_queue.WriteBuffer(m_uniforms, 0, &s_triColor, sizeof(float) * 4);
 	m_updateEventHandler.fire({ .delta = delta });
 }
 
@@ -373,6 +417,7 @@ void ax::Window::run_loop()
 	{
 		glfwPollEvents();
 
+
 		updateDelta = glfwGetTime() - updatePrev;
 		updatePrev = glfwGetTime();
 
@@ -383,6 +428,8 @@ void ax::Window::run_loop()
 
 void ax::Window::run_wgpu_render_pass(double delta)
 {
+	m_preRenderEventHandler.fire({ .delta = delta });
+
 	wgpu::SurfaceTexture surfaceTexture;
 	m_surface.GetCurrentTexture(&surfaceTexture);
 
@@ -471,10 +518,8 @@ void ax::Window::run_wgpu_render_pass(double delta)
 
 void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 {
-	// Set Bindings
-	pass.SetBindGroup(0, m_uniformGroup, 0, nullptr);
-
-	// Draw Triangles
+	// Setup pass
+	pass.SetBindGroup(0, m_binds, 0, nullptr);
 	pass.SetPipeline(m_pipeline);
 
 	// Send out the draw event
@@ -523,8 +568,7 @@ void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
 			//m_clearColor.g = clearColor.y;
 			//m_clearColor.b = clearColor.z;
 
-			ImGui::ColorEdit3("Triangle Color", (float*)&s_triColor);
-
+			ImGui::ColorEdit4("Triangle Color", (float*)&s_triColor);
 		}
 		ImGui::End();
 
