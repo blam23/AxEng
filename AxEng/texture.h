@@ -14,7 +14,7 @@ namespace ax
 	class Texture : public Asset
 	{
 	public:
-		DISABLE_COPY(Texture);
+		DISABLE_COPY_AND_MOVE(Texture);
 
 		using Descriptor = std::string;
 

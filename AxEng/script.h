@@ -12,7 +12,7 @@ namespace ax::lua
 	class Script : public Asset
 	{
 	public:
-		DISABLE_COPY(Script);
+		DISABLE_COPY_AND_MOVE(Script);
 		using Descriptor = std::string;
 
 	public:

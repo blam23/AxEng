@@ -8,7 +8,7 @@ namespace ax
 	class Asset
 	{
 	public:
-		DISABLE_COPY(Asset);
+		DISABLE_COPY_AND_MOVE(Asset);
 
 		virtual ~Asset() = default;
 
