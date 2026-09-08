@@ -79,7 +79,7 @@ int main(int argc, char* argv[])
 			[&application](const ax::WindowPreRenderEvent& e)
 			{
 				static bool flip{ false };
-				static float tmr{ 1.0 };
+				static double tmr{ 1.0 };
 				tmr -= e.delta;
 
 				if (tmr < 0.0)
