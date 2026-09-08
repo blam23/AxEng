@@ -34,9 +34,11 @@ namespace ax::lua
 	public:
 		ScriptManager(Badge<Application>, ResourceLoader& loader);
 		sol::environment create_env();
-		std::unique_ptr<Script> load_impl(Badge<AssetManager<Script, ScriptManager>>, const std::string& name, const Script::Descriptor& description);
 
 	private:
 		ax::lua::Manager m_lua;
+
+		std::unique_ptr<Script> load_impl(const std::string& name, const Script::Descriptor& description);
+		friend AssetManager<Script, ScriptManager>;
 	};
 }

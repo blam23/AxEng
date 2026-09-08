@@ -44,7 +44,7 @@ namespace ax
 
 		std::unique_ptr<TAsset> load_impl(const std::string& name, const TAsset::Descriptor& description)
 		{
-			return static_cast<TDerived&>(*this).load_impl(Badge<AssetManager<TAsset, TDerived>>{}, name, description);
+			return static_cast<TDerived&>(*this).load_impl(name, description);
 		}
 
 		std::map<std::string, AssetStore> m_store{};

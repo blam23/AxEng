@@ -40,9 +40,11 @@ namespace ax
 	public:
 		TextureManager(Badge<Application>, ResourceLoader& loader);
 		void set_device(wgpu::Device& device);
-		std::unique_ptr<Texture> load_impl(Badge<AssetManager<Texture, TextureManager>>, const std::string& name, const Texture::Descriptor& description);
 
 	private:
 		wgpu::Device* m_device;
+
+		std::unique_ptr<Texture> load_impl(const std::string& name, const Texture::Descriptor& description);
+		friend AssetManager<Texture, TextureManager>;
 	};
 }

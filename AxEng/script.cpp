@@ -42,7 +42,7 @@ sol::function_result ax::lua::Script::run_no_cache(sol::environment& env)
 	return {};
 }
 
-std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::load_impl(Badge<AssetManager<Script, ScriptManager>>, const std::string& name, const Script::Descriptor& description)
+std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::load_impl(const std::string& name, const Script::Descriptor& description)
 {
 	auto res{ Resource::load_as_text(m_loader, description) };
 
