@@ -147,12 +147,14 @@
     <ClCompile Include="asset.cpp" />
     <ClCompile Include="backends\imgui_impl_glfw.cpp" />
     <ClCompile Include="backends\imgui_impl_wgpu.cpp" />
+    <ClCompile Include="custom_type.cpp" />
     <ClCompile Include="debug_view.cpp" />
     <ClCompile Include="event.cpp" />
     <ClCompile Include="lua_bindings.cpp" />
     <ClCompile Include="lua_engine.cpp" />
     <ClCompile Include="lua_log_bindings.cpp" />
     <ClCompile Include="application.cpp" />
+    <ClCompile Include="lua_type_bindings.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="glfw3webgpu.c" />
     <ClCompile Include="resource_loader.cpp" />
@@ -167,6 +169,7 @@
     <ClInclude Include="asset_manager.h" />
     <ClInclude Include="backends\imgui_impl_glfw.h" />
     <ClInclude Include="backends\imgui_impl_wgpu.h" />
+    <ClInclude Include="custom_type.h" />
     <ClInclude Include="debug_view.h" />
     <ClInclude Include="event.h" />
     <ClInclude Include="forward.h" />

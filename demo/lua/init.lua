@@ -9,4 +9,3 @@ print = function(...)
     log.info(res)
 end
 
-print("Hello Init")

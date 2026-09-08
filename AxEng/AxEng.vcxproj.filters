@@ -85,6 +85,12 @@
     <ClCompile Include="debug_view.cpp">
       <Filter>debug</Filter>
     </ClCompile>
+    <ClCompile Include="custom_type.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="lua_type_bindings.cpp">
+      <Filter>core\lua\bindings</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -149,6 +155,9 @@
     </ClInclude>
     <ClInclude Include="debug_view.h">
       <Filter>debug\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="custom_type.h">
+      <Filter>core\headers</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

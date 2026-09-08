@@ -26,7 +26,7 @@ bool ax::Application::init_window(const sol::environment& env)
 		.width = window["width"],
 		.height = window["height"],
 		.title = window["title"],
-		.vsync = window["v-sync"],
+		.vsync = window["vsync"],
 	});
 
 	bool success{ true };
