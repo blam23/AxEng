@@ -19,4 +19,4 @@ static void setup_type_bindings(sol::state& env)
 	env["type_size"] = type_size_table;
 }
 
-static bool registered = ax::lua::bindings::register_binding(&setup_type_bindings);
+static bool registered = ax::lua::bindings::register_binding("type", &setup_type_bindings);

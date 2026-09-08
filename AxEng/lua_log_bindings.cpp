@@ -26,4 +26,4 @@ static void setup_log_bindings(sol::state& env)
 	env["log"] = log_table;
 }
 
-static bool registered = ax::lua::bindings::register_binding(&setup_log_bindings);
+static bool registered = ax::lua::bindings::register_binding("log", &setup_log_bindings);
