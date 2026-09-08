@@ -13,7 +13,7 @@ namespace ax::lua
 	class Manager
 	{
 	public:
-		Manager(IResourceLoader& loader);
+		Manager(ResourceLoader& loader);
 		sol::environment create_env();
 		sol::load_result load(const std::string& code, const std::string& file);
 

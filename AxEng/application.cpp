@@ -2,7 +2,12 @@
 
 ax::Application ax::Application::from_directory(std::string_view root)
 {
-	return { std::make_unique<DirectoryResourceLoader>(root) };
+	return { DirectoryResourceLoader{ root } };
+}
+
+ax::Application ax::Application::from_embedded(EmbeddedResourceLayout&& layout)
+{
+	return { std::move(layout) };
 }
 
 ax::Application::~Application()
@@ -85,9 +90,9 @@ bool ax::Application::try_load()
 	return m_loaded;
 }
 
-ax::Application::Application(std::unique_ptr<IResourceLoader> loader)
+ax::Application::Application(ResourceLoader&& loader)
 	: m_loader{ std::move(loader) }
-	, m_scripts{ {}, *m_loader }
-	, m_textures{ Badge<Application>{}, *m_loader }
+	, m_scripts{ {}, m_loader }
+	, m_textures{ Badge<Application>{}, m_loader }
 {
 }

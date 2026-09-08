@@ -3,6 +3,8 @@
 #include <string_view>
 #include <filesystem>
 #include <expected>
+#include <variant>
+#include <map>
 
 namespace ax
 {
@@ -15,33 +17,46 @@ namespace ax
 		CantOpen,
 	};
 
-	/// <summary>
-	/// For getting raw resource file data. No caching, etc. just loading.
-	/// This could be straight from a root directory, an archive, a url, a dream, etc.
-	/// </summary>
-	class IResourceLoader
+	class DirectoryResourceLoader
 	{
 	public:
-		virtual ~IResourceLoader() = default;
-		virtual std::expected<std::vector<uint8_t>, ResourceLoadError> load(ResourceID id) = 0;
-		std::expected<std::string, ResourceLoadError> load_as_text(ResourceID id);
-	private:
-	};
-
-	class DirectoryResourceLoader : public IResourceLoader
-	{
-	public:
-		virtual ~DirectoryResourceLoader() = default;
 		DirectoryResourceLoader(std::filesystem::path rootDirectory);
-		virtual std::expected<std::vector<uint8_t>, ResourceLoadError> load(ResourceID id) override;
+		std::expected<std::vector<uint8_t>, ResourceLoadError> load(ResourceID id) const;
 
 	private:
 		std::filesystem::path m_root;
 	};
 
-	template <typename T>
-	concept ValidLoader = requires
+	struct EmbeddedResource
 	{
-		std::derived_from<T, IResourceLoader>;
+		uint8_t* ptr;
+		size_t size;
+	};
+
+	using EmbeddedResourceLayout = std::map<ResourceID, EmbeddedResource>;
+
+	class EmbeddedResourceLoader
+	{
+	public:
+		EmbeddedResourceLoader(EmbeddedResourceLayout&& layout)
+			: m_layout{ std::move(layout) }
+		{
+
+		}
+		std::expected<std::vector<uint8_t>, ResourceLoadError> load(ResourceID id) const;
+	private:
+		EmbeddedResourceLayout m_layout;
+	};
+
+	using ResourceLoader = std::variant<
+		DirectoryResourceLoader,
+		EmbeddedResourceLoader
+	>;
+
+	class Resource
+	{
+	public:
+		static std::expected<std::vector<uint8_t>, ax::ResourceLoadError> load(const ResourceLoader& loader, ResourceID id);
+		static std::expected<std::string, ax::ResourceLoadError> load_as_text(const ResourceLoader& loader, ResourceID id);
 	};
 }

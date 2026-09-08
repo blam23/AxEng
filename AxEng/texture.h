@@ -38,7 +38,7 @@ namespace ax
 	class TextureManager : public AssetManager<Texture>
 	{
 	public:
-		TextureManager(Badge<Application>, IResourceLoader& loader);
+		TextureManager(Badge<Application>, ResourceLoader& loader);
 		virtual std::unique_ptr<Texture> inner_load(const std::string& name, const Texture::Descriptor& description) override;
 		void set_device(wgpu::Device& device);
 

@@ -78,7 +78,7 @@ ax::Texture::~Texture()
 		stbi_image_free(m_stbiPtr);
 }
 
-ax::TextureManager::TextureManager(Badge<Application> badge, IResourceLoader& loader)
+ax::TextureManager::TextureManager(Badge<Application> badge, ResourceLoader& loader)
 	: AssetManager<Texture>{ badge, loader }
 {
 }
@@ -91,7 +91,7 @@ std::unique_ptr<ax::Texture> ax::TextureManager::inner_load(const std::string& n
 		return nullptr;
 	}
 
-	auto res{ m_loader.load(description) };
+	auto res{ Resource::load(m_loader, description) };
 
 	if (res.has_value())
 		return std::make_unique<Texture>(Badge<TextureManager>{}, name, res.value(), *m_device);

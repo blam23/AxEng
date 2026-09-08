@@ -13,7 +13,7 @@ ax::DirectoryResourceLoader::DirectoryResourceLoader(std::filesystem::path rootD
 {
 }
 
-std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::DirectoryResourceLoader::load(ResourceID id)
+std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::DirectoryResourceLoader::load(ResourceID id) const
 {
 	LogTimer _timer{ id };
 
@@ -56,9 +56,34 @@ std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::DirectoryResource
 	return ret;
 }
 
-std::expected<std::string, ax::ResourceLoadError>  ax::IResourceLoader::load_as_text(ResourceID id)
+std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::EmbeddedResourceLoader::load(ResourceID id) const
 {
-	const auto ret{ load(id) };
+	std::vector<uint8_t> ret{};
+	const auto idx{ m_layout.find(id) };
+	if (idx != m_layout.end())
+	{
+		const auto entry{ idx->second };
+		ret.resize(entry.size);
+		memcpy_s(ret.data(), ret.size(), entry.ptr, entry.size);
+		return ret;
+	}
+
+	return std::unexpected{ ax::ResourceLoadError::NotFound };
+}
+
+std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::Resource::load(const ResourceLoader& loader, ResourceID id)
+{
+	const auto ret{ std::visit([&id](auto l) { return l.load(id); }, loader) };
+
+	if (ret.has_value())
+		return ret.value();
+	else
+		return std::unexpected{ ret.error() };
+}
+
+std::expected<std::string, ax::ResourceLoadError> ax::Resource::load_as_text(const ResourceLoader& loader, ResourceID id)
+{
+	const auto ret{ load(loader, id) };
 
 	if (ret.has_value())
 		return std::string{ ret.value().begin(), ret.value().end() };

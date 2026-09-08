@@ -32,7 +32,7 @@ namespace ax::lua
 	class ScriptManager : public AssetManager<Script>
 	{
 	public:
-		ScriptManager(Badge<Application>, IResourceLoader& loader);
+		ScriptManager(Badge<Application>, ResourceLoader& loader);
 
 		virtual std::unique_ptr<Script> inner_load(const std::string& name, const Script::Descriptor& description) override;
 

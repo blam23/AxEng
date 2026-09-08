@@ -22,7 +22,7 @@ namespace ax
 	class AssetManager
 	{
 	public:
-		AssetManager(Badge<Application>, IResourceLoader& loader)
+		AssetManager(Badge<Application>, ResourceLoader& loader)
 			: m_loader{ loader }
 		{
 		}
@@ -40,7 +40,7 @@ namespace ax
 		virtual std::unique_ptr<TAsset> inner_load(const std::string& name, const TAsset::Descriptor& description) = 0;
 		std::map<std::string, std::pair<typename TAsset::Descriptor, std::unique_ptr<TAsset>>> m_store{};
 		std::recursive_mutex m_loadMutex{};
-		IResourceLoader& m_loader;
+		ResourceLoader& m_loader;
 	};
 
 	template<typename TAsset>

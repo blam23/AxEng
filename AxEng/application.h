@@ -25,13 +25,14 @@ namespace ax
 		DISABLE_COPY_AND_MOVE(Application);
 
 		static Application from_directory(std::string_view root);
+		static Application from_embedded(EmbeddedResourceLayout&& layout);
 
 		~Application();
 
 		bool try_load();
 		
-		IResourceLoader& loader() noexcept { return *m_loader; }
-		const IResourceLoader& loader() const noexcept { return *m_loader; }
+		ResourceLoader& loader() noexcept { return m_loader; }
+		const ResourceLoader& loader() const noexcept { return m_loader; }
 
 		bool has_window() const noexcept { return m_window != nullptr; }
 		Window* window() noexcept { return m_window.get(); }
@@ -41,14 +42,14 @@ namespace ax
 		TextureManager& textures() noexcept { return m_textures; }
 
 	private:
-		Application(std::unique_ptr<IResourceLoader> loader);
+		Application(ResourceLoader&& loader);
 
 		bool init_window(const sol::environment& env);
 		void add_manifest_bindings(sol::environment& env);
 
 		std::unique_ptr<Window> m_window;
 
-		std::unique_ptr<IResourceLoader> m_loader;
+		ResourceLoader m_loader;
 		lua::ScriptManager m_scripts;
 		TextureManager m_textures;
 

@@ -2,12 +2,12 @@
 #include "lua_bindings.h"
 #include "log_timer.h"
 
-ax::lua::Manager::Manager(IResourceLoader& loader)
+ax::lua::Manager::Manager(ResourceLoader& loader)
 	: m_initScript{}
 {
 	LogTimer _timer{ "init lua" };
 
-	const auto initLoad{ loader.load_as_text("lua/init.lua") };
+	const auto initLoad{ Resource::load_as_text(loader, "lua/init.lua") };
 	if (initLoad.has_value())
 	{
 		m_initScript = initLoad.value();

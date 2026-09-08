@@ -44,7 +44,7 @@ sol::function_result ax::lua::Script::run_no_cache(sol::environment& env)
 
 std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::inner_load(const std::string& name, const Script::Descriptor& description)
 {
-	auto res{ m_loader.load_as_text(description) };
+	auto res{ Resource::load_as_text(m_loader, description) };
 
 	if (res.has_value())
 		return std::make_unique<ax::lua::Script>(Badge<ScriptManager>{}, m_lua, name, res.value());
@@ -52,7 +52,7 @@ std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::inner_load(const std::s
 		return nullptr;
 }
 
-ax::lua::ScriptManager::ScriptManager(Badge<Application> badge, IResourceLoader& loader)
+ax::lua::ScriptManager::ScriptManager(Badge<Application> badge, ResourceLoader& loader)
 	: m_lua{ loader }
 	, ax::AssetManager<Script>{ badge, loader }
 {
