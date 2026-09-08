@@ -15,6 +15,21 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 			if (!m_enabled)
 				return;
 
+			ImGui::BeginMainMenuBar();
+			{
+				ImGui::Text("AxEng");
+
+				if (ImGui::Button("Reload Pipeline"))
+				{
+					app.window()->reload_pipeline();
+				}
+
+				ImGuiIO& io = ImGui::GetIO();
+				ImGui::SameLine(ImGui::GetWindowWidth() - 425);
+				ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
+			}
+			ImGui::EndMainMenuBar();
+
 			ImGui::Begin("Texture View");
 			{
 				static Texture* texture{ nullptr };

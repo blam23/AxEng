@@ -8,5 +8,5 @@ ax::LogTimer::LogTimer(std::string_view message)
 
 ax::LogTimer::~LogTimer()
 {
-	spdlog::debug("{}: {}s", m_message, m_timer);
+	spdlog::debug("{}: {}ms", m_message, std::chrono::duration_cast<std::chrono::nanoseconds>(m_timer.elapsed()).count() / 1000000.0);
 }

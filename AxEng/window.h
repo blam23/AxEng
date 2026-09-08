@@ -18,6 +18,7 @@
 // AxEng
 #include "helpers.h"
 #include "event.h"
+#include "debug_view.h"
 
 namespace ax
 {
@@ -107,13 +108,13 @@ namespace ax
 		}
 
 		void setup_bind_groups(const wgpu::TextureView& view);
+		void reload_pipeline();
 
 	private:
 		// Rendering
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
 		void run_wgpu_render_pass(double delta);
-		void init_pipeline();
 
 		// Logic
 		void handle_tick(double delta);

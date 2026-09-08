@@ -10,7 +10,6 @@
 #include <iostream>
 #include <fstream>
 
-static ImVec4 s_triColor{ 0.30f, 0.30f, 0.30f, 1.00f };
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -223,13 +222,13 @@ bool ax::Window::init_webgpu()
 	};
 	m_nearestSampler = m_device.CreateSampler(&samplerDesc);
 
-	init_pipeline();
+	reload_pipeline();
 	return true;
 }
 
-void ax::Window::init_pipeline()
+void ax::Window::reload_pipeline()
 {
-	LogTimer _timer{ "pipeline setup" };
+	LogTimer _timer{ "pipeline load" };
 
 	// Load shader
 	std::string shaderCode;
@@ -352,6 +351,9 @@ void ax::Window::init_pipeline()
 	// Create the pipeline
 	pipelineDesc.layout = layout;
 	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+
+	static const float tintColour[4] = { 1.f, 1.f, 1.f, 1.f };
+	m_queue.WriteBuffer(m_uniforms, 0, tintColour, sizeof(float) * 4);
 }
 
 void ax::Window::setup_bind_groups(const wgpu::TextureView& view)
@@ -381,8 +383,6 @@ void ax::Window::setup_bind_groups(const wgpu::TextureView& view)
 
 void ax::Window::handle_tick(double delta)
 {
-	// Update Uniforms
-	m_queue.WriteBuffer(m_uniforms, 0, &s_triColor, sizeof(float) * 4);
 	m_updateEventHandler.fire({ .delta = delta });
 }
 
@@ -545,32 +545,6 @@ void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
 		//ImGui::DockSpaceOverViewport();
 
 		ImGui::PushFont(nullptr, 16.0f);
-
-		ImGui::BeginMainMenuBar();
-		{
-			ImGui::Text("AxEng");
-
-			if (ImGui::Button("Reload Pipeline"))
-			{
-				init_pipeline();
-			}
-
-			ImGuiIO& io = ImGui::GetIO();
-			ImGui::SameLine(ImGui::GetWindowWidth() - 425);
-			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
-		}
-		ImGui::EndMainMenuBar();
-
-		ImGui::Begin("Test Window");
-		{
-			//ImGui::ColorEdit3("Clear Color", (float*)&clearColor);
-			//m_clearColor.r = clearColor.x;
-			//m_clearColor.g = clearColor.y;
-			//m_clearColor.b = clearColor.z;
-
-			ImGui::ColorEdit4("Triangle Color", (float*)&s_triColor);
-		}
-		ImGui::End();
 
 		m_uiEventHandler.fire({ .delta = delta });
 
