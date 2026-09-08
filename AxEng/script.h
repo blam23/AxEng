@@ -16,7 +16,7 @@ namespace ax::lua
 		using Descriptor = std::string;
 
 	public:
-		Script(Badge<ScriptManager>,ax::lua::Manager& m_lua, const std::string& name, const std::string& code);
+		Script(Badge<ScriptManager>, ax::lua::Manager& m_lua, const std::string& name, const std::string& code);
 
 		sol::function_result run(sol::environment& env);
 		sol::function_result run_no_cache(sol::environment& env);
@@ -29,14 +29,12 @@ namespace ax::lua
 		ax::lua::Manager& m_lua;
 	};
 
-	class ScriptManager : public AssetManager<Script>
+	class ScriptManager : public AssetManager<Script, ScriptManager>
 	{
 	public:
 		ScriptManager(Badge<Application>, ResourceLoader& loader);
-
-		virtual std::unique_ptr<Script> inner_load(const std::string& name, const Script::Descriptor& description) override;
-
 		sol::environment create_env();
+		std::unique_ptr<Script> load_impl(Badge<AssetManager<Script, ScriptManager>>, const std::string& name, const Script::Descriptor& description);
 
 	private:
 		ax::lua::Manager m_lua;

@@ -79,11 +79,11 @@ ax::Texture::~Texture()
 }
 
 ax::TextureManager::TextureManager(Badge<Application> badge, ResourceLoader& loader)
-	: AssetManager<Texture>{ badge, loader }
+	: AssetManager<Texture, TextureManager>{ badge, loader }
 {
 }
 
-std::unique_ptr<ax::Texture> ax::TextureManager::inner_load(const std::string& name, const Texture::Descriptor& description)
+std::unique_ptr<ax::Texture> ax::TextureManager::load_impl(Badge<AssetManager<Texture, TextureManager>>, const std::string& name, const Texture::Descriptor& description)
 {
 	if (m_device == nullptr)
 	{

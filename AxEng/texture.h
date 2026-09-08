@@ -35,12 +35,12 @@ namespace ax
 		uint32_t m_height{ 0 };
 	};
 
-	class TextureManager : public AssetManager<Texture>
+	class TextureManager : public AssetManager<Texture, TextureManager>
 	{
 	public:
 		TextureManager(Badge<Application>, ResourceLoader& loader);
-		virtual std::unique_ptr<Texture> inner_load(const std::string& name, const Texture::Descriptor& description) override;
 		void set_device(wgpu::Device& device);
+		std::unique_ptr<Texture> load_impl(Badge<AssetManager<Texture, TextureManager>>, const std::string& name, const Texture::Descriptor& description);
 
 	private:
 		wgpu::Device* m_device;
