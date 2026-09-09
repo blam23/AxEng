@@ -1,13 +1,13 @@
 #include <windows.h>
 
-#include "forward.h"
-#include "application.h"
-#include "resource_loader.h"
-#include "log_timer.h"
-#include "lua_engine.h"
-#include "script.h"
-#include "window.h"
-#include "debug_view.h"
+#include "axenglib/forward.h"
+#include "axenglib/application.h"
+#include "axenglib/resource_loader.h"
+#include "axenglib/log_timer.h"
+#include "axenglib/lua_engine.h"
+#include "axenglib/script.h"
+#include "axenglib/window.h"
+#include "axenglib/debug_view.h"
 
 #include <numbers>
 

@@ -13,15 +13,19 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Source Files\main">
+      <UniqueIdentifier>{4a728fe7-5829-4cc8-8ccd-3e41f9127bfb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\core">
+      <UniqueIdentifier>{d2a89d1c-a77c-471e-b235-c7e8684fd195}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="main.cpp">
-      <Filter>Source Files</Filter>
+      <Filter>Source Files\main</Filter>
     </ClCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="argparse\argparse.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
+    <ClCompile Include="test_custom_type.cpp">
+      <Filter>Source Files\core</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

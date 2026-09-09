@@ -3,5 +3,7 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Project Path="AxEng/AxEng.vcxproj" Id="b62cf5a5-a301-4266-9f4e-999707f518b9" />
+  <Project Path="AxEng/AxEng.vcxproj" Id="6e563efd-10ed-4409-ab34-8b3a02dc4eed" />
+  <Project Path="Tests/Tests.vcxproj" Id="fae6cee8-6546-44c7-8891-a409e301e487" />
+  <Project Path="AxEngLib/AxEngLib.vcxproj" Id="b62cf5a5-a301-4266-9f4e-999707f518b9" />
 </Solution>

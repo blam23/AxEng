@@ -1,0 +1,153 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="core">
+      <UniqueIdentifier>{12f658e9-130a-4cfb-90bb-873de94b2503}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="core\headers">
+      <UniqueIdentifier>{85267c10-4283-49dc-a20d-164ae6844dc0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="exterrnal">
+      <UniqueIdentifier>{6ac13698-6744-49e3-a65f-1585e4f26c0c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="exterrnal\headers">
+      <UniqueIdentifier>{c081c647-16e6-46d2-a791-b9a5559a054b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="core\asset_loaders">
+      <UniqueIdentifier>{6a368dfa-7e07-4064-962e-20e5994ec3da}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="core\lua">
+      <UniqueIdentifier>{71c9e9aa-7305-4aed-9794-189bff5f844d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="core\lua\headers">
+      <UniqueIdentifier>{1379cf0f-bb26-454d-99fb-fcd84918215c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="core\lua\bindings">
+      <UniqueIdentifier>{37f249af-47d8-4a43-805c-c8d41704bb4d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="debug">
+      <UniqueIdentifier>{0361b4e9-7361-42ad-914f-69cb2c084b00}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="debug\headers">
+      <UniqueIdentifier>{f2233ab2-2af3-4748-8002-1e67ccb8157f}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="application.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="resource_loader.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="window.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="log_timer.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="event.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="glfw3webgpu.c">
+      <Filter>exterrnal</Filter>
+    </ClCompile>
+    <ClCompile Include="backends\imgui_impl_glfw.cpp">
+      <Filter>exterrnal</Filter>
+    </ClCompile>
+    <ClCompile Include="backends\imgui_impl_wgpu.cpp">
+      <Filter>exterrnal</Filter>
+    </ClCompile>
+    <ClCompile Include="asset.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="script.cpp">
+      <Filter>core\lua</Filter>
+    </ClCompile>
+    <ClCompile Include="lua_engine.cpp">
+      <Filter>core\lua</Filter>
+    </ClCompile>
+    <ClCompile Include="lua_bindings.cpp">
+      <Filter>core\lua</Filter>
+    </ClCompile>
+    <ClCompile Include="lua_log_bindings.cpp">
+      <Filter>core\lua\bindings</Filter>
+    </ClCompile>
+    <ClCompile Include="texture.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="debug_view.cpp">
+      <Filter>debug</Filter>
+    </ClCompile>
+    <ClCompile Include="custom_type.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="lua_type_bindings.cpp">
+      <Filter>core\lua\bindings</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="event.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="helpers.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="application.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="window.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="resource_loader.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="log_timer.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="glfw3webgpu.h">
+      <Filter>exterrnal</Filter>
+    </ClInclude>
+    <ClInclude Include="stb_image.h">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="backends\imgui_impl_glfw.h">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="backends\imgui_impl_wgpu.h">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="imgui_style.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="asset_manager.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="asset.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_engine.h">
+      <Filter>core\lua\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="script.h">
+      <Filter>core\lua\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_bindings.h">
+      <Filter>core\lua\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="forward.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="texture.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="imgui_zoomable_image.h">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="debug_view.h">
+      <Filter>debug\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="custom_type.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>

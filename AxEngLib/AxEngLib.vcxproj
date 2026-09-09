@@ -21,33 +21,32 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{6e563efd-10ed-4409-ab34-8b3a02dc4eed}</ProjectGuid>
-    <RootNamespace>AxEngLib</RootNamespace>
+    <ProjectGuid>{b62cf5a5-a301-4266-9f4e-999707f518b9}</ProjectGuid>
+    <RootNamespace>AxEng</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
-    <ProjectName>AxEngMain</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
-    <ConfigurationType>Application</ConfigurationType>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
     <PlatformToolset>v145</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -73,13 +72,12 @@
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)AxEng;$(SolutionDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <TreatWarningAsError>true</TreatWarningAsError>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
     </ClCompile>
     <Link>
@@ -92,15 +90,14 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)AxEng;$(SolutionDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <TreatWarningAsError>true</TreatWarningAsError>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
     </ClCompile>
     <Link>
@@ -113,14 +110,14 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;IMGUI_IMPL_WEBGPU_BACKEND_DAWN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)AxEng;$(SolutionDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -132,15 +129,15 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <WarningLevel>Level3</WarningLevel>
+      <WarningLevel>Level4</WarningLevel>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;IMGUI_IMPL_WEBGPU_BACKEND_DAWN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp23</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)AxEng;$(SolutionDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <TreatWarningAsError>true</TreatWarningAsError>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
     </ClCompile>
     <Link>
@@ -152,15 +149,46 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="main.cpp" />
+    <ClCompile Include="asset.cpp" />
+    <ClCompile Include="backends\imgui_impl_glfw.cpp" />
+    <ClCompile Include="backends\imgui_impl_wgpu.cpp" />
+    <ClCompile Include="custom_type.cpp" />
+    <ClCompile Include="debug_view.cpp" />
+    <ClCompile Include="event.cpp" />
+    <ClCompile Include="lua_bindings.cpp" />
+    <ClCompile Include="lua_engine.cpp" />
+    <ClCompile Include="lua_log_bindings.cpp" />
+    <ClCompile Include="application.cpp" />
+    <ClCompile Include="lua_type_bindings.cpp" />
+    <ClCompile Include="glfw3webgpu.c" />
+    <ClCompile Include="resource_loader.cpp" />
+    <ClCompile Include="script.cpp" />
+    <ClCompile Include="log_timer.cpp" />
+    <ClCompile Include="texture.cpp" />
+    <ClCompile Include="window.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\AxEngLib\AxEngLib.vcxproj">
-      <Project>{b62cf5a5-a301-4266-9f4e-999707f518b9}</Project>
-    </ProjectReference>
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="argparse\argparse.hpp" />
+    <ClInclude Include="asset.h" />
+    <ClInclude Include="asset_manager.h" />
+    <ClInclude Include="backends\imgui_impl_glfw.h" />
+    <ClInclude Include="backends\imgui_impl_wgpu.h" />
+    <ClInclude Include="custom_type.h" />
+    <ClInclude Include="debug_view.h" />
+    <ClInclude Include="event.h" />
+    <ClInclude Include="forward.h" />
+    <ClInclude Include="imgui_zoomable_image.h" />
+    <ClInclude Include="lua_bindings.h" />
+    <ClInclude Include="lua_engine.h" />
+    <ClInclude Include="application.h" />
+    <ClInclude Include="glfw3webgpu.h" />
+    <ClInclude Include="helpers.h" />
+    <ClInclude Include="imgui_style.h" />
+    <ClInclude Include="resource_loader.h" />
+    <ClInclude Include="script.h" />
+    <ClInclude Include="log_timer.h" />
+    <ClInclude Include="stb_image.h" />
+    <ClInclude Include="texture.h" />
+    <ClInclude Include="window.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
