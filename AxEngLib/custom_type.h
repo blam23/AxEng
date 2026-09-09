@@ -64,7 +64,7 @@ namespace ax::type
 				const auto offset{ idx * m_pool.m_types.overall_size };
 
 				assert(sizeof(T) == itr->second.size);
-				assert(offset + itr->second.start + itr->second.size < m_data_size);
+				assert(offset + itr->second.start + itr->second.size <= m_data_size);
 
 				return reinterpret_cast<T*>(m_data_start + offset + itr->second.start);
 			}
