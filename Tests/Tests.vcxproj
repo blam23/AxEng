@@ -147,6 +147,8 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="test_custom_type.cpp" />
+    <ClCompile Include="test_event.cpp" />
+    <ClCompile Include="test_resource_loader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\AxEngLib\AxEngLib.vcxproj">

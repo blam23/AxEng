@@ -27,5 +27,11 @@
     <ClCompile Include="test_custom_type.cpp">
       <Filter>Source Files\core</Filter>
     </ClCompile>
+    <ClCompile Include="test_resource_loader.cpp">
+      <Filter>Source Files\core</Filter>
+    </ClCompile>
+    <ClCompile Include="test_event.cpp">
+      <Filter>Source Files\core</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>
