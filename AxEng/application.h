@@ -12,6 +12,7 @@
 #include "window.h"
 #include "resource_loader.h"
 #include "log_timer.h"
+#include "custom_type.h"
 
 // GFX
 #include <webgpu/webgpu_cpp.h>
@@ -52,6 +53,7 @@ namespace ax
 		ResourceLoader m_loader;
 		lua::ScriptManager m_scripts;
 		TextureManager m_textures;
+		type::TypeGenerator m_typeGen{};
 
 		std::string m_name{};
 		lua::Script* m_entryPoint{};

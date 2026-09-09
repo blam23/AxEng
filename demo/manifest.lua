@@ -17,10 +17,10 @@ app.textures = {
 }
 
 app.types = {
-    entity = {
+    entity = type.define({
         pos = type.vec2,
         scale = type.vec2,
         rot = type.float,
         texture = type.id,
-    },
+    }),
 }

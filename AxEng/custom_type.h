@@ -17,7 +17,7 @@ namespace ax::type
 		FIELD("int32",      t_int32,       int32_t,       4) \
 		FIELD("vec2",       t_vec2,        glm::vec2,     5) \
 		FIELD("string",     t_string,      std::string,   6) \
-		FIELD("id",         t_resourceID,  std::string,   7)
+		FIELD("id",         t_resourceID,  uint32_t,      7)
 
 	#define FIELD(name, type, cpp_type, value) type = value,
 	enum class FieldType
@@ -26,38 +26,74 @@ namespace ax::type
 	};
 	#undef FIELD
 
+	struct FieldDef
+	{
+		size_t start;
+		size_t size;
+	};
+
+	struct TypeDef
+	{
+		size_t overall_size;
+		std::map<std::string, FieldDef> field_map;
+	};
+
+	class PoolView;
+	class Pool
+	{
+	public:
+		Pool(const TypeDef& def, size_t objectCount);
+
+	private:
+		std::vector<uint8_t> m_data;
+		TypeDef m_types;
+		friend PoolView;
+	};
+
+	class PoolView
+	{
+	public:
+		PoolView(Pool& pool);
+
+		template <typename T>
+		T* get_field(size_t idx, const std::string& name)
+		{
+			const auto& itr{ m_pool.m_types.field_map.find(name) };
+			if (itr != m_pool.m_types.field_map.end())
+			{
+				const auto offset{ idx * m_pool.m_types.overall_size };
+
+				assert(sizeof(T) == itr->second.size);
+				assert(offset + itr->second.start + itr->second.size < m_data_size);
+
+				return reinterpret_cast<T*>(m_data_start + offset + itr->second.start);
+			}
+
+			return nullptr;
+		}
+
+	private:
+		uint8_t* m_data_start;
+		size_t m_data_size;
+		Pool& m_pool;
+	};
+
 	class TypeGenerator
 	{
 	public:
 		DISABLE_COPY_AND_MOVE(TypeGenerator);
 
-		static void ForEachType(std::function<void(const std::string&, FieldType, size_t)> func)
-		{
-			for (const auto& [name, fieldType] : s_field_name_to_type)
-			{
-				auto sizeIt{ s_field_type_sizes.find(fieldType) };
-				if (sizeIt != s_field_type_sizes.end())
-				{
-					func(name, fieldType, sizeIt->second);
-				}
-				else
-				{
-					spdlog::error("Failed to find size for type: {}", name);
-				}
-			}
-		}
+		TypeGenerator() = default;
 
-		static std::string GetTypeName(FieldType type)
-		{
-			for (const auto& [name, fieldType] : s_field_name_to_type)
-			{
-				if (fieldType == type)
-					return name;
-			}
-			return std::string{};
-		}
+		static void for_each_type(std::function<void(const std::string&, FieldType, size_t)> func);
+		static size_t get_size(FieldType t);
+
+		void register_type(const std::string& name, const TypeDef& def);
+		Pool create_pool(const std::string& name, size_t count);
 
 	private:
+		std::map<std::string, TypeDef> m_types;
+
 		#define FIELD(name, type, cpp_type, value) {FieldType::##type, sizeof(cpp_type) },
 		inline static std::map<FieldType, size_t> s_field_type_sizes
 		{

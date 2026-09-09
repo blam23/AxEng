@@ -86,6 +86,17 @@ bool ax::Application::try_load()
 	for (const auto& entry : textures)
 		m_textures.load(entry.first.as<std::string>(), entry.second.as<std::string>());
 
+	const sol::table& types{ app["types"].get<sol::table>() };
+	for (const auto& entry : types)
+		m_typeGen.register_type(entry.first.as<std::string>(), entry.second.as<ax::type::TypeDef>());
+
+	auto pool{ m_typeGen.create_pool("entity", 30) };
+	type::PoolView view{ pool };
+	auto pos{ view.get_field<glm::vec2>(0, "pos") };
+
+	pos->x = 100.5f;
+	pos->y = 150.0f;
+
 	m_loaded = true;
 	return m_loaded;
 }
