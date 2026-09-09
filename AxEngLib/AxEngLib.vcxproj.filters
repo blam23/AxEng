@@ -84,6 +84,12 @@
     <ClCompile Include="lua_type_bindings.cpp">
       <Filter>core\lua\bindings</Filter>
     </ClCompile>
+    <ClCompile Include="bind_all.cpp">
+      <Filter>core\lua\bindings</Filter>
+    </ClCompile>
+    <ClCompile Include="axeng.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -147,6 +153,18 @@
       <Filter>debug\headers</Filter>
     </ClInclude>
     <ClInclude Include="custom_type.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_log_bindings.h">
+      <Filter>core\lua\bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_type_bindings.h">
+      <Filter>core\lua\bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="bind_all.h">
+      <Filter>core\lua\bindings</Filter>
+    </ClInclude>
+    <ClInclude Include="axeng.h">
       <Filter>core\headers</Filter>
     </ClInclude>
   </ItemGroup>

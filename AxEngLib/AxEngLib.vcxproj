@@ -150,8 +150,10 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="asset.cpp" />
+    <ClCompile Include="axeng.cpp" />
     <ClCompile Include="backends\imgui_impl_glfw.cpp" />
     <ClCompile Include="backends\imgui_impl_wgpu.cpp" />
+    <ClCompile Include="bind_all.cpp" />
     <ClCompile Include="custom_type.cpp" />
     <ClCompile Include="debug_view.cpp" />
     <ClCompile Include="event.cpp" />
@@ -170,8 +172,10 @@
   <ItemGroup>
     <ClInclude Include="asset.h" />
     <ClInclude Include="asset_manager.h" />
+    <ClInclude Include="axeng.h" />
     <ClInclude Include="backends\imgui_impl_glfw.h" />
     <ClInclude Include="backends\imgui_impl_wgpu.h" />
+    <ClInclude Include="bind_all.h" />
     <ClInclude Include="custom_type.h" />
     <ClInclude Include="debug_view.h" />
     <ClInclude Include="event.h" />
@@ -183,6 +187,8 @@
     <ClInclude Include="glfw3webgpu.h" />
     <ClInclude Include="helpers.h" />
     <ClInclude Include="imgui_style.h" />
+    <ClInclude Include="lua_log_bindings.h" />
+    <ClInclude Include="lua_type_bindings.h" />
     <ClInclude Include="resource_loader.h" />
     <ClInclude Include="script.h" />
     <ClInclude Include="log_timer.h" />

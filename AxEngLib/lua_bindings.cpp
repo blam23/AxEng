@@ -2,18 +2,16 @@
 #include "spdlog/spdlog.h"
 #include <vector>
 
-std::vector<std::function<void(sol::state&)>> binds{};
-
 bool ax::lua::bindings::register_binding(std::string_view name, std::function<void(sol::state&)> func)
 {
-	binds.push_back(func);
-	spdlog::info("Registered lua binding '{}', count: {}", name, binds.size());
+	s_binds.push_back(func);
+	spdlog::info("Registered lua binding '{}', count: {}", name, s_binds.size());
 	return true;
 }
 
 void ax::lua::bindings::setup_all(sol::state& state)
 {
-	spdlog::info("Setting up all lua bindings, count: {}", binds.size());
-	for (const auto& bind : binds)
+	spdlog::info("Setting up all lua bindings, count: {}", s_binds.size());
+	for (const auto& bind : s_binds)
 		bind(state);
 }

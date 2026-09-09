@@ -1,19 +1,12 @@
 #include <windows.h>
 
-#include "axenglib/forward.h"
-#include "axenglib/application.h"
-#include "axenglib/resource_loader.h"
-#include "axenglib/log_timer.h"
-#include "axenglib/lua_engine.h"
-#include "axenglib/script.h"
-#include "axenglib/window.h"
+#include "axenglib/axeng.h"
 #include "axenglib/debug_view.h"
 
-#include <numbers>
-
+#include "argparse/argparse.hpp"
 #include <imgui.h>
 
-#include "argparse/argparse.hpp"
+#include <numbers>
 
 int main(int argc, char* argv[])
 {
@@ -49,7 +42,7 @@ int main(int argc, char* argv[])
 		return 1;
 	}
 
-	ax::setup_glfw();
+	ax::init();
 	{
 		//
 		// Setup module
@@ -121,6 +114,5 @@ int main(int argc, char* argv[])
 		// Run main loop
 		application.window()->run_loop();
 	}
-
-	ax::teardown_glfw();
+	ax::teardown();
 }

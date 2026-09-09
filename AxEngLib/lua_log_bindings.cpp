@@ -1,7 +1,6 @@
-#include "lua_bindings.h"
-#include "spdlog/spdlog.h"
+#include "lua_log_bindings.h"
 
-static void setup_log_bindings(sol::state& env)
+void ax::setup_log_bindings(sol::state& env)
 {
 	auto log_table = env.create_table();
 
@@ -25,5 +24,3 @@ static void setup_log_bindings(sol::state& env)
 
 	env["log"] = log_table;
 }
-
-static bool registered = ax::lua::bindings::register_binding("log", &setup_log_bindings);
