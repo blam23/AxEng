@@ -1,6 +1,6 @@
 #pragma once
 
-#include <vector>
+#include <map>
 #include <functional>
 #include <mutex>
 
@@ -19,22 +19,29 @@ namespace ax
 		EventHandler<T_EVENT>() = default;
 		~EventHandler<T_EVENT>() = default;
 
-		T_FUNC& subscribe(T_FUNC&& handler)
+		const size_t subscribe(T_FUNC&& handler)
 		{
 			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
-			m_subscriptions.emplace_back(handler);
-			return m_subscriptions[m_subscriptions.size() - 1];
+			m_subscriptions.emplace(m_nextIdx, handler);
+			return m_nextIdx++;
+		}
+
+		const void unsubscribe(size_t id)
+		{
+			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
+			m_subscriptions.erase(id);
 		}
 		
 		void fire(T_EVENT&& eventData)
 		{
 			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
 			for (auto& handler : m_subscriptions)
-				handler(eventData);
+				handler.second(eventData);
 		}
 
 	private:
-		std::vector<T_FUNC> m_subscriptions{};
+		std::map<size_t, T_FUNC> m_subscriptions{};
 		std::mutex m_subscriptionMutex{};
+		std::size_t m_nextIdx;
 	};
 };
