@@ -66,7 +66,12 @@ int main(int argc, char* argv[])
 	//
 
 	if (verbose)
+	{
 		spdlog::set_level(spdlog::level::trace);
+
+		for(int i = 0; i < argc; i++)
+			spdlog::trace("Argument: {}", argv[i]);
+	}
 
 	if (clean and (run and not compile))
 	{
