@@ -403,7 +403,7 @@ bool ax::Window::init_imgui()
 	ImGui_ImplWGPU_Init(&info);
 
 	ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-	ImGui::GetIO().Fonts->AddFontDefaultVector();
+	//ImGui::GetIO().Fonts->AddFontDefaultVector();
 	ax::setup_imgui_style();
 
 	return true;
@@ -544,11 +544,11 @@ void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
 	{
 		//ImGui::DockSpaceOverViewport();
 
-		ImGui::PushFont(nullptr, 16.0f);
+		//ImGui::PushFont(nullptr, 16.0f);
 
 		m_uiEventHandler.fire({ .delta = delta });
 
-		ImGui::PopFont();
+		//ImGui::PopFont();
 	}
 	ImGui::EndFrame();
 	ImGui::Render();
