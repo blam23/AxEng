@@ -5,13 +5,13 @@
 bool ax::lua::bindings::register_binding(std::string_view name, std::function<void(sol::state&)> func)
 {
 	s_binds.push_back(func);
-	spdlog::debug("Registered lua binding '{}', count: {}", name, s_binds.size());
+	spdlog::debug("<Lua> Registered lua binding '{}', count: {}", name, s_binds.size());
 	return true;
 }
 
 void ax::lua::bindings::setup_all(sol::state& state)
 {
-	spdlog::debug("Setting up all lua bindings, count: {}", s_binds.size());
+	spdlog::debug("<Lua> Setting up all lua bindings, count: {}", s_binds.size());
 	for (const auto& bind : s_binds)
 		bind(state);
 }

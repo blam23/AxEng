@@ -19,7 +19,7 @@ size_t ax::type::TypeGenerator::get_size(FieldType t)
 
 void ax::type::TypeGenerator::register_type(const std::string& name, const TypeDef& def)
 {
-	spdlog::info("Registering type: {}, size: {} bytes", name, def.overall_size);
+	spdlog::info("<Type> Registering type: {}, size: {} bytes", name, def.overall_size);
 	m_types.emplace(name, def);
 }
 

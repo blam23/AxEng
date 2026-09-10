@@ -64,7 +64,7 @@ static ax::Error validate_project(std::string_view inDir, sol::state& compiler, 
 		return ax::Error::InvalidConfiguration;
 	}
 
-	spdlog::info("Validated project.");
+	spdlog::info("<Build> Validated project.");
 	return ax::Error::Success;
 }
 
@@ -91,7 +91,7 @@ static ax::Error setup_directory(std::string_view inDir, std::string_view outDir
 		}
 	}
 
-	spdlog::info("Setup output directory.");
+	spdlog::info("<Build> Setup output directory.");
 	return ax::Error::Success;
 }
 
@@ -132,13 +132,13 @@ static ax::Error validate_lua_files(std::string_view inDir, std::string_view out
 			return ax::Error::Lua;
 		}
 
-		spdlog::info("Validated & Copied: '{}' -> '{}'", path.string(), newFile.string());
+		spdlog::debug("<Build> Validated & Copied: '{}' -> '{}'", path.string(), newFile.string());
 
 		built_script_table[kvp.first] = substr + "c";
 	}
 
 	env["built_scripts"] = built_script_table;
-
+	spdlog::info("<Build> Validated scripts.");
 	return ax::Error::Success;
 }
 
@@ -178,13 +178,13 @@ static ax::Error validate_texture_files(std::string_view inDir, std::string_view
 			return ax::Error::InvalidTexture;
 		}
 
-		spdlog::info("Validated & Copied: '{}' -> '{}'", path.string(), newFile.string());
+		spdlog::debug("<Build> Validated & Copied: '{}' -> '{}'", path.string(), newFile.string());
 
 		out_texture_table[kvp.first] = substr;
 	}
 
 	env["out_textures"] = out_texture_table;
-
+	spdlog::info("<Build> Validated textures.");
 	return ax::Error::Success;
 }
 
@@ -203,7 +203,7 @@ static ax::Error create_manifest(std::string_view outDir, sol::environment& env)
 		return ax::Error::Lua;
 	}
 
-	spdlog::info("Generated Manifest.");
+	spdlog::info("<Build> Generated Manifest.");
 	return ax::Error::Success;
 }
 
@@ -225,7 +225,7 @@ ax::Error ax::comp::clean(std::string_view outDir)
 			return ret;
 		}
 
-		spdlog::info("Cleaned old output directory.");
+		spdlog::info("<Build> Cleaned old output directory.");
 	}
 
 	std::filesystem::create_directory(outDir, ioErr);
@@ -236,7 +236,7 @@ ax::Error ax::comp::clean(std::string_view outDir)
 		return ret;
 	}
 
-	spdlog::info("Created output directory.");
+	spdlog::info("<Build> Created output directory.");
 	return ret;
 }
 
@@ -269,6 +269,6 @@ ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir)
 	AX_RETURN_ERROR_IF_FAIL(ret, create_manifest(outDir, env));
 
 
-	spdlog::info("Compiled project to: {}", outDir);
+	spdlog::info("<Build> Built project '{}' to '{}'.", env["project"]["name"].get<std::string>(), outDir);
 	return ret;
 }

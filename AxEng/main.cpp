@@ -19,7 +19,7 @@ int main(int argc, char* argv[])
 	std::string inDirectory;
 	program.add_argument("-i", "--in")
 		.store_into(inDirectory)
-		.help("Specifies the directory to use for the given operation.");
+		.help("Specifies the directory to use for the given operation");
 
 	std::string outDirectory;
 	program.add_argument("-o", "--out")
@@ -30,25 +30,31 @@ int main(int argc, char* argv[])
 	program.add_argument("-c", "--comp")
 		.store_into(compile)
 		.flag()
-		.help("Compiles given application.");
+		.help("Compiles given application");
 
 	bool clean{ false };
 	program.add_argument("-x", "--clean")
 		.store_into(clean)
 		.flag()
-		.help("Deletes the existing output directory.");
+		.help("Deletes the existing output directory");
 
 	bool run{ false };
 	program.add_argument("-r", "--run")
 		.store_into(run)
 		.flag()
-		.help("Runs given application.");
+		.help("Runs given application");
 
 	bool verbose{ false };
 	program.add_argument("-v", "--verbose")
 		.store_into(verbose)
 		.flag()
-		.help("Raises log level to highest possible.");
+		.help("Raises log level to highest possible");
+
+	bool timers{ false };
+	program.add_argument("-t", "--timers")
+		.store_into(timers)
+		.flag()
+		.help("Enables logging of various timers");
 
 	try
 	{
@@ -70,8 +76,11 @@ int main(int argc, char* argv[])
 		spdlog::set_level(spdlog::level::trace);
 
 		for(int i = 0; i < argc; i++)
-			spdlog::trace("Argument: {}", argv[i]);
+			spdlog::trace("<Main> Argument: {}", argv[i]);
 	}
+
+	if (timers)
+		ax::enable_log_timers();
 
 	if (clean and (run and not compile))
 	{

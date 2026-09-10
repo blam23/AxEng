@@ -14,6 +14,8 @@ void ax::teardown()
 
 ax::Error ax::run_from_directory(std::string_view rootDirectory)
 {
+	spdlog::info("<Ax> Running from directory: '{}'", rootDirectory);
+
 	ax::init();
 	{
 		//

@@ -16,4 +16,6 @@ namespace ax
 		std::string_view m_message;
 		spdlog::stopwatch m_timer;
 	};
+
+	void enable_log_timers();
 }
