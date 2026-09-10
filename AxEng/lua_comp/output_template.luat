@@ -1,0 +1,25 @@
+-- Generated manifest
+-- template v0.1
+
+app = {
+    name = "%%NAME%%",
+    entry_point = "%%EP%%",
+    window = {
+        width = %%WINDOW_WIDTH%%,
+        height = %%WINDOW_HEIGHT%%,
+        title = "%%NAME%%",
+        vsync = %%WINDOW_VSYNC%%,
+    },
+}
+
+app.scripts = {
+%%SCRIPTS%%
+}
+
+app.textures = {
+%%TEXTURES%%
+}
+
+app.custom_types = {
+%%TYPES%%
+}

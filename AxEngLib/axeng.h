@@ -8,9 +8,12 @@
 #include "bind_all.h"
 #include "script.h"
 #include "window.h"
+#include "error.h"
 
 namespace ax
 {
 	void init();
 	void teardown();
+
+	ax::Error run_from_directory(std::string_view rootDirectory);
 }

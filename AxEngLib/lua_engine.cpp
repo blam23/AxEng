@@ -7,7 +7,7 @@ ax::lua::Manager::Manager(ResourceLoader& loader)
 {
 	LogTimer _timer{ "init lua" };
 
-	const auto initLoad{ Resource::load_as_text(loader, "lua/init.lua") };
+	const auto initLoad{ Resource::load_as_text(loader, "scripts/init.luac") };
 	if (initLoad.has_value())
 	{
 		m_initScript = initLoad.value();
@@ -45,5 +45,5 @@ sol::environment ax::lua::Manager::create_env()
 
 sol::load_result ax::lua::Manager::load(const std::string& code, const std::string& file)
 {
-	return m_state.load(code, file);
+	return m_state.load(code, file, sol::load_mode::any);
 }

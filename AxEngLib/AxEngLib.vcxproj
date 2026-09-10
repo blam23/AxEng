@@ -154,8 +154,10 @@
     <ClCompile Include="backends\imgui_impl_glfw.cpp" />
     <ClCompile Include="backends\imgui_impl_wgpu.cpp" />
     <ClCompile Include="bind_all.cpp" />
+    <ClCompile Include="compiler.cpp" />
     <ClCompile Include="custom_type.cpp" />
     <ClCompile Include="debug_view.cpp" />
+    <ClCompile Include="error.cpp" />
     <ClCompile Include="event.cpp" />
     <ClCompile Include="lua_bindings.cpp" />
     <ClCompile Include="lua_engine.cpp" />
@@ -176,8 +178,11 @@
     <ClInclude Include="backends\imgui_impl_glfw.h" />
     <ClInclude Include="backends\imgui_impl_wgpu.h" />
     <ClInclude Include="bind_all.h" />
+    <ClInclude Include="compiler.h" />
     <ClInclude Include="custom_type.h" />
     <ClInclude Include="debug_view.h" />
+    <ClInclude Include="error.h" />
+    <ClInclude Include="error_def.h" />
     <ClInclude Include="event.h" />
     <ClInclude Include="forward.h" />
     <ClInclude Include="imgui_zoomable_image.h" />

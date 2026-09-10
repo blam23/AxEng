@@ -31,6 +31,12 @@
     <Filter Include="debug\headers">
       <UniqueIdentifier>{f2233ab2-2af3-4748-8002-1e67ccb8157f}</UniqueIdentifier>
     </Filter>
+    <Filter Include="comp">
+      <UniqueIdentifier>{5b0089a0-36a1-4d34-a6fe-c776a19e9bf5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="comp\headers">
+      <UniqueIdentifier>{6e1ae60a-efdb-4c20-85df-4e0b223c33ef}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="application.cpp">
@@ -88,6 +94,12 @@
       <Filter>core\lua\bindings</Filter>
     </ClCompile>
     <ClCompile Include="axeng.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="compiler.cpp">
+      <Filter>comp</Filter>
+    </ClCompile>
+    <ClCompile Include="error.cpp">
       <Filter>core</Filter>
     </ClCompile>
   </ItemGroup>
@@ -165,6 +177,15 @@
       <Filter>core\lua\bindings</Filter>
     </ClInclude>
     <ClInclude Include="axeng.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="error.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="compiler.h">
+      <Filter>comp\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="error_def.h">
       <Filter>core\headers</Filter>
     </ClInclude>
   </ItemGroup>

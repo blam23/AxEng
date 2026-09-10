@@ -1,35 +1,54 @@
 #include <windows.h>
 
 #include "axenglib/axeng.h"
+#include "axenglib/compiler.h"
 #include "axenglib/debug_view.h"
 
 #include "argparse/argparse.hpp"
-#include <imgui.h>
 
-#include <numbers>
+#define RET(x) std::to_underlying(x)
 
 int main(int argc, char* argv[])
 {
-#ifdef _DEBUG
-	spdlog::set_level(spdlog::level::debug);
-#endif
-
 	//
 	// Parse Args
 	//
 
 	argparse::ArgumentParser program("AxEng");
 
-	std::string rootDirectory;
-	program.add_argument("-r", "--root")
-		.store_into(rootDirectory)
-		.required()
-		.help("Loads an application from the given root directory");
+	std::string inDirectory;
+	program.add_argument("-i", "--in")
+		.store_into(inDirectory)
+		.help("Specifies the directory to use for the given operation.");
 
-	//std::string zipPath;
-	//program.add_argument("-z", "--zip")
-	//	.store_into(zipPath)
-	//	.help("Loads an application from the given zip file");
+	std::string outDirectory;
+	program.add_argument("-o", "--out")
+		.store_into(outDirectory)
+		.help("Where to store any results for the given operation");
+
+	bool compile{ false };
+	program.add_argument("-c", "--comp")
+		.store_into(compile)
+		.flag()
+		.help("Compiles given application.");
+
+	bool clean{ false };
+	program.add_argument("-x", "--clean")
+		.store_into(clean)
+		.flag()
+		.help("Deletes the existing output directory.");
+
+	bool run{ false };
+	program.add_argument("-r", "--run")
+		.store_into(run)
+		.flag()
+		.help("Runs given application.");
+
+	bool verbose{ false };
+	program.add_argument("-v", "--verbose")
+		.store_into(run)
+		.flag()
+		.help("Raises log level to highest possible.");
 
 	try
 	{
@@ -39,80 +58,74 @@ int main(int argc, char* argv[])
 	{
 		spdlog::error("Failed to parse arguments: {}", err.what());
 		spdlog::error("{}", program.help().str());
-		return 1;
+		return RET(ax::Error::InvalidConfiguration);
 	}
 
-	ax::init();
+	//
+	// Validate Args
+	//
+
+	if (verbose)
+		spdlog::set_level(spdlog::level::trace);
+
+	if (clean and (run and not compile))
 	{
-		//
-		// Setup module
-		//
-		auto application{ ax::Application::from_directory(rootDirectory) };
-		auto loaded{ application.try_load() };
-
-		if (!loaded)
-			return 2;
-
-		// Setup event handlers
-		double time{ 0.0 };
-		application.window()->get_update_event_handler().subscribe
-		(
-			[&application, &time](const ax::WindowUpdateEvent& e)
-			{
-				time += e.delta;
-				wgpu::Color clearColor{ std::sin(time), std::cos(time), 0.0, 1.0};
-				application.window()->set_clear_color(clearColor);
-
-				//script->run(env);
-			}
-		);
-
-		application.window()->get_pre_render_event_handler().subscribe
-		(
-			[&application](const ax::WindowPreRenderEvent& e)
-			{
-				static bool flip{ false };
-				static double tmr{ 1.0 };
-				tmr -= e.delta;
-
-				if (tmr < 0.0)
-				{
-					tmr = 1.0;
-					flip = !flip;
-				}
-
-				application.window()->setup_bind_groups(application.textures().get(flip ? "icon" : "tower")->view());
-			}
-		);
-
-		application.window()->get_render_event_handler().subscribe
-		(
-			[](const ax::WindowRenderEvent& e)
-			{
-				e.pass.Draw(4, 1, 0, 0);
-			}
-		);
-
-		application.window()->get_ui_event_handler().subscribe
-		(
-			[](const ax::WindowUIEvent& e)
-			{
-				ImGui::Begin("Random Stuff");
-				{
-					static float deltaTimes[512]{ 0 };
-					static std::size_t deltaPtr = 0;
-					deltaTimes[deltaPtr++] = (float)e.delta * 1000.0f;
-					deltaPtr %= 512;
-					ImGui::PlotHistogram("Delta Times (ms)", deltaTimes, 512);
-				}
-				ImGui::End();
-			}
-		);
-
-		ax::debug::View::register_debug_view(application);
-
-		// Run main loop
-		application.window()->run_loop();
+		spdlog::error("Cannot clean and run when not compiling.");
+		spdlog::error("{}", program.help().str());
+		return RET(ax::Error::InvalidConfiguration);
 	}
-	ax::teardown();
+	if (inDirectory == "" and (compile or run))
+	{
+		spdlog::error("In directory required for given operation.");
+		spdlog::error("{}", program.help().str());
+		return RET(ax::Error::InvalidConfiguration);
+	}
+	if (outDirectory == "" and (compile or clean))
+	{
+		spdlog::error("Output directory required for given operation.");
+		spdlog::error("{}", program.help().str());
+		return RET(ax::Error::InvalidConfiguration);
+	}
+
+	//
+	// Run Given Operation
+	//
+
+	bool doneSomething{ false };
+
+	if (clean)
+	{
+		doneSomething = true;
+
+		const auto err{ ax::comp::clean(outDirectory) };
+		if (err != ax::Error::Success)
+			return RET(err);
+	}
+
+	if (compile)
+	{
+		doneSomething = true;
+
+		const auto err{ ax::comp::compile(inDirectory, outDirectory) };
+		if (err != ax::Error::Success)
+			return RET(err);
+	}
+
+	if (run)
+	{
+		doneSomething = true;
+
+		const auto err{ ax::run_from_directory(compile ? outDirectory : inDirectory) };
+		if (err != ax::Error::Success)
+			return RET(err);
+	}
+
+	if (!doneSomething)
+	{
+		spdlog::error("Please specify an operation to perform.");
+		spdlog::error("{}", program.help().str());
+		return RET(ax::Error::InvalidConfiguration);
+	}
+
+	return RET(ax::Error::Success);
 }

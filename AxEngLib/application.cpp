@@ -48,14 +48,14 @@ bool ax::Application::try_load()
 {
 	LogTimer _timer{ "Application Load" };
 
-	ax::lua::Script* manifest{ m_scripts.load("!manifest", "manifest.lua") };
+	ax::lua::Script* manifest{ m_scripts.load("!manifest", "manifest.luac") };
 	auto env{ m_scripts.create_env() };
 
 	add_manifest_bindings(env);
 
-	if (!manifest)
+	if (!manifest) 
 	{
-		spdlog::error("Failed to load manifest.lua");
+		spdlog::error("Failed to load manifest");
 		return false;
 	}
 
@@ -64,21 +64,12 @@ bool ax::Application::try_load()
 	if (!res.valid())
 	{
 		const sol::error msg = res;
-		spdlog::error("Failed to parse manifest.lua: {}", msg.what());
+		spdlog::error("Failed to parse manifest: {}", msg.what());
 		return false;
 	}
 
 	const auto& app{ env["app"] };
 	m_name = app["name"];
-
-	std::string entryPointScript = app["entry_point"];
-	m_entryPoint = m_scripts.load("!entry", entryPointScript);
-
-	if (!m_entryPoint)
-	{
-		spdlog::error("Failed to load entry point script: '{}'", entryPointScript);
-		return false;
-	}
 
 	init_window(env);
 
@@ -86,16 +77,22 @@ bool ax::Application::try_load()
 	for (const auto& entry : textures)
 		m_textures.load(entry.first.as<std::string>(), entry.second.as<std::string>());
 
-	const sol::table& types{ app["types"].get<sol::table>() };
-	for (const auto& entry : types)
-		m_typeGen.register_type(entry.first.as<std::string>(), entry.second.as<ax::type::TypeDef>());
+	const sol::table& scripts{ app["scripts"].get<sol::table>() };
+	for (const auto& entry : scripts)
+		m_scripts.load(entry.first.as<std::string>(), entry.second.as<std::string>());
 
-	auto pool{ m_typeGen.create_pool("entity", 30) };
-	type::PoolView view{ pool };
-	auto pos{ view.get_field<glm::vec2>(0, "pos") };
+	//const sol::table& types{ app["types"].get<sol::table>() };
+	//for (const auto& entry : types)
+	//	m_typeGen.register_type(entry.first.as<std::string>(), entry.second.as<ax::type::TypeDef>());
 
-	pos->x = 100.5f;
-	pos->y = 150.0f;
+	std::string entryPointScript = app["entry_point"];
+	m_entryPoint = m_scripts.get(entryPointScript);
+
+	if (!m_entryPoint)
+	{
+		spdlog::error("Failed to load entry point script: '{}'", entryPointScript);
+		return false;
+	}
 
 	m_loaded = true;
 	return m_loaded;
