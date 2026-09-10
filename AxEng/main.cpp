@@ -46,7 +46,7 @@ int main(int argc, char* argv[])
 
 	bool verbose{ false };
 	program.add_argument("-v", "--verbose")
-		.store_into(run)
+		.store_into(verbose)
 		.flag()
 		.help("Raises log level to highest possible.");
 
