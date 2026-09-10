@@ -3,14 +3,16 @@
 #include "lua_engine.h"
 #include "bind_all.h"
 #include "lua_bindings.h"
+#include "log_timer.h"
 
-#include "spdlog/spdlog.h"
 #include <filesystem>
 #include <fstream>
 #include <ranges>
 
 static ax::Error setup_lua_compiler(sol::state& compiler, sol::environment& env)
 {
+	ax::LogTimer tmr{ "setup lua compiler" };
+
 	sol::load_result load_res{ compiler.load_file("lua_comp/main.lua", sol::load_mode::text)};
 	if (!load_res.valid())
 	{
@@ -35,6 +37,8 @@ static ax::Error setup_lua_compiler(sol::state& compiler, sol::environment& env)
 
 static ax::Error validate_project(std::string_view inDir, sol::state& compiler, sol::environment& env)
 {
+	ax::LogTimer tmr{ "validate project file" };
+
 	sol::function validate{ env["validate_project_file"] };
 	sol::set_environment(env, validate);
 
@@ -66,6 +70,8 @@ static ax::Error validate_project(std::string_view inDir, sol::state& compiler, 
 
 static ax::Error setup_directory(std::string_view inDir, std::string_view outDir)
 {
+	ax::LogTimer tmr{ "setup output directory" };
+
 	std::filesystem::path in{ inDir };
 	std::filesystem::path out{ outDir };
 
@@ -91,6 +97,8 @@ static ax::Error setup_directory(std::string_view inDir, std::string_view outDir
 
 static ax::Error validate_lua_files(std::string_view inDir, std::string_view outDir, sol::environment& env)
 {
+	ax::LogTimer tmr{ "validate scripts" };
+
 	std::filesystem::path in{ inDir };
 	std::filesystem::path out{ outDir };
 	std::filesystem::path newExt{ ".luac" };
@@ -136,6 +144,8 @@ static ax::Error validate_lua_files(std::string_view inDir, std::string_view out
 
 static ax::Error validate_texture_files(std::string_view inDir, std::string_view outDir, sol::environment& env)
 {
+	ax::LogTimer tmr{ "validate textures" };
+
 	std::filesystem::path in{ inDir };
 	std::filesystem::path out{ outDir };
 
@@ -180,6 +190,8 @@ static ax::Error validate_texture_files(std::string_view inDir, std::string_view
 
 static ax::Error create_manifest(std::string_view outDir, sol::environment& env)
 {
+	ax::LogTimer tmr{ "create manifest" };
+
 	sol::function createManifest{ env["create_manifest"] };
 	sol::set_environment(env, createManifest);
 
@@ -197,6 +209,8 @@ static ax::Error create_manifest(std::string_view outDir, sol::environment& env)
 
 ax::Error ax::comp::clean(std::string_view outDir)
 {
+	LogTimer tmr{ "clean output dir" };
+
 	ax::Error ret{ ax::Error::Success };
 	std::error_code ioErr;
 
@@ -228,6 +242,8 @@ ax::Error ax::comp::clean(std::string_view outDir)
 
 ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir)
 {
+	LogTimer tmr{ "compilation" };
+
 	ax::Error ret{ ax::Error::Success };
 
 	sol::state compiler;
