@@ -240,7 +240,7 @@ ax::Error ax::comp::clean(std::string_view outDir)
 	return ret;
 }
 
-ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir)
+ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir, bool zipItUp)
 {
 	LogTimer tmr{ "compilation" };
 
@@ -271,5 +271,41 @@ ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir)
 	ax::lua::bindings::cleanup_state(compiler);
 
 	spdlog::info("<Build> Built project '{}' to '{}'.", env["project"]["name"].get<std::string>(), outDir);
+
+	if (zipItUp)
+	{
+		try
+		{
+			std::filesystem::path outPath{ outDir };
+			std::filesystem::path zipPath = outPath;
+			zipPath += ".zip";
+
+			std::string pathPattern = outPath.string();
+			if (pathPattern.back() == '/' || pathPattern.back() == '\\')
+				pathPattern += "*";
+			else
+				pathPattern += "\\*";
+
+			std::string cmd = "powershell -NoProfile -Command \"Compress-Archive -Path '"
+				+ pathPattern + "' -DestinationPath '" + zipPath.string() + "' -Force\"";
+
+			int rc = std::system(cmd.c_str());
+			if (rc != 0)
+			{
+				spdlog::error("Failed to create zip '{}', exit code: {}", zipPath.string(), rc);
+				ret = ax::Error::IO;
+			}
+			else
+			{
+				spdlog::info("<Build> Packaged output to '{}'.", zipPath.string());
+			}
+		}
+		catch (const std::exception& ex)
+		{
+			spdlog::error("Exception while creating zip: {}", ex.what());
+			ret = ax::Error::IO;
+		}
+	}
+
 	return ret;
 }

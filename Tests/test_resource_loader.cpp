@@ -5,6 +5,7 @@
 #include <fstream>
 
 using namespace ax;
+namespace fs = std::filesystem;
 
 TEST(EmbeddedResourceLoaderTests, LoadExistingResource_ReturnsExpectedData)
 {
@@ -53,8 +54,8 @@ TEST(EmbeddedResourceLoaderTests, LoadEmptyResource_ReturnsEmptyVector)
 
 TEST(DirectoryResourceLoaderTests, LoadFile_ReturnsContents)
 {
-    const auto tmp = std::filesystem::temp_directory_path() / "axeng_test_dir_loadfile";
-    std::filesystem::create_directories(tmp);
+    const auto tmp = fs::temp_directory_path() / "axeng_test_dir_loadfile";
+    fs::create_directories(tmp);
 
     const auto filename = "test.bin";
     const auto filepath = tmp / filename;
@@ -73,13 +74,13 @@ TEST(DirectoryResourceLoaderTests, LoadFile_ReturnsContents)
     EXPECT_EQ(vec, expected);
 
     std::error_code ec;
-    std::filesystem::remove_all(tmp, ec);
+    fs::remove_all(tmp, ec);
 }
 
 TEST(DirectoryResourceLoaderTests, LoadMissingFile_ReturnsNotFound)
 {
-    const auto tmp = std::filesystem::temp_directory_path() / "axeng_test_dir_missing";
-    std::filesystem::create_directories(tmp);
+    const auto tmp = fs::temp_directory_path() / "axeng_test_dir_missing";
+    fs::create_directories(tmp);
 
     DirectoryResourceLoader loader(tmp);
     const auto res = loader.load("no_such_file.bin");
@@ -87,18 +88,18 @@ TEST(DirectoryResourceLoaderTests, LoadMissingFile_ReturnsNotFound)
     EXPECT_EQ(res.error(), ResourceLoadError::NotFound);
 
     std::error_code ec;
-    std::filesystem::remove_all(tmp, ec);
+    fs::remove_all(tmp, ec);
     EXPECT_EQ(0, ec.value()) << "Failed to cleanup test!";
 }
 
 TEST(DirectoryResourceLoaderTests, LoadDirectoryAsFile_ReturnsCantOpen)
 {
-    const auto tmp = std::filesystem::temp_directory_path() / "axeng_test_dir_isdir";
-    std::filesystem::create_directories(tmp);
+    const auto tmp = fs::temp_directory_path() / "axeng_test_dir_isdir";
+    fs::create_directories(tmp);
 
     // Create a subdirectory and attempt to load it as if it were a file.
     const auto subdir = tmp / "subdir";
-    std::filesystem::create_directories(subdir);
+    fs::create_directories(subdir);
 
     DirectoryResourceLoader loader(tmp);
     const auto res = loader.load("subdir");
@@ -108,7 +109,7 @@ TEST(DirectoryResourceLoaderTests, LoadDirectoryAsFile_ReturnsCantOpen)
     EXPECT_EQ(res.error(), ResourceLoadError::CantOpen);
 
     std::error_code ec;
-    std::filesystem::remove_all(tmp, ec);
+    fs::remove_all(tmp, ec);
     EXPECT_EQ(0, ec.value()) << "Failed to cleanup test!";
 }
 
@@ -131,8 +132,8 @@ TEST(ResourceTests, LoadAndLoadAsText_WithEmbeddedLoader)
 
 TEST(ResourceTests, LoadWithDirectoryLoader_ViaResourceVariant)
 {
-    const auto tmp = std::filesystem::temp_directory_path() / "axeng_test_dir_variant";
-    std::filesystem::create_directories(tmp);
+    const auto tmp = fs::temp_directory_path() / "axeng_test_dir_variant";
+    fs::create_directories(tmp);
 
     const auto filename = "hello.txt";
     const auto filepath = tmp / filename;
@@ -142,8 +143,7 @@ TEST(ResourceTests, LoadWithDirectoryLoader_ViaResourceVariant)
         out << content;
     }
 
-    DirectoryResourceLoader dirLoader(tmp);
-    ResourceLoader loader = dirLoader;
+    ResourceLoader loader = DirectoryResourceLoader{ tmp };
 
     const auto bytes = Resource::load(loader, filename);
     ASSERT_TRUE(bytes.has_value());
@@ -154,6 +154,125 @@ TEST(ResourceTests, LoadWithDirectoryLoader_ViaResourceVariant)
     EXPECT_EQ(text.value(), content);
 
     std::error_code ec;
-    std::filesystem::remove_all(tmp, ec);
+    fs::remove_all(tmp, ec);
     EXPECT_EQ(0, ec.value()) << "Failed to cleanup test!";
+}
+
+
+TEST(EmbeddedResourceLoaderTest, LoadReturnsData)
+{
+    static uint8_t data[] = { 0x01, 0x02, 0x03, 0x04 };
+    EmbeddedResourceLayout layout;
+    // key is a string literal so the string_view remains valid
+    layout.emplace("res.bin", EmbeddedResource{ data, sizeof(data) });
+
+    EmbeddedResourceLoader loader(std::move(layout));
+    auto ret = loader.load("res.bin");
+
+    ASSERT_TRUE(ret.has_value());
+    std::vector<uint8_t> expected(std::begin(data), std::end(data));
+    EXPECT_EQ(ret.value(), expected);
+}
+
+TEST(EmbeddedResourceLoaderTest, LoadNotFound)
+{
+    EmbeddedResourceLayout layout;
+    static uint8_t data[] = { 0xFF };
+    layout.emplace("present.bin", EmbeddedResource{ data, sizeof(data) });
+
+    EmbeddedResourceLoader loader(std::move(layout));
+    auto ret = loader.load("missing.bin");
+
+    EXPECT_FALSE(ret.has_value());
+    EXPECT_EQ(ret.error(), ResourceLoadError::NotFound);
+}
+
+TEST(ResourceTest, LoadAsTextWithEmbedded)
+{
+    const std::string text = "embedded text";
+    static uint8_t buf[] = { 'e','m','b','e','d','d','e','d',' ','t','e','x','t' };
+    EmbeddedResourceLayout layout;
+    layout.emplace("foo.txt", EmbeddedResource{ buf, sizeof(buf) });
+
+    ResourceLoader loader = EmbeddedResourceLoader(std::move(layout));
+    auto ret = Resource::load_as_text(loader, "foo.txt");
+
+    ASSERT_TRUE(ret.has_value());
+    EXPECT_EQ(ret.value(), text);
+}
+
+TEST(ResourceTest, LoadNotFoundDirectoryThroughResource)
+{
+    const fs::path tempDir = fs::temp_directory_path() / "AxEng_ResourceLoaderTests_NotFound";
+    fs::create_directories(tempDir);
+    ResourceLoader loader = DirectoryResourceLoader{ tempDir };
+
+    auto ret = Resource::load(loader, "does_not_exist.bin");
+    EXPECT_FALSE(ret.has_value());
+    EXPECT_EQ(ret.error(), ResourceLoadError::NotFound);
+
+    std::error_code ec;
+    fs::remove_all(tempDir, ec);
+    EXPECT_EQ(0, ec.value()) << "Failed to cleanup test!";
+}
+
+TEST(ZipResourceLoaderTest, SetupFailsWhenFileMissing)
+{
+    const fs::path missingZip = fs::temp_directory_path() / "AxEng_ZipTests_nonexistent.zip";
+    // Ensure it does not exist
+    std::error_code ec;
+    fs::remove(missingZip, ec);
+
+    ZipResourceLoader loader(missingZip);
+    auto setupErr = loader.setup();
+
+    ASSERT_TRUE(setupErr.has_value());
+    EXPECT_EQ(setupErr.value(), ResourceLoadError::NotFound);
+}
+
+TEST(ZipResourceLoaderTest, SetupLoadAndCleanupSucceeds)
+{
+    const fs::path baseDir = fs::temp_directory_path() / "AxEng_ZipTests";
+    const fs::path filePath = baseDir / "data.txt";
+    const fs::path zipPath = baseDir / "archive.zip";
+
+    std::error_code ec;
+    fs::create_directories(baseDir, ec);
+    ASSERT_FALSE(ec) << "Failed to create temp dir: " << ec.message();
+
+    const std::string contents = "Hello from zip!";
+    {
+        std::ofstream ofs(filePath, std::ios::binary);
+        ASSERT_TRUE(ofs.is_open());
+        ofs.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+    }
+
+    std::string cmd = "powershell -NoProfile -Command \"Compress-Archive -LiteralPath '"
+        + filePath.string() + "' -DestinationPath '" + zipPath.string() + "' -Force\"";
+
+    const int rc = std::system(cmd.c_str());
+    ASSERT_EQ(rc, 0) << "Compress-Archive command failed with code: " << rc;
+    ASSERT_TRUE(fs::exists(zipPath)) << "Zip file was not created";
+
+    ZipResourceLoader loader(zipPath);
+    auto setupErr = loader.setup();
+    ASSERT_FALSE(setupErr.has_value()) << "setup() returned error";
+
+    auto data = loader.load("data.txt");
+    ASSERT_TRUE(data.has_value());
+    std::string loaded(data->begin(), data->end());
+    EXPECT_EQ(loaded, contents);
+
+    auto cleanupErr = loader.cleanup();
+    EXPECT_FALSE(cleanupErr.has_value()) << "cleanup() returned error";
+
+    fs::remove(zipPath, ec);
+    EXPECT_EQ(0, ec.value()) << "Failed to cleanup test!";
+
+    fs::remove(filePath, ec);
+    EXPECT_EQ(0, ec.value()) << "Failed to cleanup test!";
+
+    fs::remove(baseDir, ec);
+    EXPECT_EQ(0, ec.value()) << "Failed to cleanup test!";
+
 }

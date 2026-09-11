@@ -2,10 +2,15 @@
 #include "lua_bindings.h"
 #include "log_timer.h"
 
-ax::lua::Manager::Manager(ResourceLoader& loader)
-	: m_initScript{}
+ax::lua::Manager::~Manager()
 {
-	LogTimer _timer{ "init lua" };
+	if (m_loaded)
+		bindings::cleanup_state(m_state);
+}
+
+ax::Error ax::lua::Manager::setup(const ResourceLoader& loader)
+{
+	LogTimer _timer{ "setup lua" };
 
 	const auto initLoad{ Resource::load_as_text(loader, "scripts/init.luac") };
 	if (initLoad.has_value())
@@ -15,7 +20,7 @@ ax::lua::Manager::Manager(ResourceLoader& loader)
 	else
 	{
 		spdlog::error("Failed to load init script: ResourceLoadError::{}", (int)initLoad.error());
-		return;
+		return ax::Error::IO;
 	}
 
 	m_state.open_libraries
@@ -35,12 +40,19 @@ ax::lua::Manager::Manager(ResourceLoader& loader)
 	{
 		sol::error err = res;
 		spdlog::error("Failed to run init script {}", err.what());
+		return ax::Error::Lua;
 	}
+
+	m_loaded = true;
+	return ax::Error::Success;
 }
 
-ax::lua::Manager::~Manager()
+ax::Error ax::lua::Manager::cleanup()
 {
+	m_loaded = false;
 	bindings::cleanup_state(m_state);
+
+	return ax::Error::Success;
 }
 
 sol::environment ax::lua::Manager::create_env()

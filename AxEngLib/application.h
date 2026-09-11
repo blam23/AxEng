@@ -27,11 +27,12 @@ namespace ax
 
 		static Application from_directory(std::string_view root);
 		static Application from_embedded(EmbeddedResourceLayout&& layout);
+		static Application from_zip(std::string_view zipFile);
 
 		~Application();
 
 		bool try_load();
-		void unload();
+		void cleanup();
 		
 		ResourceLoader& loader() noexcept { return m_loader; }
 		const ResourceLoader& loader() const noexcept { return m_loader; }

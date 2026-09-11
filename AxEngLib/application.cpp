@@ -10,6 +10,11 @@ ax::Application ax::Application::from_embedded(EmbeddedResourceLayout&& layout)
 	return { std::move(layout) };
 }
 
+ax::Application ax::Application::from_zip(std::string_view zipFile)
+{
+	return { ZipResourceLoader{ zipFile } };
+}
+
 bool ax::Application::init_window(const sol::environment& env)
 {
 	LogTimer _timer{ "wgpu initial setup" };
@@ -42,6 +47,9 @@ void ax::Application::add_manifest_bindings(sol::environment&)
 bool ax::Application::try_load()
 {
 	LogTimer _timer{ "Application Load" };
+
+	ax::Resource::setup_loader(m_loader);
+	m_scripts.setup({});
 
 	ax::lua::Script* manifest{ m_scripts.load("!manifest", "manifest.luac") };
 	auto env{ m_scripts.create_env() };
@@ -100,18 +108,20 @@ bool ax::Application::try_load()
 	return m_loaded;
 }
 
-void ax::Application::unload()
+void ax::Application::cleanup()
 {
-	m_scripts.unload_all({});
+	m_scripts.cleanup({});
 
 	if (m_window)
 		m_window = nullptr;
+
+	ax::Resource::cleanup_loader(m_loader);
 }
 
 ax::Application::~Application()
 {
 	if (m_loaded)
-		unload();
+		cleanup();
 }
 
 ax::Application::Application(ResourceLoader&& loader)

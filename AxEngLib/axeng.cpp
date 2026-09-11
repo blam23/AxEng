@@ -24,7 +24,7 @@ ax::Error ax::run(Application&& app)
 		ax::debug::View::register_debug_view(app);
 
 		app.window()->run_loop();
-		app.unload();
+		app.cleanup();
 	}
 	ax::teardown();
 
@@ -35,4 +35,10 @@ ax::Error ax::run_from_directory(std::string_view rootDirectory)
 {
 	spdlog::info("<Ax> Running from directory: '{}'", rootDirectory);
 	return run(ax::Application::from_directory(rootDirectory));
+}
+
+ax::Error ax::run_from_zip(std::string_view zip)
+{
+	spdlog::info("<Ax> Running from zip: '{}'", zip);
+	return run(ax::Application::from_zip(zip));
 }

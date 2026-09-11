@@ -53,7 +53,7 @@ std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::load_impl(const std::st
 }
 
 ax::lua::ScriptManager::ScriptManager(Badge<Application> badge, ResourceLoader& loader)
-	: m_lua{ loader }
+	: m_lua{}
 	, ax::AssetManager<Script, ScriptManager>{ badge, loader }
 {
 }
@@ -61,4 +61,15 @@ ax::lua::ScriptManager::ScriptManager(Badge<Application> badge, ResourceLoader& 
 sol::environment ax::lua::ScriptManager::create_env()
 {
 	return m_lua.create_env();
+}
+
+ax::Error ax::lua::ScriptManager::setup(Badge<Application>)
+{
+	return m_lua.setup(m_loader);
+}
+
+ax::Error ax::lua::ScriptManager::cleanup(Badge<Application> b)
+{
+	unload_all(b);
+	return m_lua.cleanup();
 }

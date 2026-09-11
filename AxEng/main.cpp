@@ -19,7 +19,7 @@ int main(int argc, char* argv[])
 	std::string inDirectory;
 	program.add_argument("-i", "--in")
 		.store_into(inDirectory)
-		.help("Specifies the directory to use for the given operation");
+		.help("Specifies the directory/zip to use for the given operation");
 
 	std::string outDirectory;
 	program.add_argument("-o", "--out")
@@ -36,7 +36,7 @@ int main(int argc, char* argv[])
 	program.add_argument("-x", "--clean")
 		.store_into(clean)
 		.flag()
-		.help("Deletes the existing output directory");
+		.help("Deletes the existing output directory/zip");
 
 	bool run{ false };
 	program.add_argument("-r", "--run")
@@ -55,6 +55,12 @@ int main(int argc, char* argv[])
 		.store_into(timers)
 		.flag()
 		.help("Enables logging of various timers");
+
+	bool useZipFiles{ false };
+	program.add_argument("-z", "--zip")
+		.store_into(useZipFiles)
+		.flag()
+		.help("Compiles to / loads from a ZIP file instead of directory");
 
 	try
 	{
@@ -120,7 +126,7 @@ int main(int argc, char* argv[])
 	{
 		doneSomething = true;
 
-		const auto err{ ax::comp::compile(inDirectory, outDirectory) };
+		const auto err{ ax::comp::compile(inDirectory, outDirectory, useZipFiles) };
 		if (err != ax::Error::Success)
 			return RET(err);
 	}
@@ -129,9 +135,18 @@ int main(int argc, char* argv[])
 	{
 		doneSomething = true;
 
-		const auto err{ ax::run_from_directory(compile ? outDirectory : inDirectory) };
-		if (err != ax::Error::Success)
-			return RET(err);
+		if (useZipFiles)
+		{
+			const auto err{ ax::run_from_zip(compile ? outDirectory + ".zip" : inDirectory)};
+			if (err != ax::Error::Success)
+				return RET(err);
+		}
+		else
+		{
+			const auto err{ ax::run_from_directory(compile ? outDirectory : inDirectory) };
+			if (err != ax::Error::Success)
+				return RET(err);
+		}
 	}
 
 	if (!doneSomething)

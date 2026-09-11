@@ -18,4 +18,5 @@ namespace ax
 
 	ax::Error run(Application&&);
 	ax::Error run_from_directory(std::string_view rootDirectory);
+	ax::Error run_from_zip(std::string_view zipFile);
 }

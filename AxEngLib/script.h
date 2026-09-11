@@ -35,6 +35,9 @@ namespace ax::lua
 		ScriptManager(Badge<Application>, ResourceLoader& loader);
 		sol::environment create_env();
 
+		ax::Error setup(Badge<Application>);
+		ax::Error cleanup(Badge<Application>);
+
 	private:
 		ax::lua::Manager m_lua;
 
