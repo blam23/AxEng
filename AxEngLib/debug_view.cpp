@@ -10,7 +10,7 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 {
 	app.window()->get_ui_event_handler().subscribe
 	(
-		[&app](const ax::WindowUIEvent&)
+		[&app](const ax::WindowUIEvent& e)
 		{
 			if (!m_enabled)
 				return;
@@ -25,10 +25,20 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 				}
 
 				ImGuiIO& io = ImGui::GetIO();
-				ImGui::SameLine(ImGui::GetWindowWidth() - 425);
+				ImGui::SameLine(ImGui::GetWindowWidth() - 335);
 				ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 			}
 			ImGui::EndMainMenuBar();
+
+			ImGui::Begin("Timing");
+			{
+				static float deltaTimes[512]{ 0 };
+				static std::size_t deltaPtr = 0;
+				deltaTimes[deltaPtr++] = (float)e.delta * 1000.0f;
+				deltaPtr %= 512;
+				ImGui::PlotHistogram("Delta Times (ms)", deltaTimes, 512);
+			}
+			ImGui::End();
 
 			ImGui::Begin("Texture View");
 			{
