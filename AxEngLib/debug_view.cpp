@@ -8,11 +8,20 @@
 
 void ax::debug::View::register_debug_view(ax::Application& app)
 {
+	s_toggleHandler.subscribe
+	(
+		[](const ax::input::KeyEvent& e)
+		{
+			if (e.pressed)
+				toggle();
+		}
+	);
+
 	app.window()->get_ui_event_handler().subscribe
 	(
 		[&app](const ax::WindowUIEvent& e)
 		{
-			if (!m_enabled)
+			if (!s_enabled)
 				return;
 
 			ImGui::BeginMainMenuBar();
@@ -92,12 +101,17 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 	);
 }
 
+void ax::debug::View::toggle()
+{
+	s_enabled = !s_enabled;
+}
+
 void ax::debug::View::enable()
 {
-	m_enabled = true;
+	s_enabled = true;
 }
 
 void ax::debug::View::disable()
 {
-	m_enabled = false;
+	s_enabled = false;
 }

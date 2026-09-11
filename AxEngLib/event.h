@@ -32,7 +32,7 @@ namespace ax
 			m_subscriptions.erase(id);
 		}
 		
-		void fire(T_EVENT&& eventData)
+		void fire(T_EVENT&& eventData) const
 		{
 			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
 			for (auto& handler : m_subscriptions)
@@ -41,7 +41,7 @@ namespace ax
 
 	private:
 		std::map<size_t, T_FUNC> m_subscriptions{};
-		std::mutex m_subscriptionMutex{};
+		mutable std::mutex m_subscriptionMutex{};
 		std::size_t m_nextIdx;
 	};
 };

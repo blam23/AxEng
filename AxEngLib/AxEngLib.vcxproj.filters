@@ -37,6 +37,12 @@
     <Filter Include="comp\headers">
       <UniqueIdentifier>{6e1ae60a-efdb-4c20-85df-4e0b223c33ef}</UniqueIdentifier>
     </Filter>
+    <Filter Include="core\input">
+      <UniqueIdentifier>{425ad026-6d55-436d-b5e1-98df9b690a10}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="core\input\headers">
+      <UniqueIdentifier>{9669d072-dc38-4775-9349-79c698d3ea1c}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="application.cpp">
@@ -101,6 +107,9 @@
     </ClCompile>
     <ClCompile Include="error.cpp">
       <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="keyboard.cpp">
+      <Filter>core\input</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -187,6 +196,9 @@
     </ClInclude>
     <ClInclude Include="error_def.h">
       <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="keyboard.h">
+      <Filter>core\input\headers</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

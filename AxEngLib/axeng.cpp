@@ -18,9 +18,6 @@ ax::Error ax::run_from_directory(std::string_view rootDirectory)
 
 	ax::init();
 	{
-		//
-		// Setup module
-		//
 		auto application{ ax::Application::from_directory(rootDirectory) };
 		auto loaded{ application.try_load() };
 
@@ -29,7 +26,8 @@ ax::Error ax::run_from_directory(std::string_view rootDirectory)
 
 		ax::debug::View::register_debug_view(application);
 
-		// Run main loop
+		ax::input::KeyEventHandler::register_callback(application.window()->glfw_handle());
+
 		application.window()->run_loop();
 	}
 	ax::teardown();

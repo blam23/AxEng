@@ -159,6 +159,7 @@
     <ClCompile Include="debug_view.cpp" />
     <ClCompile Include="error.cpp" />
     <ClCompile Include="event.cpp" />
+    <ClCompile Include="keyboard.cpp" />
     <ClCompile Include="lua_bindings.cpp" />
     <ClCompile Include="lua_engine.cpp" />
     <ClCompile Include="lua_log_bindings.cpp" />
@@ -186,6 +187,7 @@
     <ClInclude Include="event.h" />
     <ClInclude Include="forward.h" />
     <ClInclude Include="imgui_zoomable_image.h" />
+    <ClInclude Include="keyboard.h" />
     <ClInclude Include="lua_bindings.h" />
     <ClInclude Include="lua_engine.h" />
     <ClInclude Include="application.h" />

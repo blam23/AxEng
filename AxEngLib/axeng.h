@@ -9,6 +9,7 @@
 #include "script.h"
 #include "window.h"
 #include "error.h"
+#include "keyboard.h"
 
 namespace ax
 {
