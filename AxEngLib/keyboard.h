@@ -10,19 +10,32 @@
 
 namespace ax::input
 {
+	using Key = int;
+
 	struct KeyEvent
 	{
 		bool pressed;
 		int mods;
 	};
 
+	struct AnyKeyEvent
+	{
+		Key key;
+		bool pressed;
+		int mods;
+	};
+	using AnyKeyEventHandler = ax::EventHandler<AnyKeyEvent>;
+
 	class KeyEventHandler final 
 		: public ax::EventHandler<KeyEvent>
 	{
 	public:
-		static void register_callback(GLFWwindow* window);
+		static void register_events(GLFWwindow* window);
+		static void cleanup_events(GLFWwindow* window);
+		static bool is_key_pressed(Key key);
+		inline static AnyKeyEventHandler globalEventHandler{};
 
-		KeyEventHandler(int key);
+		KeyEventHandler(Key key);
 		~KeyEventHandler();
 
 	private:
@@ -31,6 +44,6 @@ namespace ax::input
 		inline static std::mutex s_handlerMutex{};
 		inline static std::vector<bool> s_keyMap{};
 
-		int m_key;
+		Key m_key;
 	};
 }

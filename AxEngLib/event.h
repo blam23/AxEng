@@ -19,17 +19,23 @@ namespace ax
 		EventHandler<T_EVENT>() = default;
 		~EventHandler<T_EVENT>() = default;
 
-		const size_t subscribe(T_FUNC&& handler)
+		size_t subscribe(T_FUNC&& handler)
 		{
 			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
 			m_subscriptions.emplace(m_nextIdx, handler);
 			return m_nextIdx++;
 		}
 
-		const void unsubscribe(size_t id)
+		void unsubscribe(size_t id)
 		{
 			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
 			m_subscriptions.erase(id);
+		}
+
+		void unsubscribe_all()
+		{
+			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
+			m_subscriptions.clear();
 		}
 		
 		void fire(T_EVENT&& eventData) const

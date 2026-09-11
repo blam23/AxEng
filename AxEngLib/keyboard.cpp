@@ -2,13 +2,25 @@
 
 #include "spdlog/spdlog.h"
 
-void ax::input::KeyEventHandler::register_callback(GLFWwindow* window)
+void ax::input::KeyEventHandler::register_events(GLFWwindow* window)
 {
 	s_keyMap.resize(GLFW_KEY_LAST + 1);
 	glfwSetKeyCallback(window, glfw_callback);
 }
 
-ax::input::KeyEventHandler::KeyEventHandler(int key)
+void ax::input::KeyEventHandler::cleanup_events(GLFWwindow* window)
+{
+	globalEventHandler.unsubscribe_all();
+	glfwSetKeyCallback(window, nullptr);
+}
+
+bool ax::input::KeyEventHandler::is_key_pressed(Key key)
+{
+	return s_keyMap[key];
+}
+
+
+ax::input::KeyEventHandler::KeyEventHandler(Key key)
 	: m_key{ key }
 {
 	std::lock_guard lock{ s_handlerMutex };
@@ -36,6 +48,8 @@ void ax::input::KeyEventHandler::glfw_callback(GLFWwindow*, int key, int scancod
 	}
 	
 	s_keyMap[key] = action == GLFW_PRESS;
+
+	globalEventHandler.fire({ .key = key, .pressed = action == GLFW_PRESS, .mods = mods });
 
 	for (const auto& handler : s_eventHandlers)
 	{

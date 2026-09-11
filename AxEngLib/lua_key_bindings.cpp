@@ -12,7 +12,7 @@ void ax::lua::bindings::setup_key_bindings(sol::state& env)
 {
 	auto key_table = env.create_table();
 
-	key_table["register"] =
+	key_table["subscribe_key"] =
 		[](int key, const std::function<void(bool pressed, int mods)>& callback)
 		{
 			std::lock_guard lock{ s_handlerMutex };
@@ -28,6 +28,26 @@ void ax::lua::bindings::setup_key_bindings(sol::state& env)
 			);
 
 			s_handlers.push_back(std::move(ptr));
+		};
+
+	key_table["subscribe_all"] =
+		[](const std::function<void(int key, bool pressed, int mods)>& callback)
+		{
+			std::lock_guard lock{ s_handlerMutex };
+
+			ax::input::KeyEventHandler::globalEventHandler.subscribe
+			(
+				[callback](const auto& e)
+				{
+					callback(e.key, e.pressed, e.mods);
+				}
+			);
+		};
+
+	key_table["is_pressed"] =
+		[](ax::input::Key key) -> bool
+		{
+			return ax::input::KeyEventHandler::is_key_pressed(key);
 		};
 
 	env["keyboard"] = key_table;

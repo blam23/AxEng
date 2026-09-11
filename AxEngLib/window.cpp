@@ -413,6 +413,8 @@ double updatePrev{ 0 };
 double updateDelta{ 0 };
 void ax::Window::run_loop()
 {
+	ax::input::KeyEventHandler::register_events(m_window);
+
 	while (!glfwWindowShouldClose(m_window))
 	{
 		glfwPollEvents();
@@ -424,6 +426,8 @@ void ax::Window::run_loop()
 		handle_tick(updateDelta);
 		run_wgpu_render_pass(updateDelta);
 	}
+
+	ax::input::KeyEventHandler::cleanup_events(m_window);
 }
 
 void ax::Window::run_wgpu_render_pass(double delta)

@@ -26,8 +26,6 @@ ax::Error ax::run_from_directory(std::string_view rootDirectory)
 
 		ax::debug::View::register_debug_view(application);
 
-		ax::input::KeyEventHandler::register_callback(application.window()->glfw_handle());
-
 		application.window()->run_loop();
 	}
 	ax::teardown();
