@@ -3,6 +3,7 @@ project = {
     init_script = "init",
     entry_point = "test",
     icon = "icon",
+    highlight = "#A256FF"
 }
 
 project.scripts = {
