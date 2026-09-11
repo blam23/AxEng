@@ -94,6 +94,8 @@ bool ax::Application::try_load()
 		return false;
 	}
 
+	m_entryPoint->run(env);
+
 	m_loaded = true;
 	return m_loaded;
 }
