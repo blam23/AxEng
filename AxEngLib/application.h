@@ -31,6 +31,7 @@ namespace ax
 		~Application();
 
 		bool try_load();
+		void unload();
 		
 		ResourceLoader& loader() noexcept { return m_loader; }
 		const ResourceLoader& loader() const noexcept { return m_loader; }

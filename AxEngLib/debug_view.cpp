@@ -24,7 +24,7 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 			if (!s_enabled)
 				return;
 
-			ImGui::ShowDemoWindow();
+			//ImGui::ShowDemoWindow();
 
 			ImGui::BeginMainMenuBar();
 			{

@@ -33,11 +33,13 @@ function d_key_event(pressed, mods)
     end
 end
 
-function any_key_event(key, pressed, mods)
-    if (key == keys.esc and pressed) then
+function esc_key_event(pressed, mods)
+    if pressed then
         window.request_close(app.window.handle)
     end
+end
 
+function any_key_event(key, pressed, mods)
     window.set_title(app.window.handle, "KEY: " .. tostring(key))
 end
 
@@ -45,4 +47,6 @@ keyboard.subscribe_key(keys.w, w_key_event)
 keyboard.subscribe_key(keys.a, a_key_event)
 keyboard.subscribe_key(keys.s, s_key_event)
 keyboard.subscribe_key(keys.d, d_key_event)
+keyboard.subscribe_key(keys.esc, esc_key_event)
+
 keyboard.subscribe_all(any_key_event)

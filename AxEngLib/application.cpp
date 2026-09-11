@@ -10,11 +10,6 @@ ax::Application ax::Application::from_embedded(EmbeddedResourceLayout&& layout)
 	return { std::move(layout) };
 }
 
-ax::Application::~Application()
-{
-	m_scripts.unload_all({});
-}
-
 bool ax::Application::init_window(const sol::environment& env)
 {
 	LogTimer _timer{ "wgpu initial setup" };
@@ -103,6 +98,20 @@ bool ax::Application::try_load()
 
 	m_loaded = true;
 	return m_loaded;
+}
+
+void ax::Application::unload()
+{
+	m_scripts.unload_all({});
+
+	if (m_window)
+		m_window = nullptr;
+}
+
+ax::Application::~Application()
+{
+	if (m_loaded)
+		unload();
 }
 
 ax::Application::Application(ResourceLoader&& loader)

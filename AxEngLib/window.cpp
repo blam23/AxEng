@@ -112,7 +112,8 @@ bool ax::Window::init_webgpu()
 	auto adapter_callback =
 		[](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message, void* userdata)
 		{
-			if (status != wgpu::RequestAdapterStatus::Success) {
+			if (status != wgpu::RequestAdapterStatus::Success)
+			{
 				spdlog::error("Failed to get an adapter: {}", message.data);
 				return;
 			}
@@ -134,7 +135,8 @@ bool ax::Window::init_webgpu()
 	auto device_callback =
 		[](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message, void* userData)
 		{
-			if (status != wgpu::RequestDeviceStatus::Success) {
+			if (status != wgpu::RequestDeviceStatus::Success)
+			{
 				spdlog::error("Failed to get a device: {}", message.data);
 				return;
 			}

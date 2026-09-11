@@ -12,23 +12,27 @@ void ax::teardown()
 	ax::teardown_glfw();
 }
 
-ax::Error ax::run_from_directory(std::string_view rootDirectory)
+ax::Error ax::run(Application&& app)
 {
-	spdlog::info("<Ax> Running from directory: '{}'", rootDirectory);
-
 	ax::init();
 	{
-		auto application{ ax::Application::from_directory(rootDirectory) };
-		auto loaded{ application.try_load() };
+		auto loaded{ app.try_load() };
 
 		if (!loaded)
 			return Error::ApplicationLoadFailed;
 
-		ax::debug::View::register_debug_view(application);
+		ax::debug::View::register_debug_view(app);
 
-		application.window()->run_loop();
+		app.window()->run_loop();
+		app.unload();
 	}
 	ax::teardown();
 
 	return Error::Success;
+}
+
+ax::Error ax::run_from_directory(std::string_view rootDirectory)
+{
+	spdlog::info("<Ax> Running from directory: '{}'", rootDirectory);
+	return run(ax::Application::from_directory(rootDirectory));
 }

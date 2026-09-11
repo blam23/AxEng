@@ -16,5 +16,6 @@ namespace ax
 	void init();
 	void teardown();
 
+	ax::Error run(Application&&);
 	ax::Error run_from_directory(std::string_view rootDirectory);
 }
