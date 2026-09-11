@@ -2,6 +2,7 @@ project = {
     name = "My First Project",
     init_script = "init",
     entry_point = "test",
+    icon = "icon",
 }
 
 project.scripts = {

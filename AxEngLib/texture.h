@@ -9,6 +9,9 @@
 #include <webgpu/webgpu_cpp.h>
 #include <webgpu/webgpu_cpp_print.h>
 
+#include <GLFW/glfw3.h>
+#undef APIENTRY
+
 namespace ax
 {
 	class Texture : public Asset
@@ -25,6 +28,8 @@ namespace ax
 		const wgpu::TextureView& view() const { return m_view; }
 		uint32_t width() const { return m_width; }
 		uint32_t height() const { return m_height; }
+
+		GLFWimage create_glfw_image() const;
 
 	private:
 		wgpu::Texture m_texture;

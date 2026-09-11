@@ -11,6 +11,7 @@ end
 
 -- todo: improve
 keys = {
+    esc = 256,
     w = 87,
     a = 65,
     s = 83,

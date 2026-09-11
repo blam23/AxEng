@@ -72,10 +72,15 @@ bool ax::Application::try_load()
 	m_name = app["name"];
 
 	init_window(env);
+	const auto& window{ app["window"] };
+	window["handle"] = (void*)m_window->glfw_handle();
 
 	const sol::table& textures{ app["textures"].get<sol::table>() };
 	for (const auto& entry : textures)
 		m_textures.load(entry.first.as<std::string>(), entry.second.as<std::string>());
+
+	const auto& icon{ m_textures.get(window["icon"])->create_glfw_image() };
+	glfwSetWindowIcon(m_window->glfw_handle(), 1, &icon);
 
 	const sol::table& scripts{ app["scripts"].get<sol::table>() };
 	for (const auto& entry : scripts)

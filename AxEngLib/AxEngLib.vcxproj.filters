@@ -117,6 +117,9 @@
     <ClCompile Include="lua_key_bindings.cpp">
       <Filter>core\lua\bindings</Filter>
     </ClCompile>
+    <ClCompile Include="lua_window_bindings.cpp">
+      <Filter>core\lua\bindings</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -207,6 +210,9 @@
       <Filter>core\lua\bindings\headers</Filter>
     </ClInclude>
     <ClInclude Include="lua_type_bindings.h">
+      <Filter>core\lua\bindings\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_window_bindings.h">
       <Filter>core\lua\bindings\headers</Filter>
     </ClInclude>
   </ItemGroup>

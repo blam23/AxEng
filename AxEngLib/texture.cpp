@@ -78,6 +78,16 @@ ax::Texture::~Texture()
 		stbi_image_free(m_stbiPtr);
 }
 
+GLFWimage ax::Texture::create_glfw_image() const
+{
+	return 
+	{
+		.width = static_cast<int>(m_width),
+		.height = static_cast<int>(m_height),
+		.pixels = (unsigned char*)m_stbiPtr,
+	};
+}
+
 ax::TextureManager::TextureManager(Badge<Application> badge, ResourceLoader& loader)
 	: AssetManager<Texture, TextureManager>{ badge, loader }
 {

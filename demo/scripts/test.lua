@@ -34,7 +34,11 @@ function d_key_event(pressed, mods)
 end
 
 function any_key_event(key, pressed, mods)
-    print("KEY: " .. tostring(key) .. " - " .. tostring(pressed))
+    if (key == keys.esc and pressed) then
+        window.request_close(app.window.handle)
+    end
+
+    window.set_title(app.window.handle, "KEY: " .. tostring(key))
 end
 
 keyboard.subscribe_key(keys.w, w_key_event)

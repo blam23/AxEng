@@ -30,6 +30,7 @@ function validate_project_file()
     key_exists(project, "name")
     key_exists(project, "init_script")
     key_exists(project, "entry_point")
+    key_exists(project, "icon")
     key_exists(project, "scripts")
     key_exists(project, "textures")
     key_exists(project, "types")
@@ -125,7 +126,8 @@ function create_manifest(dir, strip_debug_output)
 
     local data = {
         NAME = project.name,
-        EP = project.entry_point,
+        ENTRY_POINT = project.entry_point,
+        ICON = project.icon,
         WINDOW_WIDTH = 1920,
         WINDOW_HEIGHT = 1080,
         WINDOW_VSYNC = true,

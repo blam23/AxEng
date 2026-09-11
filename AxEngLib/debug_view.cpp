@@ -24,6 +24,8 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 			if (!s_enabled)
 				return;
 
+			ImGui::ShowDemoWindow();
+
 			ImGui::BeginMainMenuBar();
 			{
 				ImGui::Text("AxEng");

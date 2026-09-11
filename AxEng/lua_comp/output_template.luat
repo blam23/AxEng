@@ -3,12 +3,13 @@
 
 app = {
     name = "%%NAME%%",
-    entry_point = "%%EP%%",
+    entry_point = "%%ENTRY_POINT%%",
     window = {
         width = %%WINDOW_WIDTH%%,
         height = %%WINDOW_HEIGHT%%,
         title = "%%NAME%%",
         vsync = %%WINDOW_VSYNC%%,
+        icon = "%%ICON%%",
     },
 }
 
