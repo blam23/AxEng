@@ -16,7 +16,7 @@ static ax::type::TypeDef type_from_table(const sol::table& tbl)
 	return def;
 };
 
-void ax::setup_type_bindings(sol::state& env)
+void ax::lua::bindings::setup_type_bindings(sol::state& env)
 {
 	auto type_table = env.create_table();
 	auto type_size_table = env.create_table();

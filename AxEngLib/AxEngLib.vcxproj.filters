@@ -43,6 +43,9 @@
     <Filter Include="core\input\headers">
       <UniqueIdentifier>{9669d072-dc38-4775-9349-79c698d3ea1c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="core\lua\bindings\headers">
+      <UniqueIdentifier>{a4cd54b0-33d3-40c0-bc49-a2451c36a1ac}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="application.cpp">
@@ -111,6 +114,9 @@
     <ClCompile Include="keyboard.cpp">
       <Filter>core\input</Filter>
     </ClCompile>
+    <ClCompile Include="lua_key_bindings.cpp">
+      <Filter>core\lua\bindings</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -176,15 +182,6 @@
     <ClInclude Include="custom_type.h">
       <Filter>core\headers</Filter>
     </ClInclude>
-    <ClInclude Include="lua_log_bindings.h">
-      <Filter>core\lua\bindings</Filter>
-    </ClInclude>
-    <ClInclude Include="lua_type_bindings.h">
-      <Filter>core\lua\bindings</Filter>
-    </ClInclude>
-    <ClInclude Include="bind_all.h">
-      <Filter>core\lua\bindings</Filter>
-    </ClInclude>
     <ClInclude Include="axeng.h">
       <Filter>core\headers</Filter>
     </ClInclude>
@@ -199,6 +196,18 @@
     </ClInclude>
     <ClInclude Include="keyboard.h">
       <Filter>core\input\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="bind_all.h">
+      <Filter>core\lua\bindings\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_key_bindings.h">
+      <Filter>core\lua\bindings\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_log_bindings.h">
+      <Filter>core\lua\bindings\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_type_bindings.h">
+      <Filter>core\lua\bindings\headers</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

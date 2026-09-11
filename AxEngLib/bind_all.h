@@ -1,6 +1,6 @@
 #pragma once
 
-namespace ax::lua
+namespace ax::lua::bindings
 {
-	void bind_all();
+	void setup();
 }

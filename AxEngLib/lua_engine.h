@@ -14,6 +14,7 @@ namespace ax::lua
 	{
 	public:
 		Manager(ResourceLoader& loader);
+		~Manager();
 		sol::environment create_env();
 		sol::load_result load(const std::string& code, const std::string& file);
 

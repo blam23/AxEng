@@ -28,7 +28,7 @@ ax::lua::Manager::Manager(ResourceLoader& loader)
 		sol::lib::bit32
 	);
 
-	bindings::setup_all(m_state);
+	bindings::bind_to_state(m_state);
 
 	const auto res{ m_state.do_string(m_initScript, "Init Script") };
 	if (!res.valid())
@@ -36,6 +36,11 @@ ax::lua::Manager::Manager(ResourceLoader& loader)
 		sol::error err = res;
 		spdlog::error("Failed to run init script {}", err.what());
 	}
+}
+
+ax::lua::Manager::~Manager()
+{
+	bindings::cleanup_state(m_state);
 }
 
 sol::environment ax::lua::Manager::create_env()

@@ -162,6 +162,7 @@
     <ClCompile Include="keyboard.cpp" />
     <ClCompile Include="lua_bindings.cpp" />
     <ClCompile Include="lua_engine.cpp" />
+    <ClCompile Include="lua_key_bindings.cpp" />
     <ClCompile Include="lua_log_bindings.cpp" />
     <ClCompile Include="application.cpp" />
     <ClCompile Include="lua_type_bindings.cpp" />
@@ -194,6 +195,7 @@
     <ClInclude Include="glfw3webgpu.h" />
     <ClInclude Include="helpers.h" />
     <ClInclude Include="imgui_style.h" />
+    <ClInclude Include="lua_key_bindings.h" />
     <ClInclude Include="lua_log_bindings.h" />
     <ClInclude Include="lua_type_bindings.h" />
     <ClInclude Include="resource_loader.h" />

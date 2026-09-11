@@ -256,8 +256,8 @@ ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir)
 	);
 	sol::environment env{ compiler, sol::create, compiler.globals() };
 
-	ax::lua::bind_all();
-	ax::lua::bindings::setup_all(compiler);
+	ax::lua::bindings::setup();
+	ax::lua::bindings::bind_to_state(compiler);
 
 	AX_RETURN_ERROR_IF_FAIL(ret, setup_directory(inDir, outDir));
 	AX_RETURN_ERROR_IF_FAIL(ret, setup_lua_compiler(compiler, env));
@@ -268,6 +268,7 @@ ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir)
 
 	AX_RETURN_ERROR_IF_FAIL(ret, create_manifest(outDir, env));
 
+	ax::lua::bindings::cleanup_state(compiler);
 
 	spdlog::info("<Build> Built project '{}' to '{}'.", env["project"]["name"].get<std::string>(), outDir);
 	return ret;

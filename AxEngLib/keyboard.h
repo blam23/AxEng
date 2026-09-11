@@ -29,6 +29,7 @@ namespace ax::input
 		static void glfw_callback(GLFWwindow* window, int key, int scancode, int action, int mods);
 		inline static std::vector<KeyEventHandler*> s_eventHandlers{};
 		inline static std::mutex s_handlerMutex{};
+		inline static std::vector<bool> s_keyMap{};
 
 		int m_key;
 	};

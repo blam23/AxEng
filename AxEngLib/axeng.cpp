@@ -3,8 +3,8 @@
 
 void ax::init()
 {
+	ax::lua::bindings::setup();
 	ax::setup_glfw();
-	ax::lua::bind_all();
 }
 
 void ax::teardown()

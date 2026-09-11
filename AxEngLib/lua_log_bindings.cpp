@@ -1,6 +1,6 @@
 #include "lua_log_bindings.h"
 
-void ax::setup_log_bindings(sol::state& env)
+void ax::lua::bindings::setup_log_bindings(sol::state& env)
 {
 	auto log_table = env.create_table();
 
