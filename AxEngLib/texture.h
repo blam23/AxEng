@@ -12,6 +12,8 @@
 #include <GLFW/glfw3.h>
 #undef APIENTRY
 
+#include <imgui.h>
+
 namespace ax
 {
 	class Texture : public Asset
@@ -26,6 +28,7 @@ namespace ax
 
 		const wgpu::Texture& texture() const { return m_texture; }
 		const wgpu::TextureView& view() const { return m_view; }
+		const ImTextureID imgui_view() const { return (ImTextureID)(intptr_t)m_view.Get(); }
 		uint32_t width() const { return m_width; }
 		uint32_t height() const { return m_height; }
 

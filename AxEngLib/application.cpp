@@ -15,11 +15,11 @@ ax::Application ax::Application::from_zip(std::string_view zipFile)
 	return { ZipResourceLoader{ zipFile } };
 }
 
-bool ax::Application::init_window(const sol::environment& env)
+bool ax::Application::init_window()
 {
 	LogTimer _timer{ "wgpu initial setup" };
 
-	const auto& app{ env["app"] };
+	const auto& app{ m_env["app"] };
 	const auto& window{ app["window"] };
 	m_window = std::make_unique<Window>(WindowDefinition
 	{
@@ -40,7 +40,54 @@ bool ax::Application::init_window(const sol::environment& env)
 	return success;
 }
 
-void ax::Application::add_manifest_bindings(sol::environment&)
+void ax::Application::add_application_bindings(sol::state& state)
+{
+	const auto& app{ m_env["app"] };
+	auto on_ui_table{ state.create_table() };
+
+	on_ui_table["subscribe"] = 
+		[this](std::function<void(double delta)> f) -> size_t 
+		{
+			return m_window->get_ui_event_handler().subscribe([f](const ax::WindowUIEvent& e) { f(e.delta); });
+		};
+
+	on_ui_table["unsubscribe"] = 
+		[this](size_t id)
+		{
+			m_window->get_ui_event_handler().unsubscribe(id);
+		};
+
+	auto resource_lookup_texture{ state.create_table() };
+
+
+	resource_lookup_texture["get_texture"] =
+		[this, &state](const std::string& name) -> sol::table
+		{
+			auto text{ m_textures.get(name) };
+
+			auto ret = state.create_table();
+
+			if (text)
+			{
+				ret["valid"] = true;
+				ret["view"] = text->view();
+				ret["ui_view"] = text->imgui_view();
+				ret["width"] = text->width();
+				ret["height"] = text->height();
+			}
+			else
+			{
+				ret["valid"] = false;
+			}
+
+			return ret;
+		};
+
+	app["on_ui"] = on_ui_table;
+	app["res"] = resource_lookup_texture;
+}
+
+void ax::Application::add_manifest_bindings(sol::state&)
 {
 }
 
@@ -52,9 +99,9 @@ bool ax::Application::try_load()
 	m_scripts.setup({});
 
 	ax::lua::Script* manifest{ m_scripts.load("!manifest", "manifest.luac") };
-	auto env{ m_scripts.create_env() };
+	m_env = m_scripts.create_env();
 
-	add_manifest_bindings(env);
+	add_manifest_bindings(m_scripts.state({}));
 
 	if (!manifest) 
 	{
@@ -62,7 +109,7 @@ bool ax::Application::try_load()
 		return false;
 	}
 
-	const auto& res{ manifest->run(env) };
+	const auto& res{ manifest->run(m_env) };
 
 	if (!res.valid())
 	{
@@ -71,10 +118,10 @@ bool ax::Application::try_load()
 		return false;
 	}
 
-	const auto& app{ env["app"] };
+	const auto& app{ m_env["app"] };
 	m_name = app["name"];
 
-	init_window(env);
+	init_window();
 	const auto& window{ app["window"] };
 	window["handle"] = (void*)m_window->glfw_handle();
 
@@ -102,7 +149,16 @@ bool ax::Application::try_load()
 		return false;
 	}
 
-	m_entryPoint->run(env);
+	add_application_bindings(m_scripts.state({}));
+
+	spdlog::info("<Lua> Running entry point script: '{}'", entryPointScript);
+	const auto ep_res = m_entryPoint->run(m_env);
+	if (!ep_res.valid())
+	{
+		const sol::error msg = ep_res;
+		spdlog::error("Failed to run entry point script: {}", msg.what());
+		return false;
+	}
 
 	m_loaded = true;
 	return m_loaded;
@@ -122,6 +178,8 @@ ax::Application::~Application()
 {
 	if (m_loaded)
 		cleanup();
+
+	m_scripts.cleanup({});
 }
 
 ax::Application::Application(ResourceLoader&& loader)

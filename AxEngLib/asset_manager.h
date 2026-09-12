@@ -22,6 +22,8 @@ namespace ax
 	class AssetManager
 	{
 	public:
+		DISABLE_COPY_AND_MOVE(AssetManager);
+
 		AssetManager(Badge<Application>, ResourceLoader& loader)
 			: m_loader{ loader }
 		{
@@ -38,6 +40,7 @@ namespace ax
 	private:
 		struct AssetStore
 		{
+
 			typename TAsset::Descriptor desc;
 			std::unique_ptr<TAsset> asset;
 		};

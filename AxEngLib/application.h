@@ -47,15 +47,16 @@ namespace ax
 	private:
 		Application(ResourceLoader&& loader);
 
-		bool init_window(const sol::environment& env);
-		void add_manifest_bindings(sol::environment& env);
-
+		bool init_window();
+		void add_manifest_bindings(sol::state&);
+		void add_application_bindings(sol::state&);
 		std::unique_ptr<Window> m_window;
 
 		ResourceLoader m_loader;
 		lua::ScriptManager m_scripts;
 		TextureManager m_textures;
 		type::TypeGenerator m_typeGen{};
+		sol::environment m_env;
 
 		std::string m_name{};
 		lua::Script* m_entryPoint{};

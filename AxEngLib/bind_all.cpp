@@ -4,6 +4,8 @@
 #include "lua_type_bindings.h"
 #include "lua_key_bindings.h"
 #include "lua_window_bindings.h"
+#include "lua_imgui_bindings.h"
+#include "lua_texture_bindings.h"
 
 void ax::lua::bindings::setup()
 {
@@ -15,5 +17,9 @@ void ax::lua::bindings::setup()
 	bindings::register_cleanup("keyboard", &cleanup_key_bindings);
 
 	bindings::register_binding("window", &setup_window_bindings);
+
+	bindings::register_binding("ui", &setup_imgui_bindings);
+
+	bindings::register_binding("texture", &setup_texture_bindings);
 }
 

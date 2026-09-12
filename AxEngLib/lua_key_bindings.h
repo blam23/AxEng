@@ -4,6 +4,6 @@
 
 namespace ax::lua::bindings
 {
-	void setup_key_bindings(sol::state& env);
-	void cleanup_key_bindings(sol::state& env);
+	void setup_key_bindings(sol::state&);
+	void cleanup_key_bindings(sol::state&);
 }

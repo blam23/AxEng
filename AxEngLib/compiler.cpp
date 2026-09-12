@@ -286,6 +286,7 @@ ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir, boo
 			else
 				pathPattern += "\\*";
 
+			// TODO: Replace this with minizip or some such
 			std::string cmd = "powershell -NoProfile -Command \"Compress-Archive -Path '"
 				+ pathPattern + "' -DestinationPath '" + zipPath.string() + "' -Force\"";
 

@@ -1,8 +1,8 @@
 #include "lua_log_bindings.h"
 
-void ax::lua::bindings::setup_log_bindings(sol::state& env)
+void ax::lua::bindings::setup_log_bindings(sol::state& state)
 {
-	auto log_table = env.create_table();
+	auto log_table = state.create_table();
 
 	log_table["info"] = 
 		[](const std::string& message)
@@ -22,5 +22,5 @@ void ax::lua::bindings::setup_log_bindings(sol::state& env)
 			spdlog::error(message);
 		};
 
-	env["log"] = log_table;
+	state["log"] = log_table;
 }

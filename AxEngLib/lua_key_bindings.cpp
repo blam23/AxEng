@@ -8,9 +8,9 @@
 std::vector<std::unique_ptr<ax::input::KeyEventHandler>> s_handlers{};
 std::mutex s_handlerMutex{};
 
-void ax::lua::bindings::setup_key_bindings(sol::state& env)
+void ax::lua::bindings::setup_key_bindings(sol::state& state)
 {
-	auto key_table = env.create_table();
+	auto key_table = state.create_table();
 
 	key_table["subscribe_key"] =
 		[](int key, const std::function<void(bool pressed, int mods)>& callback)
@@ -50,7 +50,7 @@ void ax::lua::bindings::setup_key_bindings(sol::state& env)
 			return ax::input::KeyEventHandler::is_key_pressed(key);
 		};
 
-	env["keyboard"] = key_table;
+	state["keyboard"] = key_table;
 }
 
 void ax::lua::bindings::cleanup_key_bindings(sol::state&)

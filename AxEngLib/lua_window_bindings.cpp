@@ -3,9 +3,9 @@
 #include "window.h"
 #include "texture.h"
 
-void ax::lua::bindings::setup_window_bindings(sol::state& env)
+void ax::lua::bindings::setup_window_bindings(sol::state& state)
 {
-	auto window_table = env.create_table();
+	auto window_table = state.create_table();
 
 	window_table["request_close"] = 
 		[](void* w) -> void
@@ -19,5 +19,5 @@ void ax::lua::bindings::setup_window_bindings(sol::state& env)
 			glfwSetWindowTitle((GLFWwindow*)w, str.c_str());
 		};
 
-	env["window"] = window_table;
+	state["window"] = window_table;
 }

@@ -38,6 +38,9 @@ namespace ax::lua
 		ax::Error setup(Badge<Application>);
 		ax::Error cleanup(Badge<Application>);
 
+		sol::state& state(Badge<Application>) { return m_lua.state(); }
+		const sol::state& state(Badge<Application>) const { return m_lua.state(); }
+
 	private:
 		ax::lua::Manager m_lua;
 

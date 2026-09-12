@@ -5,5 +5,5 @@
 
 namespace ax::lua::bindings
 {
-	void setup_type_bindings(sol::state& env);
+	void setup_type_bindings(sol::state&);
 }

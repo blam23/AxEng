@@ -14,6 +14,9 @@ namespace ax::lua
 	class Manager
 	{
 	public:
+		DISABLE_COPY_AND_MOVE(Manager);
+
+		Manager() {};
 		~Manager();
 
 		ax::Error setup(const ResourceLoader&);
@@ -21,6 +24,9 @@ namespace ax::lua
 
 		sol::environment create_env();
 		sol::load_result load(const std::string& code, const std::string& file);
+
+		sol::state& state() { return m_state; }
+		const sol::state& state() const { return m_state; }
 
 	private:
 		sol::state m_state;

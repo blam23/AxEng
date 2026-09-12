@@ -5,5 +5,5 @@
 
 namespace ax::lua::bindings
 {
-	void setup_window_bindings(sol::state& env);
+	void setup_window_bindings(sol::state&);
 }

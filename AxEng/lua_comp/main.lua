@@ -44,10 +44,13 @@ function validate_project_file()
 end
 
 function check_and_copy_script(script_in, script_out)
-    local chunk = loadfile(script_in)
+    local chunk, err_msg = loadfile(script_in)
 
     -- make sure it loaded
-    assert(chunk)
+    if chunk == nil then
+        log.error(err_msg)
+        assert(chunk)
+    end
 
     local ofile = io.open(script_out, "wb")
     ofile:write(string.dump(chunk))
@@ -137,10 +140,13 @@ function create_manifest(dir, strip_debug_output)
     }
     local output = template_replace(template, data)
 
-    local chunk = load(output, "!manifest", "t", strip_debug_output)
+    local chunk, err_msg = load(output, "!manifest", "t", strip_debug_output)
 
     -- make sure it loads
-    assert(chunk)
+    if chunk == nil then
+        log.error(er_rmsg)
+        assert(chunk)
+    end
 
     local ofile = io.open(dir .. "/manifest.luac", "wb")
     ofile:write(string.dump(chunk))
