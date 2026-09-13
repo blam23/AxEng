@@ -1,8 +1,7 @@
 assert_success(import(app, "load_project"))
-assert_success(import(app, "project_browser"))
-
 check_project()
---print_table(project)
+
+assert_success(import(app, "project_browser"))
 
 function test_window(delta)
     ui.w_begin("Test Window")

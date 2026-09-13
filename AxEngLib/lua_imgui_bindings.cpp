@@ -114,5 +114,38 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 			return std::make_tuple(col[0], col[1], col[2], col[3], changed);
 		};
 
+	ui_table["push_item_width"] =
+		[](float width) { ImGui::PushItemWidth(width); };
+
+	ui_table["set_next_item_width"] =
+		[](float width) { ImGui::SetNextItemWidth(width); };
+	
+	ui_table["pop_item_width"] =
+		[]() { ImGui::PopItemWidth(); };
+
+	ui_table["begin_listbox"] =
+		[](const char* label) { return ImGui::BeginListBox(label); };
+
+	ui_table["end_listbox"] =
+		[]() { ImGui::EndListBox(); };
+
+	ui_table["selectable"] =
+		[](const char* label, bool selected = false)
+		{
+			bool v = selected;
+			bool changed = ImGui::Selectable(label, &v);
+			return std::pair(v, changed);
+		};
+
+	ui_table["input_text"] =
+		[](const char* label, const std::string& initial)
+		{
+			char buf[256];
+			std::memset(buf, 0, sizeof(buf));
+			std::memcpy(buf, initial.c_str(), initial.size());
+			bool changed = ImGui::InputText(label, buf, sizeof(buf));
+			return std::pair(std::string(buf), changed);
+		};
+
 	state["ui"] = ui_table;
 }
