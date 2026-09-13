@@ -9,3 +9,4 @@
 	ERR(Lua,                           4) \
 	ERR(InvalidTexture,                5) \
 	ERR(ApplicationLoadFailed,      1000) \
+	ERR(AssetNotFound,              1001) \

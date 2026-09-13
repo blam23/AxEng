@@ -35,6 +35,9 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 			ImGui::TextColored(ImVec4(r, g, b, a), "%s", text);
 		};
 
+	ui_table["dock_space_over_viewport"] =
+		[]() { ImGui::DockSpaceOverViewport(); };
+
 	ui_table["same_line"] = 
 		[](float pos_x = 0.0f, float spacing_w = -1.0f) { ImGui::SameLine(pos_x, spacing_w); };
 

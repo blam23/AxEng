@@ -13,7 +13,7 @@ project.scripts = {
 
 project.textures = {
     icon = "assets/icon.png",
-    frog = "assets/frog.png",
+    frilly = "assets/frilly.png",
 }
 
 project.types = {

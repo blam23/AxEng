@@ -6,10 +6,10 @@ function test_ui(delta)
     ui.text("Delta: " .. string.format("%.2f", delta * 1000.0) .. "ms")
     ui.text("est. FPS: " .. string.format("%.0f", 1.0/delta))
 
-    show_frog, updated = ui.checkbox("Enable the frog?", show_frog)
+    show_frog, updated = ui.checkbox("Show frilly?", show_frog)
 
     if updated then
-        print("FROG TOGGLED")
+        print("FRILLY TOGGLED")
     end
 
     if show_frog then
@@ -19,11 +19,11 @@ function test_ui(delta)
     ui.w_end()
 end
 
-frog_image = app.res.get_texture("frog")
+frog_image = app.res.get_texture("frilly")
 
 if (not frog_image.valid) then
-    log.error("Unable to load frog texture!!!1!1!")
-    return
+    log.error("Unable to load frilly!!1!1!")
+    return error.AssetNotFound
 end
 
 for k,v in pairs(frog_image) do
@@ -32,3 +32,5 @@ end
 
 app.on_ui.subscribe(test_ui)
 show_frog = false
+
+return error.Success

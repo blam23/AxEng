@@ -159,6 +159,11 @@ bool ax::Application::try_load()
 		spdlog::error("Failed to run entry point script: {}", msg.what());
 		return false;
 	}
+	else if(const auto err = ep_res.get<ax::Error>(); err != ax::Error::Success)
+	{
+		spdlog::error("Entry point script failed: {}", ax::get_error_name(err));
+		return false;
+	}
 
 	m_loaded = true;
 	return m_loaded;
