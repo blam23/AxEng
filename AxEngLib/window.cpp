@@ -396,7 +396,7 @@ bool ax::Window::init_imgui()
 	ImGui::CreateContext();
 	ImGui::GetIO();
 
-	ImGui_ImplGlfw_InitForOther(m_window, true);
+	ImGui_ImplGlfw_InitForOther(m_window, false);
 
 	ImGui_ImplWGPU_InitInfo info{};
 	info.Device = m_device.Get();
@@ -405,7 +405,6 @@ bool ax::Window::init_imgui()
 	ImGui_ImplWGPU_Init(&info);
 
 	ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-	//ImGui::GetIO().Fonts->AddFontDefaultVector();
 	ax::setup_imgui_style();
 
 	return true;
@@ -416,6 +415,7 @@ double updateDelta{ 0 };
 void ax::Window::run_loop()
 {
 	ax::input::KeyEventHandler::register_events(m_window);
+	ImGui_ImplGlfw_InstallCallbacks(m_window);
 
 	while (!glfwWindowShouldClose(m_window))
 	{
@@ -548,15 +548,10 @@ void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
 
 	ImGui::NewFrame();
 	{
-		//ImGui::DockSpaceOverViewport();
-
-		//ImGui::PushFont(nullptr, 16.0f);
-
 		m_uiEventHandler.fire({ .delta = delta });
-
-		//ImGui::PopFont();
 	}
 	ImGui::EndFrame();
+
 	ImGui::Render();
 
 	ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), pass.Get());
