@@ -32,6 +32,6 @@ void ax::lua::bindings::setup_type_bindings(sol::state& state)
 
 	type_table["define"] = &type_from_table;
 
-	state["type"] = type_table;
-	state["type_size"] = type_size_table;
+	state["custom_type"] = type_table;
+	state["custom_type_size"] = type_size_table;
 }

@@ -1,6 +1,10 @@
-function test_ui(delta)
-    local updated = false
+assert_success(import(app, "load_project"))
+assert_success(import(app, "project_browser"))
 
+check_project()
+--print_table(project)
+
+function test_window(delta)
     ui.w_begin("Test Window")
     
     ui.text("Delta: " .. string.format("%.2f", delta * 1000.0) .. "ms")
@@ -19,6 +23,14 @@ function test_ui(delta)
     ui.w_end()
 end
 
+function main_ui(delta)
+    local updated = false
+
+    ui.dock_space_over_viewport()
+    --test_window(delta)
+    project_browser()
+end
+
 frog_image = app.res.get_texture("frilly")
 
 if (not frog_image.valid) then
@@ -26,11 +38,7 @@ if (not frog_image.valid) then
     return error.AssetNotFound
 end
 
-for k,v in pairs(frog_image) do
-    print(k .. " = " .. tostring(v))
-end
-
-app.on_ui.subscribe(test_ui)
+app.on_ui.subscribe(main_ui)
 show_frog = false
 
 return error.Success

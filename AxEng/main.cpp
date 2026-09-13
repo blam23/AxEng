@@ -62,9 +62,26 @@ int main(int argc, char* argv[])
 		.flag()
 		.help("Compiles to / loads from a ZIP file instead of directory");
 
+	const std::vector<std::string> in_args{ argv, argv + argc };
+	std::vector<std::string> out_args{};
+
 	try
 	{
-		program.parse_args(argc, argv);
+		out_args = program.parse_known_args(in_args);
+
+		if (verbose)
+		{
+			spdlog::set_level(spdlog::level::trace);
+
+			for (int i = 0; i < argc; i++)
+				spdlog::trace("<Main> Argument: {}", argv[i]);
+		}
+
+		spdlog::trace("<Main> Returned args: {}", out_args.size());
+		for (const auto& a : out_args)
+		{
+			spdlog::trace("<Main> \t'{}'", a);
+		}
 	}
 	catch (const std::exception& err)
 	{
@@ -76,14 +93,6 @@ int main(int argc, char* argv[])
 	//
 	// Validate Args
 	//
-
-	if (verbose)
-	{
-		spdlog::set_level(spdlog::level::trace);
-
-		for(int i = 0; i < argc; i++)
-			spdlog::trace("<Main> Argument: {}", argv[i]);
-	}
 
 	if (timers)
 		ax::enable_log_timers();
@@ -137,13 +146,13 @@ int main(int argc, char* argv[])
 
 		if (useZipFiles)
 		{
-			const auto err{ ax::run_from_zip(compile ? outDirectory + ".zip" : inDirectory)};
+			const auto err{ ax::run_from_zip(out_args, compile ? outDirectory + ".zip" : inDirectory)};
 			if (err != ax::Error::Success)
 				return RET(err);
 		}
 		else
 		{
-			const auto err{ ax::run_from_directory(compile ? outDirectory : inDirectory) };
+			const auto err{ ax::run_from_directory(out_args, compile ? outDirectory : inDirectory) };
 			if (err != ax::Error::Success)
 				return RET(err);
 		}

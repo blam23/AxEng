@@ -4,6 +4,12 @@ void ax::lua::bindings::setup_log_bindings(sol::state& state)
 {
 	auto log_table = state.create_table();
 
+	log_table["debug"] =
+		[](const std::string& message)
+		{
+			spdlog::debug(message);
+		};
+
 	log_table["info"] = 
 		[](const std::string& message)
 		{

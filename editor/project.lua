@@ -9,6 +9,8 @@ project = {
 project.scripts = {
     init = "scripts/init.lua",
     main = "scripts/main.lua",
+    project_browser = "scripts/project_browser.lua",
+    load_project = "scripts/load_project.lua",
 }
 
 project.textures = {

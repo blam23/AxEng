@@ -83,15 +83,63 @@ void ax::Application::add_application_bindings(sol::state& state)
 			return ret;
 		};
 
+	resource_lookup_texture["get_script"] =
+		[this, &state](const std::string& name) -> sol::table
+		{
+			auto script{ m_scripts.get(name) };
+
+			auto ret = state.create_table();
+
+			if (script)
+			{
+				ret["valid"] = true;
+				ret["ptr"] = script;
+			}
+			else
+			{
+				ret["valid"] = false;
+			}
+
+			return ret;
+		};
+
 	app["on_ui"] = on_ui_table;
 	app["res"] = resource_lookup_texture;
+
+	app["run_in_this_environment"] = 
+		[this](const sol::table& script) -> bool
+		{
+			if (script["valid"])
+			{
+				auto ptr{ script["ptr"].get<ax::lua::Script*>() };
+				if (ptr == nullptr)
+				{
+					spdlog::error("Invalid script object, cannot run");
+					return false;
+				}
+				auto res{ ptr->run(m_env) };
+				if (!res.valid())
+				{
+					const sol::error msg = res;
+					spdlog::error("Failed to run script: {}", msg.what());
+					return false;
+				}
+			}
+			else
+			{
+				spdlog::error("Invalid script, cannot run");
+				return false;
+			}
+
+			return true;
+		};
 }
 
 void ax::Application::add_manifest_bindings(sol::state&)
 {
 }
 
-bool ax::Application::try_load()
+bool ax::Application::try_load(const std::vector<std::string>& args)
 {
 	LogTimer _timer{ "Application Load" };
 
@@ -100,6 +148,8 @@ bool ax::Application::try_load()
 
 	ax::lua::Script* manifest{ m_scripts.load("!manifest", "manifest.luac") };
 	m_env = m_scripts.create_env();
+
+	m_env["args"] = args;
 
 	add_manifest_bindings(m_scripts.state({}));
 

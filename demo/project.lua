@@ -17,10 +17,10 @@ project.textures = {
 }
 
 project.types = {
-    entity = type.define({
-        pos = type.vec2,
-        scale = type.vec2,
-        rot = type.float,
-        texture = type.id,
+    entity = custom_type.define({
+        pos = custom_type.vec2,
+        scale = custom_type.vec2,
+        rot = custom_type.float,
+        texture = custom_type.id,
     }),
 }

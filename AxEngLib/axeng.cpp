@@ -12,11 +12,11 @@ void ax::teardown()
 	ax::teardown_glfw();
 }
 
-ax::Error ax::run(Application&& app)
+ax::Error ax::run(const std::vector<std::string>& args, Application&& app)
 {
 	ax::init();
 	{
-		auto loaded{ app.try_load() };
+		auto loaded{ app.try_load(args) };
 
 		if (!loaded)
 			return Error::ApplicationLoadFailed;
@@ -31,14 +31,14 @@ ax::Error ax::run(Application&& app)
 	return Error::Success;
 }
 
-ax::Error ax::run_from_directory(std::string_view rootDirectory)
+ax::Error ax::run_from_directory(const std::vector<std::string>& args, std::string_view rootDirectory)
 {
 	spdlog::info("<Ax> Running from directory: '{}'", rootDirectory);
-	return run(ax::Application::from_directory(rootDirectory));
+	return run(args, ax::Application::from_directory(rootDirectory));
 }
 
-ax::Error ax::run_from_zip(std::string_view zip)
+ax::Error ax::run_from_zip(const std::vector<std::string>& args, std::string_view zip)
 {
 	spdlog::info("<Ax> Running from zip: '{}'", zip);
-	return run(ax::Application::from_zip(zip));
+	return run(args, ax::Application::from_zip(zip));
 }

@@ -31,7 +31,7 @@ namespace ax
 
 		~Application();
 
-		bool try_load();
+		bool try_load(const std::vector<std::string>& args);
 		void cleanup();
 		
 		ResourceLoader& loader() noexcept { return m_loader; }
@@ -46,6 +46,8 @@ namespace ax
 
 	private:
 		Application(ResourceLoader&& loader);
+
+		const std::vector<std::string> m_args;
 
 		bool init_window();
 		void add_manifest_bindings(sol::state&);
