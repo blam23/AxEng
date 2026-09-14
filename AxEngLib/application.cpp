@@ -83,6 +83,32 @@ void ax::Application::add_application_bindings(sol::state& state)
 			return ret;
 		};
 
+	resource_lookup_texture["create_texture"] =
+		[this, &state](const std::string& name, const std::string& data) -> sol::table
+		{
+			auto text{ m_textures.get(name) };
+
+			if (text == nullptr)
+				text = m_textures.load_from_raw(name, {}, std::vector<uint8_t>{ data.begin(), data.end() });
+
+			auto ret = state.create_table();
+
+			if (text)
+			{
+				ret["valid"] = true;
+				ret["view"] = text->view();
+				ret["ui_view"] = text->imgui_view();
+				ret["width"] = text->width();
+				ret["height"] = text->height();
+			}
+			else
+			{
+				ret["valid"] = false;
+			}
+
+			return ret;
+		};
+
 	resource_lookup_texture["get_script"] =
 		[this, &state](const std::string& name) -> sol::table
 		{

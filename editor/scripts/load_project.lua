@@ -13,7 +13,6 @@ function get_project_directory()
         end
     end
 
-    print("Project: '" .. ret .. "'")
     return ret
 end
 
