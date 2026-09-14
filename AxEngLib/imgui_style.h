@@ -12,16 +12,8 @@ namespace ax
 		style.ColorButtonPosition = ImGuiDir_Left;
 		style.WindowPadding = ImVec2(8.0f, 8.0f);
 		style.FramePadding = ImVec2(16.0f, 5.0f);
-		style.ItemSpacing = ImVec2(8.0f, 8.0f);
-		style.ItemInnerSpacing = ImVec2(1.0f, 1.0f);
 		style.SeparatorTextAlign = ImVec2(0.5f, 0.5f);
 		style.SeparatorTextBorderSize = 1;
-		style.TabRounding = 0.0f;
-		style.ChildRounding = 0.0f;
-		style.WindowRounding = 0.0f;
-		style.IndentSpacing = 9.0f;
-		style.GrabMinSize = 20.0f;
-
 		style.DisabledAlpha = 0.6000000238418579f;
 		style.WindowRounding = 0.0f;
 		style.WindowBorderSize = 1.0f;
@@ -44,7 +36,6 @@ namespace ax
 		style.GrabRounding = 0.0f;
 		style.TabRounding = 0.0f;
 		style.TabBorderSize = 0.0f;
-		style.ColorButtonPosition = ImGuiDir_Right;
 		style.ButtonTextAlign = ImVec2(0.5f, 0.5f);
 		style.SelectableTextAlign = ImVec2(0.0f, 0.0f);
 
