@@ -2,6 +2,7 @@
 
 #include "spdlog/spdlog.h"
 #include "imgui.h"
+#include "ImGuiNotify.hpp"
 
 #include <string>
 #include <tuple>
@@ -114,6 +115,9 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 			return std::make_tuple(col[0], col[1], col[2], col[3], changed);
 		};
 
+	ui_table["same_line"] =
+		[]() { ImGui::SameLine(); };
+
 	ui_table["push_item_width"] =
 		[](float width) { ImGui::PushItemWidth(width); };
 
@@ -145,6 +149,20 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 			std::memcpy(buf, initial.c_str(), initial.size());
 			bool changed = ImGui::InputText(label, buf, sizeof(buf));
 			return std::pair(std::string(buf), changed);
+		};
+
+	auto notification_table{ state.create_table() };
+	notification_table["None"] = ImGuiToastType::None;
+	notification_table["Success"] = ImGuiToastType::Success;
+	notification_table["Warning"] = ImGuiToastType::Warning;
+	notification_table["Error"] = ImGuiToastType::Error;
+	notification_table["Info"] = ImGuiToastType::Info;
+	ui_table["toast_type"] = notification_table;
+
+	ui_table["insert_toast"] =
+		[](ImGuiToastType type, int duration, const char* message)
+		{
+			ImGui::InsertNotification({ type, duration, message });
 		};
 
 	state["ui"] = ui_table;

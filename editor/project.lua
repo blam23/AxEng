@@ -11,6 +11,7 @@ project.scripts = {
     main = "scripts/main.lua",
     project_browser = "scripts/project_browser.lua",
     load_project = "scripts/load_project.lua",
+    save_project = "scripts/save_project.lua",
 }
 
 project.textures = {

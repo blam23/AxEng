@@ -1,0 +1,15 @@
+{
+   "textures":{
+      "icon":"assets/icon.png",
+      "tower":"assets/tower-sheet.png"
+   },
+   "highlight":"#A256FF",
+   "scripts":{
+      "init":"scripts/init.lua",
+      "test":"scripts/test.lua"
+   },
+   "entry_point":"test",
+   "name":"My First Project",
+   "init_script":"init",
+   "icon":"icon"
+}

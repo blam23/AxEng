@@ -1,6 +1,4 @@
-project_directory = ""
-
-local get_project_directory = function()
+function get_project_directory()
     local in_pair_state = false
     local ret = ""
 
@@ -20,19 +18,22 @@ local get_project_directory = function()
 end
 
 local open_project = function(directory)
-    local res, err_msg = loadfile(directory .. "/" .. "project.lua")
-    if res == nil then
-        print("Error loading project file: " .. err_msg)
-        return error.Lua
+    local file = io.open(directory .. "/" .. "project.json", "r")
+    if file == nil then
+        return error_code.IO
+    end
+    local json_str = file:read("*all")
+    file:close()
+
+    local success, ret = pcall(function() return json.decode(json_str) end)
+
+    if not success then
+        log.error("Failed to parse project.json: ", ret)
+        return nil
     end
 
-    res()
-    return error.Success
+    print("Loaded project.json")
+    return ret
 end
 
-function check_project()
-    project_directory = get_project_directory()
-    assert_success(open_project(project_directory))
-end
-
-log.debug("Project loader loaded.")
+return open_project(get_project_directory())

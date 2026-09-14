@@ -2,6 +2,7 @@
 
 #include "lua_error_bindings.h"
 #include "lua_log_bindings.h"
+#include "lua_json_bindings.h"
 #include "lua_type_bindings.h"
 #include "lua_key_bindings.h"
 #include "lua_window_bindings.h"
@@ -10,9 +11,11 @@
 
 void ax::lua::bindings::setup()
 {
-	bindings::register_binding("error", &setup_error_bindings);
+	bindings::register_binding("error_code", &setup_error_bindings);
 
 	bindings::register_binding("log", &setup_log_bindings);
+
+	bindings::register_binding("json", &setup_json_bindings);
 
 	bindings::register_binding("type", &setup_type_bindings);
 
@@ -24,5 +27,6 @@ void ax::lua::bindings::setup()
 	bindings::register_binding("ui", &setup_imgui_bindings);
 
 	bindings::register_binding("texture", &setup_texture_bindings);
+
 }
 

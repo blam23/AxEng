@@ -107,7 +107,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 	app["res"] = resource_lookup_texture;
 
 	app["run_in_this_environment"] = 
-		[this](const sol::table& script) -> bool
+		[this](const sol::table& script) -> sol::object
 		{
 			if (script["valid"])
 			{
@@ -115,23 +115,21 @@ void ax::Application::add_application_bindings(sol::state& state)
 				if (ptr == nullptr)
 				{
 					spdlog::error("Invalid script object, cannot run");
-					return false;
+					return nullptr;
 				}
-				auto res{ ptr->run(m_env) };
+				auto res{ ptr->run_no_cache(m_env) };
 				if (!res.valid())
 				{
 					const sol::error msg = res;
 					spdlog::error("Failed to run script: {}", msg.what());
-					return false;
 				}
+				return res;
 			}
 			else
 			{
 				spdlog::error("Invalid script, cannot run");
-				return false;
+				return nullptr;
 			}
-
-			return true;
 		};
 }
 

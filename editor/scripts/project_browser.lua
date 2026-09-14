@@ -4,21 +4,25 @@ local selected_texture = 0
 local scripts = {}
 local textures = {}
 
-for k,v in pairs(project.scripts) do
-    table.insert(scripts, { k, v })
+function reload()
+    scripts = {}
+    textures = {}
+    for k,v in pairs(project.scripts) do
+        table.insert(scripts, { k, v })
+    end
+
+    for k,v in pairs(project.textures) do
+        table.insert(textures, { k, v })
+    end
 end
 
-for k,v in pairs(project.textures) do
-    table.insert(textures, { k, v })
-end
-
-function list_box(name, tbl, selected)
+function list_box(name, tbl, selected, icon)
     ui.set_next_item_width(-1)
     local need_end = ui.begin_listbox("##")
     local i = 0
     for k,v in pairs(project[name]) do
         i = i + 1
-        local highlighted, changed = ui.selectable(k .. " (" .. v.. ")", selected == i)
+        local highlighted, changed = ui.selectable(icon .. " " .. k .. " (" .. v.. ")", selected == i)
         if changed and highlighted then
             selected = i
         end
@@ -45,6 +49,8 @@ function list_box(name, tbl, selected)
                     project[name][k] = v
                     print("Updated: '", ok, "' -> '", k, "'.")
                     print("Updated: '", ov, "' -> '", v, "'.")
+                    set_unsaved()
+                    reload()
                     break
                 end
             end
@@ -57,14 +63,15 @@ end
 function project_browser()
 
     ui.w_begin("Script Browser")
-        selected_script = list_box("scripts", scripts, selected_script)
+        selected_script = list_box("scripts", scripts, selected_script, "\xef\x87\x89")
     ui.w_end()
 
     ui.w_begin("Texture Browser")
-        selected_texture = list_box("textures", textures, selected_texture)
+        selected_texture = list_box("textures", textures, selected_texture, "\xef\x87\x85")
     ui.w_end()
 
 end
 
+reload()
 
-log.debug("Loaded project browser.")
+return true

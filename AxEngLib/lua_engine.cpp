@@ -30,7 +30,8 @@ ax::Error ax::lua::Manager::setup(const ResourceLoader& loader)
 		sol::lib::math,
 		sol::lib::string,
 		sol::lib::table,
-		sol::lib::bit32
+		sol::lib::bit32,
+		sol::lib::io
 	);
 
 	bindings::bind_to_state(m_state);

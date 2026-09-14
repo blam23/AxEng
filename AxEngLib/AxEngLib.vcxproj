@@ -120,8 +120,8 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;IMGUI_IMPL_WEBGPU_BACKEND_DAWN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp23</LanguageStandard>
-      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <LanguageStandard_C>stdclatest</LanguageStandard_C>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <TreatWarningAsError>true</TreatWarningAsError>
     </ClCompile>
@@ -144,10 +144,10 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;IMGUI_IMPL_WEBGPU_BACKEND_DAWN;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp23</LanguageStandard>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
       <TreatWarningAsError>true</TreatWarningAsError>
-      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <LanguageStandard_C>stdclatest</LanguageStandard_C>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -176,6 +176,7 @@
     <ClCompile Include="lua_engine.cpp" />
     <ClCompile Include="lua_error_bindings.cpp" />
     <ClCompile Include="lua_imgui_bindings.cpp" />
+    <ClCompile Include="lua_json_bindings.cpp" />
     <ClCompile Include="lua_key_bindings.cpp" />
     <ClCompile Include="lua_log_bindings.cpp" />
     <ClCompile Include="application.cpp" />
@@ -203,6 +204,8 @@
     <ClInclude Include="error_def.h" />
     <ClInclude Include="event.h" />
     <ClInclude Include="forward.h" />
+    <ClInclude Include="IconsFontAwesome6.h" />
+    <ClInclude Include="ImGuiNotify.hpp" />
     <ClInclude Include="imgui_zoomable_image.h" />
     <ClInclude Include="keyboard.h" />
     <ClInclude Include="lua_bindings.h" />
@@ -213,6 +216,7 @@
     <ClInclude Include="imgui_style.h" />
     <ClInclude Include="lua_error_bindings.h" />
     <ClInclude Include="lua_imgui_bindings.h" />
+    <ClInclude Include="lua_json_bindings.h" />
     <ClInclude Include="lua_key_bindings.h" />
     <ClInclude Include="lua_log_bindings.h" />
     <ClInclude Include="lua_texture_bindings.h" />
@@ -224,6 +228,11 @@
     <ClInclude Include="stb_image.h" />
     <ClInclude Include="texture.h" />
     <ClInclude Include="window.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="..\lua_libs\json.lua">
+      <FileType>Document</FileType>
+    </Text>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

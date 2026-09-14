@@ -12,7 +12,7 @@ void ax::lua::bindings::setup_error_bindings(sol::state& state)
 	ERRORS
 #undef ERR
 
-	state["error"] = error_table;
+	state["error_code"] = error_table;
 }
 
 #undef ERRORS

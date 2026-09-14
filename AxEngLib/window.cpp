@@ -3,9 +3,12 @@
 #include "log_timer.h"
 
 #include "spdlog/spdlog.h"
+
 #include "backends/imgui_impl_wgpu.h"
 #include "backends/imgui_impl_glfw.h"
 #include <imgui.h>
+#include "ImGuiNotify.hpp"
+#include "IconsFontAwesome6.h"
 
 #include <iostream>
 #include <fstream>
@@ -407,6 +410,22 @@ bool ax::Window::init_imgui()
 	ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 	ax::setup_imgui_style();
 
+	ImGuiIO& io = ImGui::GetIO();
+	ImFontConfig default_font_config;
+	float baseFontSize = 13.0f;
+	default_font_config.SizePixels = baseFontSize;
+	io.Fonts->AddFontDefaultBitmap(&default_font_config);
+	float iconFontSize = baseFontSize * 2.0f / 3.0f; // FontAwesome fonts need to have their sizes reduced by 2.0f/3.0f in order to align correctly
+
+	// merge in icons from Font Awesome
+	static const ImWchar icons_ranges[] = { ICON_MIN_FA, ICON_MAX_16_FA, 0 };
+	ImFontConfig icons_config;
+	icons_config.MergeMode = true;
+	icons_config.PixelSnapH = true;
+	icons_config.GlyphMinAdvanceX = iconFontSize;
+	icons_config.SizePixels = iconFontSize;
+	io.Fonts->AddFontFromFileTTF(FONT_ICON_FILE_NAME_FAS, iconFontSize, &icons_config, icons_ranges);
+
 	return true;
 }
 
@@ -549,6 +568,16 @@ void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
 	ImGui::NewFrame();
 	{
 		m_uiEventHandler.fire({ .delta = delta });
+
+		// Render notifications
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.f); 
+		ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+		ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.10f, 0.10f, 0.10f, 1.00f));
+		{
+			ImGui::RenderNotifications();
+		}
+		ImGui::PopStyleVar(2);
+		ImGui::PopStyleColor(1);
 	}
 	ImGui::EndFrame();
 

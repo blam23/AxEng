@@ -46,6 +46,9 @@
     <Filter Include="core\lua\bindings\headers">
       <UniqueIdentifier>{a4cd54b0-33d3-40c0-bc49-a2451c36a1ac}</UniqueIdentifier>
     </Filter>
+    <Filter Include="core\lua\external">
+      <UniqueIdentifier>{2f38db08-136f-4980-ae3a-390f5bf02b0f}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="application.cpp">
@@ -127,6 +130,9 @@
       <Filter>core\lua\bindings</Filter>
     </ClCompile>
     <ClCompile Include="lua_error_bindings.cpp">
+      <Filter>core\lua\bindings</Filter>
+    </ClCompile>
+    <ClCompile Include="lua_json_bindings.cpp">
       <Filter>core\lua\bindings</Filter>
     </ClCompile>
   </ItemGroup>
@@ -233,5 +239,19 @@
     <ClInclude Include="lua_error_bindings.h">
       <Filter>core\lua\bindings\headers</Filter>
     </ClInclude>
+    <ClInclude Include="lua_json_bindings.h">
+      <Filter>core\lua\bindings\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="IconsFontAwesome6.h">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="ImGuiNotify.hpp">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Text Include="..\lua_libs\json.lua">
+      <Filter>core\lua\external</Filter>
+    </Text>
   </ItemGroup>
 </Project>

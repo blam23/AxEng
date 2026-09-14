@@ -2,8 +2,11 @@
 local __print = print
 print = function(...)
     local arg={...}
-    local res = ""
+    local res = "<Lua> "
     for i,v in ipairs(arg) do
+        if v == nil then
+            v = "nil"
+        end
         res = res .. tostring(v)
     end
     log.info(res)
@@ -41,8 +44,11 @@ require = function()
     print("Do not use this!")
 end
 
-function assert_success(err)
-    assert(err == error.Success)
+function assert_success(err, msg)
+    if (err ~= error_code.Success) then
+        log.error(msg)
+    end
+    assert(err == error_code.Success)
 end
 
 function import(app, script_name)
@@ -51,24 +57,23 @@ function import(app, script_name)
     end
 
     if app.imported[script_name] then
-        log.info("Already loaded script: '" .. script_name .. "'")
-        return error.Success
+        return app.imported[script_name]
     end
 
     local script = app.res.get_script(script_name)
 
     if (not script.valid) then
-        log.error("Unable to load script: '" .. script_name .. "'.")
-        return error.AssetNotFound
+        log.error_code("Unable to load script: '" .. script_name .. "'.")
+        return error_code.AssetNotFound
     end
 
-    app.imported[script_name] = true
-
-    if (app.run_in_this_environment(script)) then
-        return error.Success
-    else
-        return error.Lua
+    local res = app.run_in_this_environment(script)
+    if res == nil then
+        error("Failed to run script '" .. script_name .. "'.")
     end
+
+    app.imported[script_name] = res
+    return res
 end
 
 -- todo: improve
