@@ -10,9 +10,6 @@ local save_project = function()
         return error_code.JSONFailure
     end
 
-    print_table(project)
-    print("Ret: ", ret)
-
     local ofile = io.open(get_project_directory() .. "/" .. "project.json", "w")
     if ofile == nil then
         return error_code.IO

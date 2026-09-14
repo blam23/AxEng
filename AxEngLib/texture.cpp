@@ -93,6 +93,17 @@ ax::TextureManager::TextureManager(Badge<Application> badge, ResourceLoader& loa
 {
 }
 
+std::unique_ptr<ax::Texture> ax::TextureManager::load_from_raw_impl(const std::string& name, const std::vector<uint8_t>& data)
+{
+	if (m_device == nullptr)
+	{
+		spdlog::error("TextureManager device not set.");
+		return nullptr;
+	}
+
+	return std::make_unique<Texture>(Badge<TextureManager>{}, name, data, *m_device);
+}
+
 std::unique_ptr<ax::Texture> ax::TextureManager::load_impl(const std::string& name, const Texture::Descriptor& description)
 {
 	if (m_device == nullptr)

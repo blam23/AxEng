@@ -31,6 +31,7 @@ namespace ax
 		~AssetManager() = default;
 		
 		TAsset* load(const std::string& name, const TAsset::Descriptor& description);
+		TAsset* load_from_raw(const std::string& name, const TAsset::Descriptor& description, const std::vector<uint8_t>& data);
 		TAsset* get(const std::string& name);
 		const TAsset* get(const std::string& name) const;
 		void for_each(std::function<void(const std::string& name, TAsset&)> func);
@@ -48,6 +49,11 @@ namespace ax
 		std::unique_ptr<TAsset> load_impl(const std::string& name, const TAsset::Descriptor& description)
 		{
 			return static_cast<TDerived&>(*this).load_impl(name, description);
+		}
+
+		std::unique_ptr<TAsset> load_from_raw_impl(const std::string& name, const std::vector<uint8_t>& data)
+		{
+			return static_cast<TDerived&>(*this).load_from_raw_impl(name, data);
 		}
 
 		std::map<std::string, AssetStore> m_store{};
@@ -73,6 +79,36 @@ namespace ax
 
 		// Try and load the asset
 		auto asset{ load_impl(name, description) };
+
+		// Only emplace if the asset was loaded successfully
+		if (asset && asset->is_loaded())
+		{
+			const auto [idx, success] = m_store.try_emplace(name, AssetStore{ description, std::move(asset) });
+
+			if (success)
+				return idx->second.asset.get();
+		}
+
+		return nullptr;
+	}
+
+	template<typename TAsset, typename TDerived>
+		requires ValidAsset<TAsset>
+	TAsset* AssetManager<TAsset, TDerived>::load_from_raw(
+		const std::string& name,
+		const TAsset::Descriptor& description,
+		const std::vector<uint8_t>& data
+	)
+	{
+		std::lock_guard lock{ m_loadMutex };
+
+		// If the asset already is loaded, return it
+		const auto itr{ m_store.find(name) };
+		if (itr != m_store.end())
+			return itr->second.asset.get();
+
+		// Try and load the asset
+		auto asset{ load_from_raw_impl(name, data) };
 
 		// Only emplace if the asset was loaded successfully
 		if (asset && asset->is_loaded())

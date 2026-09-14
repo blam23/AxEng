@@ -52,6 +52,7 @@ namespace ax
 	private:
 		wgpu::Device* m_device;
 
+		std::unique_ptr<Texture> load_from_raw_impl(const std::string& name, const std::vector<uint8_t>& data);
 		std::unique_ptr<Texture> load_impl(const std::string& name, const Texture::Descriptor& description);
 		friend AssetManager<Texture, TextureManager>;
 	};
