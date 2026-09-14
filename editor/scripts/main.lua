@@ -35,13 +35,13 @@ function save_window(delta)
             last_save = last_save - delta
             ui.same_line()
             if last_save_err == error_code.Success  then
-                ui.text_colored(0, 0.8, 0, last_save / 3.0, "\xef\x81\x98 Saved") -- circle check
+                ui.text_color(0, 0.8, 0, last_save / 3.0, "\xef\x81\x98 Saved") -- circle check
             else
-                ui.text_colored(0.7, 0, 0, last_save / 3.0, "\xef\x81\xaa Failed to save") -- circle exclamation
+                ui.text_color(0.7, 0, 0, last_save / 3.0, "\xef\x81\xaa Failed to save") -- circle exclamation
             end
         elseif unsaved then
             ui.same_line()
-            ui.text_colored(0.7, 0.7, 0, 1, "* Unsaved") -- circle check
+            ui.text_color(0.7, 0.7, 0, 1, "* Unsaved") -- circle check
         end
     ui.w_end()
 end

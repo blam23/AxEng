@@ -27,10 +27,10 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 	ui_table["text"] = 
 		[](const char* text) { ImGui::Text("%s", text); };
 
-	ui_table["text_wrapped"] = 
+	ui_table["text_wrap"] = 
 		[](const char* text) { ImGui::TextWrapped("%s", text); };
 
-	ui_table["text_colored"] = 
+	ui_table["text_color"] = 
 		[](float r, float g, float b, float a, const char* text)
 		{
 			ImGui::TextColored(ImVec4(r, g, b, a), "%s", text);

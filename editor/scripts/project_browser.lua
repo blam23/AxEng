@@ -108,14 +108,14 @@ function preview_script(selected)
     if not script_failed then
         ui.same_line()
         if script_valid then
-            ui.text_colored(0, 0.8, 0, 1.0, "\xef\x81\x98")
+            ui.text_color(0, 0.8, 0, 1.0, "\xef\x81\x98")
         else
-            ui.text_colored(0.7, 0, 0, 1.0, "\xef\x81\xaa")
-            ui.text_colored(0.8, 0.3, 0.2, 1.0, script_error_msg)
+            ui.text_color(0.7, 0, 0, 1.0, "\xef\x81\xaa")
+            ui.text_color(0.8, 0.3, 0.2, 1.0, script_error_msg)
         end
         ui.text(script_cache)
     else
-        ui.text_colored(0.7, 0, 0, 1.0, "\xef\x81\xaa Invalid script!")
+        ui.text_color(0.7, 0, 0, 1.0, "\xef\x81\xaa Invalid script!")
     end
 end
 
@@ -159,7 +159,7 @@ function preview_texture(selected)
     if not texture_failed and texture_cache and texture_cache.valid then
         ui.image(texture_cache)
     else
-        ui.text_colored(0.7, 0, 0, 1.0, "\xef\x81\xaa Invalid texture!")
+        ui.text_color(0.7, 0, 0, 1.0, "\xef\x81\xaa Invalid texture!")
         ui.image(error_texture)
     end
 end
