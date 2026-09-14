@@ -5,6 +5,8 @@ local scripts = {}
 local textures = {}
 
 function reload()
+    old_script_selected = 0
+    old_texture_selected = 0
     scripts = {}
     textures = {}
     for k,v in pairs(project.scripts) do
@@ -19,9 +21,6 @@ end
 function list_box(name, tbl, selected, icon)
     ui.set_next_item_width(-1)
     local need_end = ui.begin_listbox("##")
-    if not need_end then
-        return 0, false
-    end
     local i = 0
     for k,v in pairs(project[name]) do
         i = i + 1
@@ -30,7 +29,9 @@ function list_box(name, tbl, selected, icon)
             selected = i
         end
     end
-    ui.end_listbox()
+    if need_end then
+        ui.end_listbox()
+    end
     if selected > 0 then
         local k = tbl[selected][1]
         local v = tbl[selected][2]
@@ -58,13 +59,16 @@ function list_box(name, tbl, selected, icon)
         end
     end
 
-    return selected, true
+    return selected, need_end
 end
 
 local old_script_selected = 0
 local script_cache = ""
+local script_failed = false
 function preview_script(selected)
-    if script_cache == "" or old_script_selected ~= selected then
+    if (script_cache == nil and not script_failed) or old_script_selected ~= selected then
+        script_failed = false
+        old_script_selected = selected
         local script_file = ""
         local i = 0
         for k,v in pairs(project.scripts) do
@@ -76,24 +80,35 @@ function preview_script(selected)
         end
         if script_file == "" then
             log.error("Unable to get script file.")
+            script_failed = true
             return
         end
 
         local file = io.open(get_project_directory() .. "/" .. script_file, "r")
+        if file == nil then
+            log.error("Failed to open script: '" .. script_file .. "'.")
+            script_failed = true
+            return
+        end
         script_cache = file:read("*all")
         file:close()
-
-        old_script_selected = selected
     end
 
     -- todo: replace with code editor
-    ui.text(script_cache)
+    if not script_failed then
+        ui.text(script_cache)
+    else
+        ui.text("Invalid script!")
+    end
 end
 
 local old_texture_selected = 0
 local texture_cache = nil
+local texture_failed = false
 function preview_texture(selected)
-    if texture_cache == nil or old_texture_selected ~= selected then
+    if (texture_cache == nil and not texture_failed) or old_texture_selected ~= selected then
+        texture_failed = false
+        old_texture_selected = selected
         local texture_name = ""
         local texture_file = ""
         local i = 0
@@ -108,19 +123,26 @@ function preview_texture(selected)
 
         if texture_file == "" then
             log.error("Unable to get texture file.")
+            texture_failed = true
             return
         end
 
         local file = io.open(get_project_directory() .. "/" .. texture_file, "rb")
+        if file == nil then
+            log.error("Failed to open texture: '" .. texture_file .. "'.")
+            texture_failed = true
+            return
+        end
         local texture_data = file:read("*all")
         file:close()
 
-        texture_cache = app.res.create_texture("proj__" .. texture_name, texture_data)
-        old_texture_selected = selected
+        texture_cache = app.res.create_texture("proj__" .. texture_file .. "__" .. texture_name, texture_data)
     end
 
-    if texture_cache and texture_cache.valid then
+    if not texture_failed and texture_cache and texture_cache.valid then
         ui.image(texture_cache)
+    else
+        ui.text("Invalid texture!")
     end
 end
 
