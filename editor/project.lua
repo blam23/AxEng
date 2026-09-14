@@ -17,6 +17,7 @@ project.scripts = {
 project.textures = {
     icon = "assets/icon.png",
     frilly = "assets/frilly.png",
+    error = "assets/error.png",
 }
 
 project.types = {

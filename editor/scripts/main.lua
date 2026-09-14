@@ -55,4 +55,6 @@ end
 set_saved()
 app.on_ui.subscribe(main_ui)
 
+error_texture = app.res.get_texture("error")
+
 return error_code.Success

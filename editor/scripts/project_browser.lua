@@ -65,11 +65,12 @@ end
 local old_script_selected = 0
 local script_cache = ""
 local script_failed = false
+local script_valid = false
+local script_error_msg = ""
 function preview_script(selected)
     if (script_cache == nil and not script_failed) or old_script_selected ~= selected then
         script_failed = false
         old_script_selected = selected
-        local script_file = ""
         local i = 0
         for k,v in pairs(project.scripts) do
             i = i + 1
@@ -92,13 +93,29 @@ function preview_script(selected)
         end
         script_cache = file:read("*all")
         file:close()
+
+        local res, err = load(script_cache, "*")
+        if res then
+            script_valid = true
+        else
+            log.error(err)
+            script_valid = false
+            script_error_msg = err
+        end
     end
 
     -- todo: replace with code editor
     if not script_failed then
+        ui.same_line()
+        if script_valid then
+            ui.text_colored(0, 0.8, 0, 1.0, "\xef\x81\x98")
+        else
+            ui.text_colored(0.7, 0, 0, 1.0, "\xef\x81\xaa")
+            ui.text_colored(0.8, 0.3, 0.2, 1.0, script_error_msg)
+        end
         ui.text(script_cache)
     else
-        ui.text("Invalid script!")
+        ui.text_colored(0.7, 0, 0, 1.0, "\xef\x81\xaa Invalid script!")
     end
 end
 
@@ -142,7 +159,8 @@ function preview_texture(selected)
     if not texture_failed and texture_cache and texture_cache.valid then
         ui.image(texture_cache)
     else
-        ui.text("Invalid texture!")
+        ui.text_colored(0.7, 0, 0, 1.0, "\xef\x81\xaa Invalid texture!")
+        ui.image(error_texture)
     end
 end
 
