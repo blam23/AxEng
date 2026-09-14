@@ -1,4 +1,5 @@
 local unsaved = false
+local show_close_confirm_modal = false
 
 function set_unsaved()
     unsaved = true
@@ -46,17 +47,41 @@ function save_window(delta)
     ui.w_end()
 end
 
+function close_confirm_modal()
+    if show_close_confirm_modal then
+        ui.open_popup("Confirm Close")
+        local opened = ui.begin_popup_modal("Confirm Close")
+
+        ui.text("You have unsaved work, are you sure you want to exit?")
+        if ui.button("Yes, close it!") then
+            window.request_close(app.window.handle)
+            show_close_confirm_modal = false
+            ui.close_current_popup()
+        end
+        ui.same_line()
+        if ui.button("I want to keep working") then
+            show_close_confirm_modal = false
+            ui.close_current_popup()
+        end
+        if opened then
+            ui.end_popup()
+        end
+    end
+end
+
 function main_ui(delta)
     ui.dock_space_over_viewport()
     save_window(delta)
     project_browser()
+    close_confirm_modal()
 end
 
 function tried_to_close()
     if unsaved then
-        -- TODO: this should trigger some kinda pop-up to exit/stay
         app.window.prevent_close()
         ui.insert_toast(ui.toast_type.Error, 3000, "Make sure to save before exiting!")
+
+        show_close_confirm_modal = true
     end
 end
 

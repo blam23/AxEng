@@ -165,5 +165,20 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 			ImGui::InsertNotification({ type, duration, message });
 		};
 
+	ui_table["begin_popup_modal"] =
+		[](const char* name) 
+		{ 
+			return ImGui::BeginPopupModal(name);
+		};
+
+	ui_table["end_popup"] =
+		[]() { ImGui::EndPopup(); };
+
+	ui_table["close_current_popup"] =
+		[]() { ImGui::CloseCurrentPopup(); };
+
+	ui_table["open_popup"] =
+		[](const char* name) { ImGui::OpenPopup(name); };
+
 	state["ui"] = ui_table;
 }
