@@ -43,22 +43,8 @@ bool ax::Application::init_window()
 void ax::Application::add_application_bindings(sol::state& state)
 {
 	const auto& app{ m_env["app"] };
-	auto on_ui_table{ state.create_table() };
-
-	on_ui_table["subscribe"] = 
-		[this](std::function<void(double delta)> f) -> size_t 
-		{
-			return m_window->get_ui_event_handler().subscribe([f](const ax::WindowUIEvent& e) { f(e.delta); });
-		};
-
-	on_ui_table["unsubscribe"] = 
-		[this](size_t id)
-		{
-			m_window->get_ui_event_handler().unsubscribe(id);
-		};
 
 	auto resource_lookup_texture{ state.create_table() };
-
 
 	resource_lookup_texture["get_texture"] =
 		[this, &state](const std::string& name) -> sol::table
@@ -129,7 +115,6 @@ void ax::Application::add_application_bindings(sol::state& state)
 			return ret;
 		};
 
-	app["on_ui"] = on_ui_table;
 	app["res"] = resource_lookup_texture;
 
 	app["run_in_this_environment"] = 
@@ -157,6 +142,41 @@ void ax::Application::add_application_bindings(sol::state& state)
 				return nullptr;
 			}
 		};
+
+	
+	const auto& window{ app["window"] };
+
+	window["prevent_close"] =
+		[this]()
+		{
+			m_window->prevent_close();
+		};
+
+	auto on_ui_table{ state.create_table() };
+	on_ui_table["subscribe"] =
+		[this](std::function<void(double delta)> f) -> size_t
+		{
+			return m_window->get_ui_event_handler().subscribe([f](const ax::WindowUIEvent& e) { f(e.delta); });
+		};
+	on_ui_table["unsubscribe"] =
+		[this](size_t id)
+		{
+			m_window->get_ui_event_handler().unsubscribe(id);
+		};
+	window["on_ui"] = on_ui_table;
+
+	auto on_close_table{ state.create_table() };
+	on_close_table["subscribe"] =
+		[this](std::function<void()> f) -> size_t
+		{
+			return m_window->get_request_close_event_handler().subscribe([f](const ax::WindowRequestCloseEvent&) { f(); });
+		};
+	on_close_table["unsubscribe"] =
+		[this](size_t id)
+		{
+			m_window->get_ui_event_handler().unsubscribe(id);
+		};
+	window["on_close"] = on_close_table;
 }
 
 void ax::Application::add_manifest_bindings(sol::state&)

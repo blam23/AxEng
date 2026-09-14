@@ -13,6 +13,8 @@
 #include <iostream>
 #include <fstream>
 
+std::map<GLFWwindow*, ax::Window*> s_windows{};
+std::mutex s_windows_mutex{};
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -26,12 +28,21 @@ ax::Window::Window(const WindowDefinition& def)
 {
 	LogTimer _timer{ "create window" };
 	m_window = glfwCreateWindow(m_width, m_height, def.title.data(), NULL, NULL);
+
+	std::lock_guard lock{ s_windows_mutex };
+	s_windows.emplace(m_window, this);
 }
 
 ax::Window::~Window()
 {
 	if (m_window)
+	{
+		{
+			std::lock_guard lock{ s_windows_mutex };
+			s_windows.erase(m_window);
+		}
 		glfwDestroyWindow(m_window);
+	}
 
 	m_surface.Unconfigure();
 }
@@ -391,6 +402,11 @@ void ax::Window::handle_tick(double delta)
 	m_updateEventHandler.fire({ .delta = delta });
 }
 
+void ax::Window::prevent_close()
+{
+	m_can_close = false;
+}
+
 bool ax::Window::init_imgui()
 {
 	LogTimer _timer{ "imgui setup" };
@@ -412,9 +428,9 @@ bool ax::Window::init_imgui()
 
 	ImGuiIO& io = ImGui::GetIO();
 	ImFontConfig default_font_config;
-	float baseFontSize = 13.0f;
+	float baseFontSize = 14.0f;
 	default_font_config.SizePixels = baseFontSize;
-	io.Fonts->AddFontDefaultBitmap(&default_font_config);
+	io.Fonts->AddFontDefaultVector(&default_font_config);
 	float iconFontSize = baseFontSize * 2.0f / 3.0f; // FontAwesome fonts need to have their sizes reduced by 2.0f/3.0f in order to align correctly
 
 	// merge in icons from Font Awesome
@@ -429,10 +445,35 @@ bool ax::Window::init_imgui()
 	return true;
 }
 
+void ax::Window::register_window_events()
+{
+	glfwSetWindowCloseCallback(m_window, ax::Window::window_close_handler);
+}
+
+void ax::Window::window_close_handler(GLFWwindow* window)
+{
+	const auto idx{ s_windows.find(window) };
+	if (idx != s_windows.end())
+	{
+		if (idx->second != nullptr)
+		{
+			// Set m_can_close to false here (Window::prevent_close()) to stop window closing.
+			idx->second->get_request_close_event_handler().fire({ idx->second });
+
+			if (!idx->second->m_can_close)
+			{
+				glfwSetWindowShouldClose(window, false);
+				idx->second->m_can_close = true;
+			}
+		}
+	}
+}
+
 double updatePrev{ 0 };
 double updateDelta{ 0 };
 void ax::Window::run_loop()
 {
+	register_window_events();
 	ax::input::KeyEventHandler::register_events(m_window);
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
 

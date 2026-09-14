@@ -38,6 +38,11 @@ namespace ax
 		double delta;
 	};
 
+	struct WindowRequestCloseEvent
+	{
+		Window* window;
+	};
+
 	// Before the render pass is setup
 	struct WindowPreRenderEvent
 	{
@@ -68,6 +73,8 @@ namespace ax
 		bool init_imgui();
 		void run_loop();
 
+		void prevent_close();
+
 		GLFWwindow* glfw_handle() const
 		{
 			return m_window;
@@ -97,6 +104,12 @@ namespace ax
 			return m_uiEventHandler;
 		}
 
+		using RequestCloseEventHandler = EventHandler<WindowRequestCloseEvent>;
+		RequestCloseEventHandler& get_request_close_event_handler()
+		{
+			return m_requestCloseEventHandler;
+		}
+
 		wgpu::Device& device() noexcept { return m_device; }
 		const wgpu::Device& device() const noexcept { return m_device; }
 		wgpu::Queue& queue() noexcept { return m_queue; }
@@ -123,15 +136,19 @@ namespace ax
 		uint32_t m_width;
 		uint32_t m_height;
 		bool m_vsync;
+		bool m_can_close{ true };
 
 		// Events
 		UpdateEventHandler m_updateEventHandler;
 		PreRenderEventHandler m_preRenderEventHandler;
 		RenderEventHandler m_renderEventHandler;
 		UIEventHandler m_uiEventHandler;
+		RequestCloseEventHandler m_requestCloseEventHandler;
 
 		// GLFW
 		GLFWwindow* m_window{ nullptr };
+		void register_window_events();
+		static void window_close_handler(GLFWwindow* window);
 
 		// WGPU
 		wgpu::Device m_device;

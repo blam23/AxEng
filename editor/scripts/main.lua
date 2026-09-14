@@ -52,8 +52,17 @@ function main_ui(delta)
     project_browser()
 end
 
+function tried_to_close()
+    if unsaved then
+        -- TODO: this should trigger some kinda pop-up to exit/stay
+        app.window.prevent_close()
+        ui.insert_toast(ui.toast_type.Error, 3000, "Make sure to save before exiting!")
+    end
+end
+
 set_saved()
-app.on_ui.subscribe(main_ui)
+app.window.on_ui.subscribe(main_ui)
+app.window.on_close.subscribe(tried_to_close)
 
 error_texture = app.res.get_texture("error")
 
