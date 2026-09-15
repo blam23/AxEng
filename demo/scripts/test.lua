@@ -50,3 +50,5 @@ keyboard.subscribe_key(keys.d, d_key_event)
 keyboard.subscribe_key(keys.esc, esc_key_event)
 
 keyboard.subscribe_all(any_key_event)
+
+return error_code.Success

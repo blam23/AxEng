@@ -1,15 +1,15 @@
 {
-   "textures":{
-      "icon":"assets/icon.png",
-      "tower":"assets/tower-sheet.png"
-   },
-   "highlight":"#A256FF",
+   "icon":"icon",
+   "name":"My First Project",
    "scripts":{
-      "init":"scripts/init.lua",
-      "test":"scripts/test.lua"
+      "test":"scripts/test.lua",
+      "init":"scripts/init.lua"
    },
    "entry_point":"test",
-   "name":"My First Project",
-   "init_script":"init",
-   "icon":"icon"
+   "textures":{
+      "tower":"assets/tower-sheet.png",
+      "icon":"assets/icon.png"
+   },
+   "highlight":"#A256FF",
+   "init_script":"init"
 }

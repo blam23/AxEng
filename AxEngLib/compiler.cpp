@@ -9,11 +9,12 @@
 #include <fstream>
 #include <ranges>
 
-static ax::Error setup_lua_compiler(sol::state& compiler, sol::environment& env)
+static ax::Error run_lua_compiler(sol::state& compiler, sol::environment& env, std::string_view inDir, std::string_view outDir)
 {
 	ax::LogTimer tmr{ "setup lua compiler" };
 
-	sol::load_result load_res{ compiler.load_file("lua_comp/main.lua", sol::load_mode::text)};
+	// Load the compiler script
+	sol::load_result load_res{ compiler.load_file("lua_comp/compiler.lua", sol::load_mode::text)};
 	if (!load_res.valid())
 	{
 		sol::error err = load_res;
@@ -23,49 +24,27 @@ static ax::Error setup_lua_compiler(sol::state& compiler, sol::environment& env)
 	
 	sol::function func{ load_res };
 	sol::set_environment(env, func);
-	const auto& res{ func() };
+	const auto& scriptRes{ func() };
 
-	if (!res.valid())
+	if (!scriptRes.valid())
 	{
-		sol::error err = res;
+		sol::error err = scriptRes;
 		spdlog::error("Failed to run compilation file, err: {}", err.what());
 		return ax::Error::Lua;
 	}
 
-	return ax::Error::Success;
-}
-
-static ax::Error validate_project(std::string_view inDir, sol::state& compiler, sol::environment& env)
-{
-	ax::LogTimer tmr{ "validate project file" };
-
-	sol::function validate{ env["validate_project_file"] };
-	sol::set_environment(env, validate);
-
-	std::string projectFile{ inDir };
-	projectFile += "/project.lua";
-	compiler.load_file(projectFile);
-
-	sol::function func{ compiler.load_file(projectFile, sol::load_mode::text) };
-	sol::set_environment(env, func);
-	const auto& res{ func() };
-
-	if (!res.valid())
+	// Run compiler.lua::compile(inDir, outDir)
+	sol::function compileFunc{ env["compile"] };
+	sol::set_environment(env, compileFunc);
+	const auto& compileRes = compileFunc(inDir, outDir);
+	if (!compileRes.valid())
 	{
-		sol::error err = res;
-		spdlog::error("Failed to run file {}, err: {}", projectFile, err.what());
+		sol::error err = compileRes;
+		spdlog::error("Failed run compile function, err: {}", err.what());
 		return ax::Error::Lua;
 	}
 
-	bool success{ validate() };
-	if (!success)
-	{
-		spdlog::error("Failed to validate project!");
-		return ax::Error::InvalidConfiguration;
-	}
-
-	spdlog::info("<Build> Validated project.");
-	return ax::Error::Success;
+	return static_cast<ax::Error>(compileRes.get<uint32_t>());
 }
 
 static ax::Error setup_directory(std::string_view inDir, std::string_view outDir)
@@ -92,118 +71,6 @@ static ax::Error setup_directory(std::string_view inDir, std::string_view outDir
 	}
 
 	spdlog::info("<Build> Setup output directory.");
-	return ax::Error::Success;
-}
-
-static ax::Error validate_lua_files(std::string_view inDir, std::string_view outDir, sol::environment& env)
-{
-	ax::LogTimer tmr{ "validate scripts" };
-
-	std::filesystem::path in{ inDir };
-	std::filesystem::path out{ outDir };
-	std::filesystem::path newExt{ ".luac" };
-
-	sol::function checkFunc{ env["check_and_copy_script"] };
-	sol::set_environment(env, checkFunc);
-
-	const auto& project{ env["project"] };
-	const sol::table& files{ project["scripts"].get<sol::table>() };
-	auto built_script_table{ env.create() };
-
-	for (const auto& kvp : files)
-	{
-		const std::filesystem::path path{ in / kvp.second.as<std::string>() };
-
-		if (path.extension() != ".lua")
-		{
-			spdlog::error("All script files must have '.lua' extension, '{}' does not.", path.string());
-			return ax::Error::InvalidConfiguration;
-		}
-
-		const auto& substr{ path.string().substr(in.string().length() + 1) };
-		auto newFile{ out / substr };
-
-		newFile.replace_extension(newExt);
-		const auto res{ checkFunc(path.string(), newFile.string(), true) };
-		if (!res.valid())
-		{
-			sol::error err = res;
-			spdlog::error("Failed to validate lua file '{}':\n{}", path.string(), err.what());
-			return ax::Error::Lua;
-		}
-
-		spdlog::debug("<Build> Validated & Copied: '{}' -> '{}'", path.string(), newFile.string());
-
-		built_script_table[kvp.first] = substr + "c";
-	}
-
-	env["built_scripts"] = built_script_table;
-	spdlog::info("<Build> Validated scripts.");
-	return ax::Error::Success;
-}
-
-static ax::Error validate_texture_files(std::string_view inDir, std::string_view outDir, sol::environment& env)
-{
-	ax::LogTimer tmr{ "validate textures" };
-
-	std::filesystem::path in{ inDir };
-	std::filesystem::path out{ outDir };
-
-	sol::function checkFunc{ env["check_and_copy_texture"] };
-	sol::set_environment(env, checkFunc);
-
-	const auto& project{ env["project"] };
-	const sol::table& files{ project["textures"].get<sol::table>() };
-	auto out_texture_table{ env.create() };
-
-	for (const auto& kvp : files)
-	{
-		const std::filesystem::path path{ in / kvp.second.as<std::string>() };
-
-		if (path.extension() != ".png")
-		{
-			spdlog::error("All textures files must have '.png' extension, '{}' does not.", path.string());
-			return ax::Error::InvalidConfiguration;
-		}
-
-		const auto& substr{ path.string().substr(in.string().length() + 1) };
-		auto newFile{ out / substr };
-
-		//newFile.replace_extension(newExt);
-		const auto res{ checkFunc(path.string(), newFile.string(), true) };
-		if (!res.valid())
-		{
-			sol::error err = res;
-			spdlog::error("Failed to validate texture file '{}':\n{}", path.string(), err.what());
-			return ax::Error::InvalidTexture;
-		}
-
-		spdlog::debug("<Build> Validated & Copied: '{}' -> '{}'", path.string(), newFile.string());
-
-		out_texture_table[kvp.first] = substr;
-	}
-
-	env["out_textures"] = out_texture_table;
-	spdlog::info("<Build> Validated textures.");
-	return ax::Error::Success;
-}
-
-static ax::Error create_manifest(std::string_view outDir, sol::environment& env)
-{
-	ax::LogTimer tmr{ "create manifest" };
-
-	sol::function createManifest{ env["create_manifest"] };
-	sol::set_environment(env, createManifest);
-
-	const auto res{ createManifest(outDir, true) };
-	if (!res.valid())
-	{
-		sol::error err = res;
-		spdlog::error("Failed to create manifest: {}", err.what());
-		return ax::Error::Lua;
-	}
-
-	spdlog::info("<Build> Generated Manifest.");
 	return ax::Error::Success;
 }
 
@@ -240,11 +107,53 @@ ax::Error ax::comp::clean(std::string_view outDir)
 	return ret;
 }
 
+ax::Error zip(std::string_view outDir)
+{
+	ax::Error ret{ ax::Error::Success };
+
+	try
+	{
+		std::filesystem::path outPath{ outDir };
+		std::filesystem::path zipPath = outPath;
+		zipPath += ".zip";
+
+		std::string pathPattern = outPath.string();
+		if (pathPattern.back() == '/' || pathPattern.back() == '\\')
+			pathPattern += "*";
+		else
+			pathPattern += "\\*";
+
+		// TODO: Replace this with minizip or some such
+		std::string cmd = "powershell -NoProfile -Command \"Compress-Archive -Path '"
+			+ pathPattern + "' -DestinationPath '" + zipPath.string() + "' -Force\"";
+
+		int rc = std::system(cmd.c_str());
+		if (rc != 0)
+		{
+			spdlog::error("Failed to create zip '{}', exit code: {}", zipPath.string(), rc);
+			ret = ax::Error::IO;
+		}
+		else
+		{
+			spdlog::info("<Build> Packaged output to '{}'.", zipPath.string());
+		}
+	}
+	catch (const std::exception& ex)
+	{
+		spdlog::error("Exception while creating zip: {}", ex.what());
+		ret = ax::Error::IO;
+	}
+
+	return ret;
+}
+
 ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir, bool zipItUp)
 {
 	LogTimer tmr{ "compilation" };
 
 	ax::Error ret{ ax::Error::Success };
+
+	spdlog::info("<Build> Building project from '{}'.", outDir);
 
 	sol::state compiler;
 	compiler.open_libraries
@@ -260,53 +169,14 @@ ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir, boo
 	ax::lua::bindings::bind_to_state(compiler);
 
 	AX_RETURN_ERROR_IF_FAIL(ret, setup_directory(inDir, outDir));
-	AX_RETURN_ERROR_IF_FAIL(ret, setup_lua_compiler(compiler, env));
-
-	AX_RETURN_ERROR_IF_FAIL(ret, validate_project(inDir, compiler, env));
-	AX_RETURN_ERROR_IF_FAIL(ret, validate_lua_files(inDir, outDir, env));
-	AX_RETURN_ERROR_IF_FAIL(ret, validate_texture_files(inDir, outDir, env));
-
-	AX_RETURN_ERROR_IF_FAIL(ret, create_manifest(outDir, env));
+	AX_RETURN_ERROR_IF_FAIL(ret, run_lua_compiler(compiler, env, inDir, outDir));
 
 	ax::lua::bindings::cleanup_state(compiler);
 
-	spdlog::info("<Build> Built project '{}' to '{}'.", env["project"]["name"].get<std::string>(), outDir);
+	spdlog::info("<Build> Built project '{}' to '{}'.", env["compiled_project"]["name"].get<std::string>(), outDir);
 
 	if (zipItUp)
-	{
-		try
-		{
-			std::filesystem::path outPath{ outDir };
-			std::filesystem::path zipPath = outPath;
-			zipPath += ".zip";
-
-			std::string pathPattern = outPath.string();
-			if (pathPattern.back() == '/' || pathPattern.back() == '\\')
-				pathPattern += "*";
-			else
-				pathPattern += "\\*";
-
-			// TODO: Replace this with minizip or some such
-			std::string cmd = "powershell -NoProfile -Command \"Compress-Archive -Path '"
-				+ pathPattern + "' -DestinationPath '" + zipPath.string() + "' -Force\"";
-
-			int rc = std::system(cmd.c_str());
-			if (rc != 0)
-			{
-				spdlog::error("Failed to create zip '{}', exit code: {}", zipPath.string(), rc);
-				ret = ax::Error::IO;
-			}
-			else
-			{
-				spdlog::info("<Build> Packaged output to '{}'.", zipPath.string());
-			}
-		}
-		catch (const std::exception& ex)
-		{
-			spdlog::error("Exception while creating zip: {}", ex.what());
-			ret = ax::Error::IO;
-		}
-	}
+		ret = zip(outDir);
 
 	return ret;
 }
