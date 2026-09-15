@@ -165,19 +165,19 @@ function preview_texture(selected)
 end
 
 function project_browser()
-    ui.w_begin("Script Browser")
+    ui.begin_window("Script Browser")
         selected_script, script_active = list_box("scripts", scripts, selected_script, "\xef\x87\x89")
         if script_active and selected_script > 0 then
             preview_script(selected_script)
         end
-    ui.w_end()
+    ui.end_window()
 
-    ui.w_begin("Texture Browser")
+    ui.begin_window("Texture Browser")
         selected_texture, texture_active = list_box("textures", textures, selected_texture, "\xef\x87\x85")
         if texture_active and selected_texture > 0 then
             preview_texture(selected_texture)
         end
-    ui.w_end()
+    ui.end_window()
 end
 
 reload()

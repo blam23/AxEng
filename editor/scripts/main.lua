@@ -19,7 +19,7 @@ local last_save = 0
 local last_save_err = false
 
 function save_window(delta)
-    ui.w_begin("Save Window")
+    ui.begin_window("Save Window")
         if ui.button("Save") then
             last_save = 3.0
             local err = save_project()
@@ -44,7 +44,7 @@ function save_window(delta)
             ui.same_line()
             ui.text_color(0.7, 0.7, 0, 1, "* Unsaved") -- circle check
         end
-    ui.w_end()
+    ui.end_window()
 end
 
 function close_confirm_modal()
@@ -52,7 +52,7 @@ function close_confirm_modal()
         ui.open_popup("Confirm Close")
         local opened = ui.begin_popup_modal("Confirm Close")
 
-        ui.text("You have unsaved work, are you sure you want to exit?")
+        ui.text("You have unsaved work, are you sure you want to exit?\n\n")
         if ui.button("Yes, close it!") then
             window.request_close(app.window.handle)
             show_close_confirm_modal = false

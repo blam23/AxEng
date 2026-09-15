@@ -12,10 +12,10 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 {
 	auto ui_table{ state.create_table() };
 
-	ui_table["w_begin"] = 
+	ui_table["begin_window"] = 
 		[](const char* name) { return ImGui::Begin(name); };
 
-	ui_table["w_end"] = // 'end' is a keyword in lua so these are now w_begin and w_end
+	ui_table["end_window"] = // 'end' is a keyword in lua so these are now postfix'd with _window
 		[]() { ImGui::End(); };
 
 	ui_table["image"] = 
