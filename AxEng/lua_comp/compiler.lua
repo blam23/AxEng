@@ -211,8 +211,6 @@ local function create_manifest(project, dir, strip_debug_output)
     }
     local output = template_replace(template, data)
 
-    print(output)
-
     local chunk, err_msg = load(output, "!manifest", "t", strip_debug_output)
 
     -- make sure it loads
