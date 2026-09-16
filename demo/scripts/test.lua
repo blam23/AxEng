@@ -43,11 +43,11 @@ function any_key_event(key, pressed, mods)
     window.set_title(app.window.handle, "KEY: " .. tostring(key))
 end
 
-keyboard.subscribe_key(keys.w, w_key_event)
-keyboard.subscribe_key(keys.a, a_key_event)
-keyboard.subscribe_key(keys.s, s_key_event)
-keyboard.subscribe_key(keys.d, d_key_event)
-keyboard.subscribe_key(keys.esc, esc_key_event)
+keyboard.subscribe_key(ax.key_map.w, w_key_event)
+keyboard.subscribe_key(ax.key_map.a, a_key_event)
+keyboard.subscribe_key(ax.key_map.s, s_key_event)
+keyboard.subscribe_key(ax.key_map.d, d_key_event)
+keyboard.subscribe_key(ax.key_map.esc, esc_key_event)
 
 keyboard.subscribe_all(any_key_event)
 

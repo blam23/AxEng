@@ -1,6 +1,7 @@
 #include "lua_engine.h"
 #include "lua_bindings.h"
 #include "log_timer.h"
+#include "script.h"
 
 ax::lua::Manager::~Manager()
 {
@@ -8,18 +9,19 @@ ax::lua::Manager::~Manager()
 		bindings::cleanup_state(m_state);
 }
 
-ax::Error ax::lua::Manager::setup(const ResourceLoader& loader)
+ax::Error ax::lua::Manager::setup()
 {
 	LogTimer _timer{ "setup lua" };
 
-	const auto initLoad{ Resource::load_as_text(loader, "scripts/init.luac") };
+	const auto initLoad{ Resource::embedded_load_as_text<Script>("@init") };
+	std::string initScript{};
 	if (initLoad.has_value())
 	{
-		m_initScript = initLoad.value();
+		initScript = initLoad.value();
 	}
 	else
 	{
-		spdlog::error("Failed to load init script: ResourceLoadError::{}", (int)initLoad.error());
+		spdlog::error("Failed to load @init script: ResourceLoadError::{}", (int)initLoad.error());
 		return ax::Error::IO;
 	}
 
@@ -36,11 +38,11 @@ ax::Error ax::lua::Manager::setup(const ResourceLoader& loader)
 
 	bindings::bind_to_state(m_state);
 
-	const auto res{ m_state.do_string(m_initScript, "Init Script") };
+	const auto res{ m_state.do_string(initScript, "@init") };
 	if (!res.valid())
 	{
 		sol::error err = res;
-		spdlog::error("Failed to run init script {}", err.what());
+		spdlog::error("Failed to run @init script {}", err.what());
 		return ax::Error::Lua;
 	}
 

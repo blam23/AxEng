@@ -10,5 +10,6 @@
 	ERR(InvalidTexture,                5) \
 	ERR(JSONFailure,                   6) \
 	ERR(InvalidScript,                 7) \
+	ERR(InvalidResource,               8) \
 	ERR(ApplicationLoadFailed,      1000) \
 	ERR(AssetNotFound,              1001) \

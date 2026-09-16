@@ -21,9 +21,12 @@ ax::Error ax::run(const std::vector<std::string>& args, Application&& app)
 		if (!loaded)
 			return Error::ApplicationLoadFailed;
 
-		ax::debug::View::register_debug_view(app);
+		if (app.has_window())
+		{
+			ax::debug::View::register_debug_view(app);
+			app.window()->run_loop();
+		}
 
-		app.window()->run_loop();
 		app.cleanup();
 	}
 	ax::teardown();

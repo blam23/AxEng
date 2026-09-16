@@ -1,4 +1,5 @@
-local old_project = import(app, "load_project")
+local comp = ax.import("@compiler_core")
+local json = ax.import("@json")
 
 local save_project = function()
 
@@ -10,7 +11,7 @@ local save_project = function()
         return error_code.JSONFailure
     end
 
-    local ofile = io.open(get_project_directory() .. "/" .. "project.json", "w")
+    local ofile = io.open(comp.get_project_directory_from_args() .. "/" .. "project.json", "w")
     if ofile == nil then
         return error_code.IO
     end

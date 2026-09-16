@@ -132,8 +132,8 @@
     <ClCompile Include="lua_error_bindings.cpp">
       <Filter>core\lua\bindings</Filter>
     </ClCompile>
-    <ClCompile Include="lua_json_bindings.cpp">
-      <Filter>core\lua\bindings</Filter>
+    <ClCompile Include="lua_lib_loader.cpp">
+      <Filter>core\lua\external</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -239,19 +239,30 @@
     <ClInclude Include="lua_error_bindings.h">
       <Filter>core\lua\bindings\headers</Filter>
     </ClInclude>
-    <ClInclude Include="lua_json_bindings.h">
-      <Filter>core\lua\bindings\headers</Filter>
-    </ClInclude>
     <ClInclude Include="IconsFontAwesome6.h">
       <Filter>exterrnal\headers</Filter>
     </ClInclude>
     <ClInclude Include="ImGuiNotify.hpp">
       <Filter>exterrnal\headers</Filter>
     </ClInclude>
+    <ClInclude Include="lua_libs.h">
+      <Filter>core\lua\external</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_lib_loader.h">
+      <Filter>core\lua\external</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\lua_libs\json.lua">
       <Filter>core\lua\external</Filter>
     </Text>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\lua_libs\compiler_core.lua">
+      <Filter>core\lua\external</Filter>
+    </None>
+    <None Include="..\lua_libs\std.lua">
+      <Filter>core\lua\external</Filter>
+    </None>
   </ItemGroup>
 </Project>

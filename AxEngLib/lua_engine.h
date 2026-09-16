@@ -19,7 +19,7 @@ namespace ax::lua
 		Manager() {};
 		~Manager();
 
-		ax::Error setup(const ResourceLoader&);
+		ax::Error setup();
 		ax::Error cleanup();
 
 		sol::environment create_env();
@@ -30,7 +30,6 @@ namespace ax::lua
 
 	private:
 		sol::state m_state;
-		std::string m_initScript;
 		bool m_loaded{ false };
 	};
 }

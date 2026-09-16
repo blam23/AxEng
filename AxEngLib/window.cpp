@@ -40,6 +40,12 @@ ax::Window::~Window()
 		{
 			std::lock_guard lock{ s_windows_mutex };
 			s_windows.erase(m_window);
+
+			if (s_windows.size() == 0)
+			{
+				ImGui_ImplGlfw_Shutdown();
+				ImGui_ImplWGPU_Shutdown();
+			}
 		}
 		glfwDestroyWindow(m_window);
 	}
@@ -68,8 +74,6 @@ bool ax::setup_glfw()
 
 void ax::teardown_glfw()
 {
-	ImGui_ImplGlfw_Shutdown();
-	ImGui_ImplWGPU_Shutdown();
 	glfwTerminate();
 }
 
@@ -427,11 +431,11 @@ bool ax::Window::init_imgui()
 	ax::setup_imgui_style();
 
 	ImGuiIO& io = ImGui::GetIO();
-	ImFontConfig default_font_config;
-	float baseFontSize = 14.0f;
+	ImFontConfig default_font_config{};
+	const auto baseFontSize = 13.0f;
 	default_font_config.SizePixels = baseFontSize;
-	io.Fonts->AddFontDefaultVector(&default_font_config);
-	float iconFontSize = baseFontSize * 2.0f / 3.0f; // FontAwesome fonts need to have their sizes reduced by 2.0f/3.0f in order to align correctly
+	io.Fonts->AddFontDefault(&default_font_config);
+	const auto iconFontSize = baseFontSize * 2.0f / 3.0f; // FontAwesome fonts need to have their sizes reduced by 2.0f/3.0f in order to align correctly
 
 	// merge in icons from Font Awesome
 	static const ImWchar icons_ranges[] = { ICON_MIN_FA, ICON_MAX_16_FA, 0 };

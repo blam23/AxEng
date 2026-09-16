@@ -56,6 +56,11 @@ std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::DirectoryResource
 	return ret;
 }
 
+void ax::EmbeddedResourceLoader::register_resource(ResourceID id, EmbeddedResource res)
+{
+	m_layout[id] = res;
+}
+
 std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::EmbeddedResourceLoader::load(ResourceID id) const
 {
 	std::vector<uint8_t> ret{};
@@ -81,6 +86,7 @@ std::optional<ax::ResourceLoadError> ax::Resource::cleanup_loader(ResourceLoader
 {
 	return std::visit([](auto& l) { return l.cleanup(); }, loader);
 }
+
 
 std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::Resource::load(const ResourceLoader& loader, ResourceID id)
 {
@@ -109,7 +115,7 @@ std::expected<std::string, ax::ResourceLoadError> ax::Resource::load_as_text(con
 #include <minizip-ng/mz_strm_os.h>
 #include <minizip-ng/mz_zip.h>
 
-ax::ZipResourceLoader::ZipResourceLoader(ZipResourceLoader&& in)
+ax::ZipResourceLoader::ZipResourceLoader(ZipResourceLoader&& in) noexcept
 {
 	m_bufferStream = in.m_bufferStream;
 	m_fileStream = in.m_fileStream;
@@ -122,7 +128,7 @@ ax::ZipResourceLoader::ZipResourceLoader(ZipResourceLoader&& in)
 	in.m_zipFile = "";
 }
 
-ax::ZipResourceLoader& ax::ZipResourceLoader::operator=(ZipResourceLoader&& in)
+ax::ZipResourceLoader& ax::ZipResourceLoader::operator=(ZipResourceLoader&& in) noexcept
 {
 	m_bufferStream = in.m_bufferStream;
 	m_fileStream = in.m_fileStream;

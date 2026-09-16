@@ -44,6 +44,8 @@ namespace ax
 		const TextureManager& textures() const noexcept { return m_textures; }
 		TextureManager& textures() noexcept { return m_textures; }
 
+		void set_headless() noexcept { m_create_window = false; }
+
 	private:
 		Application(ResourceLoader&& loader);
 
@@ -59,6 +61,7 @@ namespace ax
 		TextureManager m_textures;
 		type::TypeGenerator m_typeGen{};
 		sol::environment m_env;
+		bool m_create_window{ true };
 
 		std::string m_name{};
 		lua::Script* m_entryPoint{};

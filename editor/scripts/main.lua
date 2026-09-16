@@ -1,3 +1,6 @@
+-- AxEditor
+-- -cxrv --in "$(SolutionDir)editor" --out "E:\AxEdit" --project $(SolutionDir)demo" 
+
 local unsaved = false
 local show_close_confirm_modal = false
 
@@ -11,13 +14,19 @@ function set_saved()
     window.set_title(app.window.handle, "AxEng - " .. project.name)
 end
 
-project = import(app, "load_project")
-local save_project = import(app, "save_project")
-import(app, "project_browser")
+local comp = ax.import("@compiler_core")
+project = comp.open_project(comp.get_project_directory_from_args())
+local validated = comp.validate_project(project)
+if not validated then
+    log.error("Failed to validate project.")
+    return error_code.InvalidConfiguration
+end
+
+local save_project = ax.import("save_project")
+local project_browser = ax.import("project_browser")
 
 local last_save = 0
 local last_save_err = false
-
 function save_window(delta)
     ui.begin_window("Save Window")
         if ui.button("Save") then

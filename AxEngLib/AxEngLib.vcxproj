@@ -176,8 +176,8 @@
     <ClCompile Include="lua_engine.cpp" />
     <ClCompile Include="lua_error_bindings.cpp" />
     <ClCompile Include="lua_imgui_bindings.cpp" />
-    <ClCompile Include="lua_json_bindings.cpp" />
     <ClCompile Include="lua_key_bindings.cpp" />
+    <ClCompile Include="lua_lib_loader.cpp" />
     <ClCompile Include="lua_log_bindings.cpp" />
     <ClCompile Include="application.cpp" />
     <ClCompile Include="lua_texture_bindings.cpp" />
@@ -216,8 +216,9 @@
     <ClInclude Include="imgui_style.h" />
     <ClInclude Include="lua_error_bindings.h" />
     <ClInclude Include="lua_imgui_bindings.h" />
-    <ClInclude Include="lua_json_bindings.h" />
     <ClInclude Include="lua_key_bindings.h" />
+    <ClInclude Include="lua_libs.h" />
+    <ClInclude Include="lua_lib_loader.h" />
     <ClInclude Include="lua_log_bindings.h" />
     <ClInclude Include="lua_texture_bindings.h" />
     <ClInclude Include="lua_type_bindings.h" />
@@ -233,6 +234,10 @@
     <Text Include="..\lua_libs\json.lua">
       <FileType>Document</FileType>
     </Text>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\lua_libs\compiler_core.lua" />
+    <None Include="..\lua_libs\std.lua" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

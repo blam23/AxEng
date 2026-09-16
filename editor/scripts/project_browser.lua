@@ -1,10 +1,12 @@
+local comp = ax.import("@compiler_core")
+
 local selected_script = 0
 local selected_texture = 0
 
 local scripts = {}
 local textures = {}
 
-function reload()
+local function reload()
     old_script_selected = 0
     old_texture_selected = 0
     scripts = {}
@@ -18,7 +20,7 @@ function reload()
     end
 end
 
-function list_box(name, tbl, selected, icon)
+local function list_box(name, tbl, selected, icon)
     ui.set_next_item_width(-1)
     local need_end = ui.begin_listbox("##")
     local i = 0
@@ -67,7 +69,7 @@ local script_cache = ""
 local script_failed = false
 local script_valid = false
 local script_error_msg = ""
-function preview_script(selected)
+local function preview_script(selected)
     if (script_cache == nil and not script_failed) or old_script_selected ~= selected then
         script_failed = false
         old_script_selected = selected
@@ -85,7 +87,7 @@ function preview_script(selected)
             return
         end
 
-        local file = io.open(get_project_directory() .. "/" .. script_file, "r")
+        local file = io.open(comp.get_project_directory_from_args() .. "/" .. script_file, "r")
         if file == nil then
             log.error("Failed to open script: '" .. script_file .. "'.")
             script_failed = true
@@ -122,7 +124,7 @@ end
 local old_texture_selected = 0
 local texture_cache = nil
 local texture_failed = false
-function preview_texture(selected)
+local function preview_texture(selected)
     if (texture_cache == nil and not texture_failed) or old_texture_selected ~= selected then
         texture_failed = false
         old_texture_selected = selected
@@ -144,7 +146,7 @@ function preview_texture(selected)
             return
         end
 
-        local file = io.open(get_project_directory() .. "/" .. texture_file, "rb")
+        local file = io.open(comp.get_project_directory_from_args() .. "/" .. texture_file, "rb")
         if file == nil then
             log.error("Failed to open texture: '" .. texture_file .. "'.")
             texture_failed = true
@@ -182,4 +184,4 @@ end
 
 reload()
 
-return true
+return project_browser

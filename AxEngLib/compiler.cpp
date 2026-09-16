@@ -1,51 +1,11 @@
 #include "compiler.h"
 
-#include "lua_engine.h"
-#include "bind_all.h"
-#include "lua_bindings.h"
-#include "log_timer.h"
+#include "application.h"
+#include "axeng.h"
 
 #include <filesystem>
 #include <fstream>
 #include <ranges>
-
-static ax::Error run_lua_compiler(sol::state& compiler, sol::environment& env, std::string_view inDir, std::string_view outDir)
-{
-	ax::LogTimer tmr{ "setup lua compiler" };
-
-	// Load the compiler script
-	sol::load_result load_res{ compiler.load_file("lua_comp/compiler.lua", sol::load_mode::text)};
-	if (!load_res.valid())
-	{
-		sol::error err = load_res;
-		spdlog::error("Failed to load compilation file, err: {}", err.what());
-		return ax::Error::Lua;
-	}
-	
-	sol::function func{ load_res };
-	sol::set_environment(env, func);
-	const auto& scriptRes{ func() };
-
-	if (!scriptRes.valid())
-	{
-		sol::error err = scriptRes;
-		spdlog::error("Failed to run compilation file, err: {}", err.what());
-		return ax::Error::Lua;
-	}
-
-	// Run compiler.lua::compile(inDir, outDir)
-	sol::function compileFunc{ env["compile"] };
-	sol::set_environment(env, compileFunc);
-	const auto& compileRes = compileFunc(inDir, outDir);
-	if (!compileRes.valid())
-	{
-		sol::error err = compileRes;
-		spdlog::error("Failed run compile function, err: {}", err.what());
-		return ax::Error::Lua;
-	}
-
-	return static_cast<ax::Error>(compileRes.get<uint32_t>());
-}
 
 static ax::Error setup_directory(std::string_view inDir, std::string_view outDir)
 {
@@ -155,25 +115,10 @@ ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir, boo
 
 	spdlog::info("<Build> Building project from '{}'.", outDir);
 
-	sol::state compiler;
-	compiler.open_libraries
-	(
-		sol::lib::base,
-		sol::lib::os,
-		sol::lib::io,
-		sol::lib::string
-	);
-	sol::environment env{ compiler, sol::create, compiler.globals() };
-
-	ax::lua::bindings::setup();
-	ax::lua::bindings::bind_to_state(compiler);
-
 	AX_RETURN_ERROR_IF_FAIL(ret, setup_directory(inDir, outDir));
-	AX_RETURN_ERROR_IF_FAIL(ret, run_lua_compiler(compiler, env, inDir, outDir));
 
-	ax::lua::bindings::cleanup_state(compiler);
-
-	spdlog::info("<Build> Built project '{}' to '{}'.", env["compiled_project"]["name"].get<std::string>(), outDir);
+	const std::vector<std::string> args{ "--in", std::string(inDir), "--out", std::string(outDir) };
+	AX_RETURN_ERROR_IF_FAIL(ret, ax::run_from_directory(args, "../AxCompiler"));
 
 	if (zipItUp)
 		ret = zip(outDir);

@@ -1,5 +1,7 @@
 #include "application.h"
 
+#include "lua_lib_loader.h"
+
 ax::Application ax::Application::from_directory(std::string_view root)
 {
 	return { DirectoryResourceLoader{ root } };
@@ -143,40 +145,43 @@ void ax::Application::add_application_bindings(sol::state& state)
 			}
 		};
 
-	
-	const auto& window{ app["window"] };
+	if (m_create_window)
+	{
+		const auto& window{ app["window"] };
 
-	window["prevent_close"] =
-		[this]()
-		{
-			m_window->prevent_close();
-		};
+		window["prevent_close"] =
+			[this]()
+			{
+				m_window->prevent_close();
+			};
 
-	auto on_ui_table{ state.create_table() };
-	on_ui_table["subscribe"] =
-		[this](std::function<void(double delta)> f) -> size_t
-		{
-			return m_window->get_ui_event_handler().subscribe([f](const ax::WindowUIEvent& e) { f(e.delta); });
-		};
-	on_ui_table["unsubscribe"] =
-		[this](size_t id)
-		{
-			m_window->get_ui_event_handler().unsubscribe(id);
-		};
-	window["on_ui"] = on_ui_table;
 
-	auto on_close_table{ state.create_table() };
-	on_close_table["subscribe"] =
-		[this](std::function<void()> f) -> size_t
-		{
-			return m_window->get_request_close_event_handler().subscribe([f](const ax::WindowRequestCloseEvent&) { f(); });
-		};
-	on_close_table["unsubscribe"] =
-		[this](size_t id)
-		{
-			m_window->get_ui_event_handler().unsubscribe(id);
-		};
-	window["on_close"] = on_close_table;
+		auto on_ui_table{ state.create_table() };
+		on_ui_table["subscribe"] =
+			[this](std::function<void(double delta)> f) -> size_t
+			{
+				return m_window->get_ui_event_handler().subscribe([f](const ax::WindowUIEvent& e) { f(e.delta); });
+			};
+		on_ui_table["unsubscribe"] =
+			[this](size_t id)
+			{
+				m_window->get_ui_event_handler().unsubscribe(id);
+			};
+		window["on_ui"] = on_ui_table;
+
+		auto on_close_table{ state.create_table() };
+		on_close_table["subscribe"] =
+			[this](std::function<void()> f) -> size_t
+			{
+				return m_window->get_request_close_event_handler().subscribe([f](const ax::WindowRequestCloseEvent&) { f(); });
+			};
+		on_close_table["unsubscribe"] =
+			[this](size_t id)
+			{
+				m_window->get_ui_event_handler().unsubscribe(id);
+			};
+		window["on_close"] = on_close_table;
+	}
 }
 
 void ax::Application::add_manifest_bindings(sol::state&)
@@ -187,6 +192,7 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 {
 	LogTimer _timer{ "Application Load" };
 
+	ax::lua::libs::register_embedded();
 	ax::Resource::setup_loader(m_loader);
 	m_scripts.setup({});
 
@@ -212,19 +218,38 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 		return false;
 	}
 
+	ax::lua::Script* stdlib{ m_scripts.load("@std", "@std")};
+	const auto& std_res{ stdlib->run(m_env) };
+	if (!std_res.valid())
+	{
+		const sol::error msg = std_res;
+		spdlog::error("Failed to load @std lib: {}", msg.what());
+		return false;
+	}
+
 	const auto& app{ m_env["app"] };
 	m_name = app["name"];
+	
+	const auto& headless_res{ app["headless"] };
+	if (headless_res.valid())
+		m_create_window = !headless_res.get<bool>();
 
-	init_window();
 	const auto& window{ app["window"] };
-	window["handle"] = (void*)m_window->glfw_handle();
+	if (m_create_window)
+	{
+		init_window();
+		window["handle"] = (void*)m_window->glfw_handle();
 
-	const sol::table& textures{ app["textures"].get<sol::table>() };
-	for (const auto& entry : textures)
-		m_textures.load(entry.first.as<std::string>(), entry.second.as<std::string>());
+		const sol::table& textures{ app["textures"].get<sol::table>() };
+		for (const auto& entry : textures)
+			m_textures.load(entry.first.as<std::string>(), entry.second.as<std::string>());
+	}
 
-	const auto& icon{ m_textures.get(window["icon"])->create_glfw_image() };
-	glfwSetWindowIcon(m_window->glfw_handle(), 1, &icon);
+	if (m_create_window)
+	{
+		const auto& icon{ m_textures.get(window["icon"])->create_glfw_image() };
+		glfwSetWindowIcon(m_window->glfw_handle(), 1, &icon);
+	}
 
 	const sol::table& scripts{ app["scripts"].get<sol::table>() };
 	for (const auto& entry : scripts)
