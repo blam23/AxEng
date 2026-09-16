@@ -93,7 +93,7 @@ local function check_and_copy_scripts(project, in_directory, out_directory)
         end
 
         built_scripts[script_name] = script_path .. "c"
-        log.debug("Compiled script: ", script_name)
+        log.debug("Compiled script: " .. script_name)
     end
 
     log.info("Compiled scripts.")
@@ -128,7 +128,7 @@ local function check_and_copy_textures(project, in_directory, out_directory)
             return false
         end
 
-        log.debug("Compiled texture: ", texture_name)
+        log.debug("Compiled texture: " .. texture_name)
     end
 
     log.info("Compiled textures.")
