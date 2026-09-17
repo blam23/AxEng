@@ -44,6 +44,12 @@ namespace ax
 		const TextureManager& textures() const noexcept { return m_textures; }
 		TextureManager& textures() noexcept { return m_textures; }
 
+		const lua::ScriptManager& scripts() const noexcept { return m_scripts; }
+		lua::ScriptManager& scripts() noexcept { return m_scripts; }
+
+		const sol::environment& debug_get_env(Badge<debug::View>) const noexcept { return m_env; }
+		sol::environment& debug_get_env(Badge<debug::View>) noexcept { return m_env; }
+
 		void set_headless() noexcept { m_create_window = false; }
 
 	private:

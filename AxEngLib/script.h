@@ -40,6 +40,8 @@ namespace ax::lua
 
 		sol::state& state(Badge<Application>) { return m_lua.state(); }
 		const sol::state& state(Badge<Application>) const { return m_lua.state(); }
+		sol::state& debug_get_state(Badge<ax::debug::View>) { return m_lua.state(); }
+		const sol::state& debug_get_state(Badge<ax::debug::View>) const { return m_lua.state(); }
 
 	private:
 		ax::lua::Manager m_lua;

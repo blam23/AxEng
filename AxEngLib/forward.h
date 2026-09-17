@@ -9,6 +9,11 @@ namespace ax
 		class Manager;
 	}
 
+	namespace debug
+	{
+		class View;
+	}
+
 	class Asset;
 	class Application;
 	class Window;
