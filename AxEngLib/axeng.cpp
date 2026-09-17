@@ -1,8 +1,10 @@
 #include "axeng.h"
 #include "imgui.h"
+#include "lua_libs.h"
 
 void ax::init()
 {
+	ax::lua::libs::load_all_embedded();
 	ax::lua::bindings::setup();
 	ax::setup_glfw();
 }

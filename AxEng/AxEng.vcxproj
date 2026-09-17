@@ -160,7 +160,11 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="..\AxEngLib\resource.h" />
     <ClInclude Include="argparse\argparse.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\AxEngLib\AxEngLib.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

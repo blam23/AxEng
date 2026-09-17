@@ -23,5 +23,13 @@
     <ClInclude Include="argparse\argparse.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\AxEngLib\resource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="..\AxEngLib\AxEngLib.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
   </ItemGroup>
 </Project>

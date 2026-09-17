@@ -138,6 +138,9 @@
     <ClCompile Include="lua_event_bindings.cpp">
       <Filter>core\lua\bindings</Filter>
     </ClCompile>
+    <ClCompile Include="lua_libs.cpp">
+      <Filter>core\lua\external</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -270,5 +273,6 @@
     <None Include="..\lua_libs\std.lua">
       <Filter>core\lua\external</Filter>
     </None>
+    <None Include="..\lua_libs\init.lua" />
   </ItemGroup>
 </Project>
