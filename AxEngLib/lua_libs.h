@@ -54,7 +54,7 @@ ax.print_table = function(tbl, lvl)
     for k, v in pairs(tbl) do
         if type(v) == "table" then
             print(indent_str, k, " = {")
-            print_table(v, lvl + 1)
+            ax.print_table(v, lvl + 1)
             print(indent_str, "}")
         else
             print(indent_str, k, " = ", tostring(v))

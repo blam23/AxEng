@@ -27,20 +27,14 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 
 			//ImGui::ShowDemoWindow();
 
-			ImGui::BeginMainMenuBar();
+			ImGui::Begin("Renderer");
 			{
-				ImGui::Text("AxEng");
-
 				if (ImGui::Button("Reload Pipeline"))
 				{
 					app.window()->reload_pipeline();
 				}
-
-				ImGuiIO& io = ImGui::GetIO();
-				ImGui::SameLine(ImGui::GetWindowWidth() - 335);
-				ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 			}
-			ImGui::EndMainMenuBar();
+			ImGui::End();
 
 			ImGui::Begin("Timing");
 			{
@@ -61,9 +55,10 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 				static bool is_global{ false };
 				static std::string label{ "Pick a script to inspect" };
 
-				ImGui::SetNextItemWidth(-1);
+				ImGui::PushItemWidth(-1);
 				if (ImGui::BeginListBox("##lua_vars"))
 				{
+
 					static size_t current{ 0 };
 					size_t n{ 0 };
 					
@@ -96,6 +91,11 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 					}
 
 					ImGui::EndListBox();
+				}
+				else
+				{
+					// Reset if we didn't set the width of the list box (because it was hidden)
+					ImGui::PopItemWidth();
 				}
 
 				if (picked_key.length() > 0)

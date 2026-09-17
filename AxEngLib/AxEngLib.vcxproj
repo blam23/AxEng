@@ -175,6 +175,7 @@
     <ClCompile Include="lua_bindings.cpp" />
     <ClCompile Include="lua_engine.cpp" />
     <ClCompile Include="lua_error_bindings.cpp" />
+    <ClCompile Include="lua_event_bindings.cpp" />
     <ClCompile Include="lua_imgui_bindings.cpp" />
     <ClCompile Include="lua_key_bindings.cpp" />
     <ClCompile Include="lua_lib_loader.cpp" />
@@ -215,6 +216,7 @@
     <ClInclude Include="helpers.h" />
     <ClInclude Include="imgui_style.h" />
     <ClInclude Include="lua_error_bindings.h" />
+    <ClInclude Include="lua_event_bindings.h" />
     <ClInclude Include="lua_imgui_bindings.h" />
     <ClInclude Include="lua_key_bindings.h" />
     <ClInclude Include="lua_libs.h" />

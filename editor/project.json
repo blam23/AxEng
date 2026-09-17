@@ -1,17 +1,20 @@
 {
-    "name": "AxEdit",
-    "entry_point": "main",
-    "icon": "icon",
-    "highlight": "#A256FF",
-    "scripts": {
-        "main": "scripts/main.lua",
-        "project_browser": "scripts/project_browser.lua",
-        "save_project": "scripts/save_project.lua"
-    },
-    "textures": {
-        "icon": "assets/icon.png",
-        "frilly": "assets/frilly.png",
-        "error": "assets/error.png"
-    },
-    "types": {}
+   "textures":{
+      "error":"assets/error.png",
+      "icon":"assets/icon.png",
+      "frilly":"assets/frilly.png"
+   },
+   "entry_point":"main",
+   "highlight":"#A256FF",
+   "icon":"icon",
+   "name":"AxEdit",
+   "types":[
+
+   ],
+   "scripts":{
+      "main":"scripts/main.lua",
+      "save_project":"scripts/save_project.lua",
+      "project_browser":"scripts/project_browser.lua",
+      "asset_inspector":"scripts/asset_inspector.lua"
+   }
 }

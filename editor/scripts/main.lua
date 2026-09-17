@@ -1,34 +1,52 @@
 -- AxEditor
 -- -cxrv --in "$(SolutionDir)editor" --out "E:\AxEdit" --project $(SolutionDir)demo" 
 
+local comp = ax.import("@compiler_core")
+local save_project = ax.import("save_project")
+local project_browser = ax.import("project_browser")
+local asset_inspector = ax.import("asset_inspector")
+
 local unsaved = false
 local show_close_confirm_modal = false
 
 function set_unsaved()
     unsaved = true
-    window.set_title(app.window.handle, "AxEng - " .. project.name .. " *")
+    window.set_title(app.window.handle, "AxEdit - " .. project.name .. " *")
 end
 
 function set_saved()
     unsaved = false
-    window.set_title(app.window.handle, "AxEng - " .. project.name)
+    window.set_title(app.window.handle, "AxEdit - " .. project.name)
 end
 
-local comp = ax.import("@compiler_core")
-project = comp.open_project(comp.get_project_directory_from_args())
-local validated = comp.validate_project(project)
-if not validated then
-    log.error("Failed to validate project.")
-    return error_code.InvalidConfiguration
+function asset_edited(data)
+    local tbl = data.tbl
+    local old_key = data.old_key
+    local old_value = data.old_value
+    local new_key = data.new_key
+    local new_value = data.new_value
+
+    if old_key == new_key and old_value == new_value then
+        return
+    end
+
+    if old_key ~= nil then
+        project[tbl][old_key] = nil -- remove old entry
+    end
+
+    project[tbl][new_key] = new_value
+    set_unsaved()
+    project_browser.reload()
 end
 
-local save_project = ax.import("save_project")
-local project_browser = ax.import("project_browser")
+lua_event.subscribe(asset_inspector.on_asset_edited, asset_edited)
+
 
 local last_save = 0
 local last_save_err = false
-function save_window(delta)
-    ui.begin_window("Save Window")
+function main_menu(delta)
+    ui.begin_main_menu_bar("Save Window")
+        ui.text("AxEng")
         if ui.button("Save") then
             last_save = 3.0
             local err = save_project()
@@ -53,7 +71,7 @@ function save_window(delta)
             ui.same_line()
             ui.text_color(0.7, 0.7, 0, 1, "* Unsaved") -- circle check
         end
-    ui.end_window()
+    ui.end_main_menu_bar()
 end
 
 function close_confirm_modal()
@@ -80,8 +98,9 @@ end
 
 function main_ui(delta)
     ui.dock_space_over_viewport()
-    save_window(delta)
-    project_browser()
+    main_menu(delta)
+    project_browser.display()
+    asset_inspector.display()
     close_confirm_modal()
 end
 
@@ -94,7 +113,18 @@ function tried_to_close()
     end
 end
 
+project = comp.open_project(comp.get_project_directory_from_args())
+local validated = comp.validate_project(project)
+if not validated then
+    log.error("Failed to validate project.")
+    return error_code.InvalidConfiguration
+end
+
 set_saved()
+
+project_browser.init()
+asset_inspector.init()
+
 app.window.on_ui.subscribe(main_ui)
 app.window.on_close.subscribe(tried_to_close)
 

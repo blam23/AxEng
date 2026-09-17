@@ -115,8 +115,26 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 			return std::make_tuple(col[0], col[1], col[2], col[3], changed);
 		};
 
+	ui_table["begin_main_menu_bar"] =
+		[]() { return ImGui::BeginMainMenuBar(); };
+
+	ui_table["end_main_menu_bar"] =
+		[]() { return ImGui::EndMainMenuBar(); };
+
+	ui_table["begin_menu_bar"] =
+		[]() { return ImGui::BeginMenuBar(); };
+
+	ui_table["end_menu_bar"] =
+		[]() { return ImGui::EndMenuBar(); };
+
 	ui_table["same_line"] =
 		[]() { ImGui::SameLine(); };
+
+	ui_table["get_window_size"] =
+		[]() { return std::pair(ImGui::GetWindowSize().x, ImGui::GetWindowSize().y); };
+
+	ui_table["same_line_offset"] =
+		[](float offset_x) { ImGui::SameLine(offset_x); };
 
 	ui_table["push_item_width"] =
 		[](float width) { ImGui::PushItemWidth(width); };
