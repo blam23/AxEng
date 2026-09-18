@@ -13,7 +13,7 @@ void ax::ImGuiHelper::add_font(std::string_view name, ImFont* font)
 	fonts.emplace(name, font);
 }
 
-ImFont* ax::ImGuiHelper::get(const std::string& name)
+ImFont* ax::ImGuiHelper::get_font(const std::string& name)
 {
 	std::lock_guard lock{ fontMutex };
 

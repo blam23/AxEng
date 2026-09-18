@@ -4,10 +4,17 @@
 #include "spdlog/spdlog.h"
 #include "imgui.h"
 #include "ImGuiNotify.hpp"
+#include "TextEditor.h"
 
 #include <string>
 #include <tuple>
 #include <cstring>
+#include <map>
+#include <mutex>
+
+std::mutex s_textEditorsMutex{};
+std::map<std::size_t, TextEditor> s_textEditors{};
+std::size_t s_nextEditorID;
 
 void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 {
@@ -211,8 +218,8 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 	ui_table["push_font"] =
 		sol::overload
 		(
-			[](const std::string& name, float size) { ImGui::PushFont(ax::ImGuiHelper::get(name), size); },
-			[](const std::string& name) { ImGui::PushFont(ax::ImGuiHelper::get(name), 0.0f); }
+			[](const std::string& name, float size) { ImGui::PushFont(ax::ImGuiHelper::get_font(name), size); },
+			[](const std::string& name) { ImGui::PushFont(ax::ImGuiHelper::get_font(name), 0.0f); }
 		);
 
 	ui_table["pop_font"] =
@@ -223,6 +230,50 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 
 	ui_table["separator"] =
 		[]() { ImGui::Separator(); };
+
+	ui_table["create_editor"] =
+		[]() -> std::size_t
+		{
+			std::lock_guard lock{ s_textEditorsMutex };
+			s_nextEditorID++;
+			s_textEditors.insert({ s_nextEditorID, {} });
+
+			auto& editor{ s_textEditors[s_nextEditorID] };
+			editor.SetShowLineNumbersEnabled(true);
+			editor.SetShowMiniMapEnabled(true);
+			editor.SetShowMatchingBrackets(true);
+			editor.SetShowWhitespacesEnabled(true);
+			editor.SetInsertSpacesOnTabs(true);
+			editor.SetCaretsVisible(true);
+			editor.SetCompletePairedGlyphs(false);
+			editor.SetLanguage(TextEditor::Language::Lua());
+
+			return s_nextEditorID;
+		};
+
+	ui_table["delete_editor"] =
+		[](std::size_t id)
+		{
+			s_textEditors.erase(id);
+		};
+
+	ui_table["set_editor_text"] =
+		[](std::size_t id, const std::string& t)
+		{
+			s_textEditors[id].SetText(t);
+		};
+
+	ui_table["set_editor_read_only"] =
+		[](std::size_t id, bool readonly)
+		{
+			s_textEditors[id].SetReadOnlyEnabled(readonly);
+		};
+
+	ui_table["render_editor"] =
+		[](std::size_t id)
+		{
+			s_textEditors[id].Render("Editor");
+		};
 
 	state["ui"] = ui_table;
 }

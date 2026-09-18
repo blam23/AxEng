@@ -144,6 +144,9 @@
     <ClCompile Include="imgui_helper.cpp">
       <Filter>core</Filter>
     </ClCompile>
+    <ClCompile Include="TextEditor.cpp">
+      <Filter>exterrnal</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -163,9 +166,6 @@
     </ClInclude>
     <ClInclude Include="log_timer.h">
       <Filter>core\headers</Filter>
-    </ClInclude>
-    <ClInclude Include="glfw3webgpu.h">
-      <Filter>exterrnal</Filter>
     </ClInclude>
     <ClInclude Include="stb_image.h">
       <Filter>exterrnal\headers</Filter>
@@ -265,6 +265,12 @@
     </ClInclude>
     <ClInclude Include="imgui_helper.h">
       <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="TextEditor.h">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="glfw3webgpu.h">
+      <Filter>exterrnal\headers</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

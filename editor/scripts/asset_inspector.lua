@@ -45,6 +45,7 @@ local function preview_script(script_name)
                 local res, err = load(script_cache, "*")
                 if res then
                     script_valid = true
+                    ui.set_editor_text(inspector.display_editor, script_cache)
                 else
                     log.error(err)
                     script_valid = false
@@ -54,7 +55,6 @@ local function preview_script(script_name)
         end
     end
 
-    -- todo: replace with code editor
     if not script_failed then
         ui.same_line()
         if script_valid then
@@ -65,7 +65,7 @@ local function preview_script(script_name)
         end
         ui.separator_text("Preview")
         ui.push_font("mono", 20.0)
-        ui.text(script_cache)
+        ui.render_editor(inspector.display_editor)
         ui.pop_font()
     else
         ui.text_color(0.7, 0, 0, 1.0, "\xef\x81\xaa Invalid script!")
@@ -139,6 +139,12 @@ end
 
 inspector.init = function(project)
     inspector.project = project
+    inspector.display_editor = ui.create_editor()
+    ui.set_editor_read_only(inspector.display_editor, true)
+end
+
+inspector.teardown = function()
+    ui.delete_editor(inspector.display_editor)
 end
 
 return inspector
