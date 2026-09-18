@@ -41,7 +41,7 @@ end
 local function list_box(name, tbl, selected, icon)
     local cr, cg, cb, ca = table.unpack(get_color(name))
     ui.set_next_item_width(-1)
-    local need_end = ui.begin_listbox("##")
+    local need_end = ui.begin_sized_listbox("##", -1, -10)
     ui.text_color(cr, cg, cb, ca, name:sub(1,1):upper() .. name:sub(2))
     local i = 0
     for k,v in pairs(browser.project[name]) do
@@ -65,7 +65,7 @@ local function list_box(name, tbl, selected, icon)
 end
 
 browser.display = function()
-    ui.begin_window("Asset Browser")
+    ui.begin_window("\xef\xa0\x82 Asset Browser") -- Folder Tree Icon
         browser.selected_script, browser.script_active = list_box("scripts", scripts, browser.selected_script, "\xef\x87\x89")
         browser.selected_texture, browser.texture_active = list_box("textures", textures, browser.selected_texture, "\xef\x87\x85")
     ui.end_window()

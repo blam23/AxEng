@@ -1,5 +1,6 @@
 #include "window.h"
 #include "imgui_style.h"
+#include "imgui_helper.h"
 #include "log_timer.h"
 
 #include "spdlog/spdlog.h"
@@ -430,21 +431,32 @@ bool ax::Window::init_imgui()
 	ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 	ax::setup_imgui_style();
 
+	// Default font
 	ImGuiIO& io = ImGui::GetIO();
 	ImFontConfig default_font_config{};
-	const auto baseFontSize = 13.0f;
+	const auto baseFontSize = 15.0f;
 	default_font_config.SizePixels = baseFontSize;
-	io.Fonts->AddFontDefault(&default_font_config);
-	const auto iconFontSize = baseFontSize * 2.0f / 3.0f; // FontAwesome fonts need to have their sizes reduced by 2.0f/3.0f in order to align correctly
+	default_font_config.ExtraSizeScale = 1.0f;
+	io.Fonts->AddFontFromFileTTF("../fonts/Montserrat-Medium.ttf", baseFontSize, &default_font_config);
 
-	// merge in icons from Font Awesome
+	// Merge in icons from Font Awesome
+	const auto iconFontSize = baseFontSize * 2.0f / 3.0f;
 	static const ImWchar icons_ranges[] = { ICON_MIN_FA, ICON_MAX_16_FA, 0 };
-	ImFontConfig icons_config;
+	ImFontConfig icons_config{};
 	icons_config.MergeMode = true;
 	icons_config.PixelSnapH = true;
 	icons_config.GlyphMinAdvanceX = iconFontSize;
 	icons_config.SizePixels = iconFontSize;
-	io.Fonts->AddFontFromFileTTF(FONT_ICON_FILE_NAME_FAS, iconFontSize, &icons_config, icons_ranges);
+	icons_config.ExtraSizeScale = 1.0f;
+	const auto merged_font{ io.Fonts->AddFontFromFileTTF(FONT_ICON_FILE_NAME_FAS, iconFontSize, &icons_config, icons_ranges) };
+	ax::ImGuiHelper::add_font("default", merged_font);
+
+	// Add a monospace font
+	ImFontConfig mono_font_config{};
+	mono_font_config.SizePixels = baseFontSize;
+	mono_font_config.ExtraSizeScale = 1.0f;
+	const auto mono_font{ io.Fonts->AddFontFromFileTTF("../fonts/SourceCodePro-Medium.ttf", baseFontSize, &mono_font_config) };
+	ax::ImGuiHelper::add_font("mono", mono_font);
 
 	return true;
 }

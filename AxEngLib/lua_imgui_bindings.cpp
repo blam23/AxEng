@@ -1,4 +1,5 @@
 #include "lua_imgui_bindings.h"
+#include "imgui_helper.h"
 
 #include "spdlog/spdlog.h"
 #include "imgui.h"
@@ -148,6 +149,9 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 	ui_table["begin_listbox"] =
 		[](const char* label) { return ImGui::BeginListBox(label); };
 
+	ui_table["begin_sized_listbox"] =
+		[](const char* label, float w, float h) { return ImGui::BeginListBox(label, ImVec2(w, h)); };
+
 	ui_table["end_listbox"] =
 		[]() { ImGui::EndListBox(); };
 
@@ -203,6 +207,22 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 
 	ui_table["end_combo"] =
 		[]() { ImGui::EndCombo(); };
+
+	ui_table["push_font"] =
+		sol::overload
+		(
+			[](const std::string& name, float size) { ImGui::PushFont(ax::ImGuiHelper::get(name), size); },
+			[](const std::string& name) { ImGui::PushFont(ax::ImGuiHelper::get(name), 0.0f); }
+		);
+
+	ui_table["pop_font"] =
+		[]() { ImGui::PopFont(); };
+
+	ui_table["separator_text"] =
+		[](const char* text) { ImGui::SeparatorText(text); };
+
+	ui_table["separator"] =
+		[]() { ImGui::Separator(); };
 
 	state["ui"] = ui_table;
 }

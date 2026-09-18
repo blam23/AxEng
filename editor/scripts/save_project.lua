@@ -39,11 +39,14 @@ save.project = function(project)
         return error_code.InvalidConfiguration
     end
 
+    local directory = project.directory
+    project.directory = nil -- don't save this
     local success, ret = pcall(function() return json.encode(project) end)
     if not success then
         log.error("Failed to encode project.json: ", tostring(ret))
         return error_code.JSONFailure
     end
+    project.directory = directory
 
     if ret == nil then
         log.error("Json encode returned nil")

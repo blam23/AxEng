@@ -1,22 +1,21 @@
 {
+   "icon":"icon",
+   "highlight":"#A256FF",
+   "entry_point":"main",
    "scripts":{
-      "build_info":"scripts/build_info.lua",
       "main":"scripts/main.lua",
       "save_project":"scripts/save_project.lua",
       "project_browser":"scripts/project_browser.lua",
-      "asset_inspector":"scripts/asset_inspector.lua"
+      "asset_inspector":"scripts/asset_inspector.lua",
+      "build_info":"scripts/build_info.lua"
    },
-   "entry_point":"main",
+   "textures":{
+      "frilly":"assets/frilly.png",
+      "error":"assets/error.png",
+      "icon":"assets/icon.png"
+   },
    "name":"AxEdit",
    "types":[
 
-   ],
-   "highlight":"#A256FF",
-   "textures":{
-      "icon":"assets/icon.png",
-      "error":"assets/error.png",
-      "frilly":"assets/frilly.png"
-   },
-   "icon":"icon",
-   "directory":"E:\\AxEng\\editor"
+   ]
 }

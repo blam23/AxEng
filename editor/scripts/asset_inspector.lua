@@ -23,32 +23,34 @@ local script_failed = false
 local script_valid = false
 local script_error_msg = ""
 local function preview_script(script_name)
-    if (script_cache == nil and not script_failed) or old_script_name ~= selected then
+    if (script_cache == nil and not script_failed) or old_script_name ~= script_name then
         script_failed = false
         old_script_name = script_name
         local script_file = inspector.project.scripts[script_name]
 
         if script_file == nil then
             log.error("Failed to get script file from key: '" .. script_name .. "'")
-            return
-        end
-
-        local file = io.open(comp.get_project_directory_from_args() .. "/" .. script_file, "r")
-        if file == nil then
-            log.error("Failed to open script: '" .. script_file .. "'.")
             script_failed = true
-            return
         end
-        script_cache = file:read("*all")
-        file:close()
 
-        local res, err = load(script_cache, "*")
-        if res then
-            script_valid = true
-        else
-            log.error(err)
-            script_valid = false
-            script_error_msg = err
+        if not script_failed then
+            local file = io.open(comp.get_project_directory_from_args() .. "/" .. script_file, "r")
+            if file == nil then
+                log.error("Failed to open script: '" .. script_file .. "'.")
+                script_failed = true
+            else
+                script_cache = file:read("*all")
+                file:close()
+
+                local res, err = load(script_cache, "*")
+                if res then
+                    script_valid = true
+                else
+                    log.error(err)
+                    script_valid = false
+                    script_error_msg = err
+                end
+            end
         end
     end
 
@@ -61,7 +63,10 @@ local function preview_script(script_name)
             ui.text_color(0.7, 0, 0, 1.0, "\xef\x81\xaa")
             ui.text_color(0.8, 0.3, 0.2, 1.0, script_error_msg)
         end
+        ui.separator_text("Preview")
+        ui.push_font("mono", 20.0)
         ui.text(script_cache)
+        ui.pop_font()
     else
         ui.text_color(0.7, 0, 0, 1.0, "\xef\x81\xaa Invalid script!")
     end
@@ -89,19 +94,21 @@ local function preview_texture(texture_name)
     end
 
     if not texture_failed and texture_cache and texture_cache.valid then
+        ui.separator_text("Preview")
         ui.image(texture_cache)
     else
         ui.text_color(0.7, 0, 0, 1.0, "\xef\x81\xaa Invalid texture!")
+        ui.separator_text("Preview")
         ui.image(error_texture)
     end
 end
 
 inspector.display = function()
-    ui.begin_window("Inspector")
+    ui.begin_window("\xef\x80\x82 Inspector") -- Magnifying Glass Icon
         if inspector.current_asset then
             local k = inspector.current_asset[2][1]
             local v = inspector.current_asset[2][2]
-            
+            ui.separator_text("Info")
             local changed, changed_2 = false
             name_input, changed = ui.input_text("Name", name_input)
             path_input, changed_2 = ui.input_text("Path", path_input)
@@ -124,6 +131,8 @@ inspector.display = function()
             elseif inspector.current_asset[1] == "textures" then
                 preview_texture(k)
             end
+        else
+            ui.text("No asset selected")
         end
     ui.end_window()
 end

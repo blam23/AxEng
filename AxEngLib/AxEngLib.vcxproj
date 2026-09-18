@@ -175,6 +175,7 @@
     <ClCompile Include="debug_view.cpp" />
     <ClCompile Include="error.cpp" />
     <ClCompile Include="event.cpp" />
+    <ClCompile Include="imgui_helper.cpp" />
     <ClCompile Include="keyboard.cpp" />
     <ClCompile Include="lua_bindings.cpp" />
     <ClCompile Include="lua_engine.cpp" />
@@ -211,6 +212,7 @@
     <ClInclude Include="event.h" />
     <ClInclude Include="forward.h" />
     <ClInclude Include="IconsFontAwesome6.h" />
+    <ClInclude Include="imgui_helper.h" />
     <ClInclude Include="ImGuiNotify.hpp" />
     <ClInclude Include="imgui_zoomable_image.h" />
     <ClInclude Include="keyboard.h" />

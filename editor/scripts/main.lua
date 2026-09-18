@@ -46,8 +46,8 @@ local last_save = 0
 local last_save_err = false
 function main_menu(delta)
     ui.begin_main_menu_bar("Save Window")
-        ui.text("AxEng")
-        if ui.button("Save") then
+        ui.text(project.name)
+        if ui.button("\xef\x83\x87 Save") then -- Floppy Disk Icon
             last_save = 3.0
             local err = save.all(project, build_info.build_data)
             last_save_err = err

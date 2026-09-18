@@ -141,6 +141,9 @@
     <ClCompile Include="lua_libs.cpp">
       <Filter>core\lua\external</Filter>
     </ClCompile>
+    <ClCompile Include="imgui_helper.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -259,6 +262,9 @@
     </ClInclude>
     <ClInclude Include="lua_event_bindings.h">
       <Filter>core\lua\bindings\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="imgui_helper.h">
+      <Filter>core\headers</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
