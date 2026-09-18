@@ -2,6 +2,8 @@
 -- Change some built-ins
 --
 
+local _ax_version = 1
+
 -- use spdlog lib to print
 local __print = print
 print = function(...)

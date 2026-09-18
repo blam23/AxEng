@@ -26,7 +26,7 @@ local function preview_script(script_name)
     if (script_cache == nil and not script_failed) or old_script_name ~= selected then
         script_failed = false
         old_script_name = script_name
-        local script_file = project.scripts[script_name]
+        local script_file = inspector.project.scripts[script_name]
 
         if script_file == nil then
             log.error("Failed to get script file from key: '" .. script_name .. "'")
@@ -74,7 +74,7 @@ local function preview_texture(texture_name)
     if (texture_cache == nil and not texture_failed) or old_texture_name ~= texture_name then
         texture_failed = false
         old_texture_name = texture_name
-        local texture_file = project.textures[texture_name]
+        local texture_file = inspector.project.textures[texture_name]
 
         local file = io.open(comp.get_project_directory_from_args() .. "/" .. texture_file, "rb")
         if file == nil then
@@ -128,7 +128,8 @@ inspector.display = function()
     ui.end_window()
 end
 
-inspector.init = function()
+inspector.init = function(project)
+    inspector.project = project
 end
 
 return inspector

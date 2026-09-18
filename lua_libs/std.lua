@@ -1,7 +1,9 @@
 -- AxEng Std Lua Library
 -- Automatically runs before any other script to help setup the environment
 
-ax = {}
+ax = {
+    revision = 1
+}
 
 ax.get_table_size = function(tbl)
     local c = 0

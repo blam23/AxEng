@@ -1,0 +1,47 @@
+{
+   "configs":{
+      "fast_debug":{
+         "compile_scripts":false,
+         "defines":[
+            "DEBUG",
+            "FASTDEBUG"
+         ],
+         "flags":[
+            "/O2 /Ot /Oi /dynamicdeopt"
+         ]
+      },
+      "release":{
+         "strip_compiled_script_symbols":true,
+         "defines":[
+            "RELEASE"
+         ],
+         "compile_scripts":true,
+         "flags":[
+            "/O2 /Ot /Oi /GL"
+         ]
+      },
+      "debug":{
+         "compile_scripts":false,
+         "defines":[
+            "DEBUG"
+         ],
+         "flags":[
+            "/Od"
+         ]
+      }
+   },
+   "all_configs":{
+      "default_config":"fast_debug",
+      "defines":[
+
+      ],
+      "flags":[
+         "/std:c++latest",
+         "/std:clatest",
+         "/utf-8"
+      ]
+   },
+   "compiler":{
+      "type":"msvc"
+   }
+}

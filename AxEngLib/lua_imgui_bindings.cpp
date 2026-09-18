@@ -198,5 +198,11 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 	ui_table["open_popup"] =
 		[](const char* name) { ImGui::OpenPopup(name); };
 
+	ui_table["begin_combo"] =
+		[](const char* label, const char* preview_value) { return ImGui::BeginCombo(label, preview_value); };
+
+	ui_table["end_combo"] =
+		[]() { ImGui::EndCombo(); };
+
 	state["ui"] = ui_table;
 }

@@ -1,6 +1,8 @@
 local json = ax.import("@json")
 
-local comp = {}
+local comp = {
+    revision = 1
+}
 
 local found_error = false
 local function key_exists(tbl, key)
@@ -24,6 +26,8 @@ comp.open_project = function(directory)
         log.error("Failed to parse project.json: ", ret)
         return nil
     end
+
+    ret.directory = directory
 
     return ret
 end
@@ -69,6 +73,24 @@ comp.get_project_directory_from_args = function()
         end
     end
 
+    return ret
+end
+
+comp.get_build_data = function(project)
+    local file = io.open(project.directory .. "/" ..  "build.json", "r")
+    if file == nil then
+        return error_code.IO
+    end
+    local json_str = file:read("*all")
+    file:close()
+
+    local success, ret = pcall(function() return json.decode(json_str) end)
+
+    if not success then
+        log.error("Failed to parse build.json: ", ret)
+        return nil
+    end
+    
     return ret
 end
 

@@ -2,9 +2,10 @@
 -- -cxrv --in "$(SolutionDir)editor" --out "E:\AxEdit" --project $(SolutionDir)demo" 
 
 local comp = ax.import("@compiler_core")
-local save_project = ax.import("save_project")
+local save = ax.import("save_project")
 local project_browser = ax.import("project_browser")
 local asset_inspector = ax.import("asset_inspector")
+local build_info = ax.import("build_info")
 
 local unsaved = false
 local show_close_confirm_modal = false
@@ -41,7 +42,6 @@ end
 
 lua_event.subscribe(asset_inspector.on_asset_edited, asset_edited)
 
-
 local last_save = 0
 local last_save_err = false
 function main_menu(delta)
@@ -49,14 +49,14 @@ function main_menu(delta)
         ui.text("AxEng")
         if ui.button("Save") then
             last_save = 3.0
-            local err = save_project()
+            local err = save.all(project, build_info.build_data)
             last_save_err = err
             if (err ~= error_code.Success) then
                 log.error("Failed to save project: " .. tostring(msg))
-                ui.insert_toast(ui.toast_type.Error, 3000, "Failed to save project.json!")
+                ui.insert_toast(ui.toast_type.Error, 3000, "Failed to save project!")
             else
                 set_saved()
-                ui.insert_toast(ui.toast_type.Success, 3000, "Saved project.json")
+                ui.insert_toast(ui.toast_type.Success, 3000, "Saved project")
             end
         end
         if last_save > 0 then
@@ -101,6 +101,7 @@ function main_ui(delta)
     main_menu(delta)
     project_browser.display()
     asset_inspector.display()
+    build_info.display()
     close_confirm_modal()
 end
 
@@ -122,8 +123,9 @@ end
 
 set_saved()
 
-project_browser.init()
-asset_inspector.init()
+project_browser.init(project)
+asset_inspector.init(project)
+build_info.init(project)
 
 app.window.on_ui.subscribe(main_ui)
 app.window.on_close.subscribe(tried_to_close)

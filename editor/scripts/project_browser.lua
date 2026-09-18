@@ -18,11 +18,11 @@ browser.reload = function()
     old_texture_selected = 0
     scripts = {}
     textures = {}
-    for k,v in pairs(project.scripts) do
+    for k,v in pairs(browser.project.scripts) do
         table.insert(scripts, { k, v })
     end
 
-    for k,v in pairs(project.textures) do
+    for k,v in pairs(browser.project.textures) do
         table.insert(textures, { k, v })
     end
 end
@@ -44,7 +44,7 @@ local function list_box(name, tbl, selected, icon)
     local need_end = ui.begin_listbox("##")
     ui.text_color(cr, cg, cb, ca, name:sub(1,1):upper() .. name:sub(2))
     local i = 0
-    for k,v in pairs(project[name]) do
+    for k,v in pairs(browser.project[name]) do
         i = i + 1
         ui.text_color(cr, cg, cb, ca, icon)
         ui.same_line()
@@ -71,7 +71,8 @@ browser.display = function()
     ui.end_window()
 end
 
-browser.init = function()
+browser.init = function(project)
+    browser.project = project
     browser.reload()
 end
 
