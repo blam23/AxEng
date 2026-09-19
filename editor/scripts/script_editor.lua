@@ -4,10 +4,13 @@ local project_browser = ax.import("project_browser")
 local editor = {
     editors = {},
     current_editor = 0,
+    is_active = false
 }
 
+local old_active = false
 editor.display = function()
     ui.begin_window("\xef\x8c\x83  Lua Editor") -- Pencil Icon
+        editor.is_active = ui.is_window_focused()
         ui.push_item_width(-1)
         if ui.begin_tab_bar("ScriptTabs") then
             local i = 0
@@ -78,6 +81,13 @@ editor.init = function(project)
 end
 
 function s_key_event(pressed, mods)
+    -- Don't check want_capture_keyboard here as that will
+    --  be true when the editor is active.
+
+    if not editor.is_active then
+        return
+    end
+
     if pressed and mods == keyboard.modifier.ctrl then
         try_save_current()
     elseif pressed and mods == keyboard.modifier.shift | keyboard.modifier.ctrl then

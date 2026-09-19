@@ -20,11 +20,17 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 {
 	auto ui_table{ state.create_table() };
 
+	ui_table["want_capture_keyboard"] =
+		[]() -> bool { return ImGui::GetIO().WantCaptureKeyboard; };
+
 	ui_table["begin_window"] = 
 		[](const char* name) { return ImGui::Begin(name); };
 
 	ui_table["end_window"] = // 'end' is a keyword in lua so these are now postfix'd with _window
 		[]() { ImGui::End(); };
+
+	ui_table["is_window_focused"] =
+		[]() { return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows); };
 
 	ui_table["image"] = 
 		[](const sol::table& img)
