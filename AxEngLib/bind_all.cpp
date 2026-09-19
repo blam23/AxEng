@@ -25,6 +25,7 @@ void ax::lua::bindings::setup()
 	bindings::register_binding("window", &setup_window_bindings);
 
 	bindings::register_binding("ui", &setup_imgui_bindings);
+	bindings::register_cleanup("ui", &cleanup_imgui_bindings);
 
 	bindings::register_binding("texture", &setup_texture_bindings);
 

@@ -3,6 +3,7 @@
 
 #include "spdlog/spdlog.h"
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "ImGuiNotify.hpp"
 #include "TextEditor.h"
 
@@ -324,4 +325,10 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 		};
 
 	state["ui"] = ui_table;
+}
+
+void ax::lua::bindings::cleanup_imgui_bindings(sol::state&)
+{
+	std::lock_guard lock{ s_textEditorsMutex };
+	s_textEditors.clear();
 }
