@@ -3,7 +3,6 @@
 
 #include "spdlog/spdlog.h"
 #include "imgui.h"
-#include "imgui_internal.h"
 #include "ImGuiNotify.hpp"
 #include "TextEditor.h"
 
@@ -319,9 +318,44 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 		};
 
 	ui_table["render_editor"] =
+		[](std::size_t id, float marginBottom)
+		{
+			const auto area{ ImGui::GetContentRegionAvail() };
+			const auto editorSize{ ImVec2(0.0f, area.y - marginBottom - (ImGui::GetStyle().WindowPadding.y)) };
+			s_textEditors[id].Render("Editor", editorSize);
+		};
+
+	ui_table["get_editor_cursor"] =
 		[](std::size_t id)
 		{
-			s_textEditors[id].Render("Editor");
+			const auto pos{ s_textEditors[id].GetCursorPosition(0) };
+			return std::pair(pos.line, pos.index);
+		};
+
+	ui_table["begin_status_bar"] =
+		[](const std::string& name, float height)
+		{
+			const auto padding{ ImGui::GetStyle().WindowPadding };
+			const auto pos{ ImGui::GetCurrentWindow()->Pos };
+			ImGui::SetNextWindowPos(ImVec2(pos.x + padding.x, pos.y + ImGui::GetCurrentWindow()->Size.y - (padding.y) - height));
+			ImGui::BeginChild(
+				name.c_str(),
+				ImVec2(ImGui::GetCurrentWindow()->Size.x - (padding.x * 2.f), height),
+				ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_Borders,
+				ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollWithMouse
+			);
+		};
+
+	ui_table["end_status_bar"] =
+		[]()
+		{
+			ImGui::EndChild();
+		};
+
+	ui_table["spacing"] =
+		[]()
+		{
+			ImGui::Spacing();
 		};
 
 	state["ui"] = ui_table;

@@ -23,13 +23,20 @@ editor.display = function()
                 if ui.begin_tab_item(script_name, flags) then
                     editor.current_editor = i
                     ui.push_font("mono", 24.0)
-                    ui.render_editor(editor.editors[i].handle)
+                    ui.render_editor(editor.editors[i].handle, 35)
                     ui.pop_font()
                     ui.end_tab_item()
                 end
             end
             ui.end_tab_bar()
         end
+        ui.begin_status_bar("StatusBar", 35.0)
+            ui.push_font("mono", 16.0)
+            -- TODO: Add script compile status
+            local line, column = ui.get_editor_cursor(editor.editors[editor.current_editor].handle)
+            ui.text("Ln: " .. line+1 .. ", Col: " .. column)
+            ui.pop_font()
+        ui.end_status_bar()
     ui.end_window()
 end
 
@@ -72,15 +79,15 @@ editor.init = function(project)
                     editor_data.first_change = false
                 else
                     editor_data.has_changes = true
+                    set_unsaved_scripts()
                 end
-                set_unsaved_scripts()
             end
         )
         table.insert(editor.editors, editor_data)
     end
 end
 
-function s_key_event(pressed, mods)
+local function s_key_event(pressed, mods)
     -- Don't check want_capture_keyboard here as that will
     --  be true when the editor is active.
 
@@ -95,7 +102,7 @@ function s_key_event(pressed, mods)
     end
 end
 
-function try_save(index)
+local function try_save(index)
     if editor.editors[index] ~= nil and editor.editors[index].has_changes then
         save_editor_file(index)
         editor.editors[index].has_changes = false
