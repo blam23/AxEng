@@ -21,6 +21,7 @@ local function update_title()
         window.set_title(app.window.handle, "AxEdit - " .. project.name .. " *")
     else
         window.set_title(app.window.handle, "AxEdit - " .. project.name)
+        window.set_title(app.window.handle, "AxEdit - " .. project.name)
     end
 end
 
@@ -29,7 +30,7 @@ function set_unsaved_config()
     update_title()
 end
 
-function set_saved()
+function set_saved_config()
     unsaved_config = false
     update_title()
 end
@@ -60,7 +61,7 @@ function asset_edited(data)
     end
 
     project[tbl][new_key] = new_value
-    set_unsaved()
+    set_unsaved_config()
     project_browser.reload()
 end
 
@@ -91,7 +92,7 @@ function main_menu(delta)
             else
                 ui.text_color(0.7, 0, 0, last_save / 3.0, "\xef\x81\xaa Failed to save") -- circle exclamation
             end
-        elseif unsaved then
+        elseif is_unsaved() then
             ui.same_line()
             ui.text_color(0.7, 0.7, 0, 1, "* Unsaved") -- circle check
         end
@@ -146,7 +147,7 @@ if not validated then
     return error_code.InvalidConfiguration
 end
 
-set_saved()
+update_title()
 
 project_browser.init(project)
 asset_inspector.init(project)
