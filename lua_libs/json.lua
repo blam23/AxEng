@@ -95,10 +95,16 @@ local function encode_table(val, indent, stack)
 
   else
     -- Treat as an object
-    for k, v in pairs(val) do
+    local keys = {}
+    for k in pairs(val) do
       if type(k) ~= "string" then
         error("invalid table: mixed or invalid key types")
       end
+      table.insert(keys, k)
+    end
+    table.sort(keys) -- Sort keys for deterministic output
+    for _, k in ipairs(keys) do
+      local v = val[k]
       table.insert(res, encode(k, indent + 1, stack) .. ":" .. encode(v, indent + 1, stack))
     end
     stack[val] = nil

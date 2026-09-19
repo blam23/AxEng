@@ -1,22 +1,22 @@
 {
-   "name":"AxEdit",
    "entry_point":"main",
+   "highlight":"#A256FF",
    "icon":"icon",
-   "textures":{
-      "frilly":"assets/frilly.png",
-      "icon":"assets/icon.png",
-      "error":"assets/error.png"
-   },
+   "name":"AxEdit",
    "scripts":{
       "asset_inspector":"scripts/asset_inspector.lua",
+      "build_info":"scripts/build_info.lua",
       "main":"scripts/main.lua",
-      "script_editor":"scripts/script_editor.lua",
-      "save_project":"scripts/save_project.lua",
       "project_browser":"scripts/project_browser.lua",
-      "build_info":"scripts/build_info.lua"
+      "save_project":"scripts/save_project.lua",
+      "script_editor":"scripts/script_editor.lua"
+   },
+   "textures":{
+      "error":"assets/error.png",
+      "frilly":"assets/frilly.png",
+      "icon":"assets/icon.png"
    },
    "types":[
 
-   ],
-   "highlight":"#A256FF"
+   ]
 }
