@@ -16,7 +16,7 @@ info.display = function()
             for config_name, _ in pairs(info.build_data.configs) do
                 if ui.selectable(config_name, config_name == info.build_data.default_config) then
                     info.build_data.default_config = config_name
-                    set_unsaved()
+                    set_unsaved_config()
                 end
             end
             ui.end_combo()
@@ -42,7 +42,7 @@ info.display = function()
             
             if compile_changed then
                 info.build_data.configs[info.config_name].compile_scripts = compile_out
-                set_unsaved()
+                set_unsaved_config()
             end
 
             if info.build_data.configs[info.config_name].strip_compiled_script_symbols == nil then
@@ -54,7 +54,7 @@ info.display = function()
             
             if strip_changed then
                 info.build_data.configs[info.config_name].strip_compiled_script_symbols = strip_out
-                set_unsaved()
+                set_unsaved_config()
             end
 
             -- Build stuff
@@ -62,7 +62,7 @@ info.display = function()
             local flags, flags_changed = ui.input_text("Flags", info.build_data.configs[info.config_name].flags)
             if flags_changed then
                 info.build_data.configs[info.config_name].flags = flags
-                set_unsaved()
+                set_unsaved_config()
             end
         end
     ui.end_window()

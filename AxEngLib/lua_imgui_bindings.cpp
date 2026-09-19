@@ -231,6 +231,28 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 	ui_table["separator"] =
 		[]() { ImGui::Separator(); };
 
+	ui_table["begin_tab_bar"] =
+		[](const char* label) { return ImGui::BeginTabBar(label, ImGuiTabBarFlags_Reorderable); };
+
+	ui_table["end_tab_bar"] =
+		[]() { ImGui::EndTabBar(); };
+
+	ui_table["begin_tab_item"] =
+		sol::overload
+		(
+			[](const char* label, int flags)
+			{
+				return ImGui::BeginTabItem(label, nullptr, flags);
+			},
+			[](const char* label)
+			{
+				return ImGui::BeginTabItem(label);
+			}
+		);
+
+	ui_table["end_tab_item"] =
+		[]() { ImGui::EndTabItem(); };
+
 	ui_table["create_editor"] =
 		[]() -> std::size_t
 		{
@@ -245,10 +267,24 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 			editor.SetShowWhitespacesEnabled(true);
 			editor.SetInsertSpacesOnTabs(true);
 			editor.SetCaretsVisible(true);
+			editor.SetLineFoldingEnabled(false);
 			editor.SetCompletePairedGlyphs(false);
+			editor.SetShowCurrentLineHighlightEnabled(true);
 			editor.SetLanguage(TextEditor::Language::Lua());
 
 			return s_nextEditorID;
+		};
+
+	ui_table["set_editor_change_callback"] =
+		[](std::size_t id, const std::function<void()>& callback)
+		{
+			s_textEditors[id].SetChangeCallback
+			(
+				[callback]()
+				{
+					callback();
+				}
+			);
 		};
 
 	ui_table["delete_editor"] =
@@ -261,6 +297,12 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 		[](std::size_t id, const std::string& t)
 		{
 			s_textEditors[id].SetText(t);
+		};
+
+	ui_table["get_editor_text"] =
+		[](std::size_t id)
+		{
+			return s_textEditors[id].GetText();
 		};
 
 	ui_table["set_editor_read_only"] =

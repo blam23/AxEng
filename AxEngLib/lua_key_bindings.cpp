@@ -11,6 +11,12 @@ std::mutex s_handlerMutex{};
 void ax::lua::bindings::setup_key_bindings(sol::state& state)
 {
 	auto key_table = state.create_table();
+	auto mod_table = state.create_table();
+
+	mod_table["shift"] = GLFW_MOD_SHIFT;
+	mod_table["ctrl"] = GLFW_MOD_CONTROL;
+	mod_table["alt"] = GLFW_MOD_ALT;
+	key_table["modifier"] = mod_table;
 
 	key_table["subscribe_key"] =
 		[](int key, const std::function<void(bool pressed, int mods)>& callback)

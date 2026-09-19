@@ -6,18 +6,42 @@ local save = ax.import("save_project")
 local project_browser = ax.import("project_browser")
 local asset_inspector = ax.import("asset_inspector")
 local build_info = ax.import("build_info")
+local editor = ax.import("script_editor")
 
-local unsaved = false
+local unsaved_config = false
+local unsaved_scripts = false
 local show_close_confirm_modal = false
 
-function set_unsaved()
-    unsaved = true
-    window.set_title(app.window.handle, "AxEdit - " .. project.name .. " *")
+function is_unsaved()
+    return unsaved_config or unsaved_scripts
+end
+
+local function update_title()
+    if is_unsaved() then
+        window.set_title(app.window.handle, "AxEdit - " .. project.name .. " *")
+    else
+        window.set_title(app.window.handle, "AxEdit - " .. project.name)
+    end
+end
+
+function set_unsaved_config()
+    unsaved_config = true
+    update_title()
 end
 
 function set_saved()
-    unsaved = false
-    window.set_title(app.window.handle, "AxEdit - " .. project.name)
+    unsaved_config = false
+    update_title()
+end
+
+function set_unsaved_scripts()
+    unsaved_scripts = true
+    update_title()
+end
+
+function set_saved_scripts()
+    unsaved_scripts = false
+    update_title()
 end
 
 function asset_edited(data)
@@ -47,7 +71,7 @@ local last_save_err = false
 function main_menu(delta)
     ui.begin_main_menu_bar("Save Window")
         ui.text(project.name)
-        if ui.button("\xef\x83\x87 Save") then -- Floppy Disk Icon
+        if ui.button("\xef\x83\x87 Save Config") then -- Floppy Disk Icon
             last_save = 3.0
             local err = save.all(project, build_info.build_data)
             last_save_err = err
@@ -55,7 +79,7 @@ function main_menu(delta)
                 log.error("Failed to save project: " .. tostring(msg))
                 ui.insert_toast(ui.toast_type.Error, 3000, "Failed to save project!")
             else
-                set_saved()
+                set_saved_config()
                 ui.insert_toast(ui.toast_type.Success, 3000, "Saved project")
             end
         end
@@ -102,11 +126,12 @@ function main_ui(delta)
     project_browser.display()
     asset_inspector.display()
     build_info.display()
+    editor.display()
     close_confirm_modal()
 end
 
 function tried_to_close()
-    if unsaved then
+    if is_unsaved() then
         app.window.prevent_close()
         ui.insert_toast(ui.toast_type.Error, 3000, "Make sure to save before exiting!")
 
@@ -126,6 +151,7 @@ set_saved()
 project_browser.init(project)
 asset_inspector.init(project)
 build_info.init(project)
+editor.init(project)
 
 app.window.on_ui.subscribe(main_ui)
 app.window.on_close.subscribe(tried_to_close)

@@ -66,8 +66,8 @@ end
 
 browser.display = function()
     ui.begin_window("\xef\xa0\x82 Asset Browser") -- Folder Tree Icon
-        browser.selected_script, browser.script_active = list_box("scripts", scripts, browser.selected_script, "\xef\x87\x89")
-        browser.selected_texture, browser.texture_active = list_box("textures", textures, browser.selected_texture, "\xef\x87\x85")
+        browser.selected_script, browser.script_active = list_box("scripts", scripts, browser.selected_script, "\xef\x84\xa1")
+        browser.selected_texture, browser.texture_active = list_box("textures", textures, browser.selected_texture, "\xef\x80\xbe")
     ui.end_window()
 end
 
