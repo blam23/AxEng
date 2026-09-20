@@ -35,5 +35,8 @@
          "strip_compiled_script_symbols":true
       }
    },
-   "default_config":"fast_debug"
+   "default_config":"fast_debug",
+   "required_permissions":[
+      "io"
+   ]
 }

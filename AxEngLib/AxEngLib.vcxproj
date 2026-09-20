@@ -211,6 +211,7 @@
     <ClInclude Include="error.h" />
     <ClInclude Include="error_def.h" />
     <ClInclude Include="event.h" />
+    <ClInclude Include="flag_set.hpp" />
     <ClInclude Include="forward.h" />
     <ClInclude Include="IconsFontAwesome6.h" />
     <ClInclude Include="imgui_helper.h" />

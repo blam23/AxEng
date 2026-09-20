@@ -272,6 +272,9 @@
     <ClInclude Include="glfw3webgpu.h">
       <Filter>exterrnal\headers</Filter>
     </ClInclude>
+    <ClInclude Include="flag_set.hpp">
+      <Filter>exterrnal\headers</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\lua_libs\json.lua">
