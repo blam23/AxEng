@@ -33,5 +33,16 @@
     <ClCompile Include="test_event.cpp">
       <Filter>Source Files\core</Filter>
     </ClCompile>
+    <ClCompile Include="test_lua_manager.cpp">
+      <Filter>Source Files\core</Filter>
+    </ClCompile>
+    <ClCompile Include="log_capture.cpp">
+      <Filter>Source Files\main</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="log_capture.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

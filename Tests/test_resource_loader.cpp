@@ -1,4 +1,5 @@
 #include "gtest/gtest.h"
+#include "log_capture.h"
 #include "axenglib/resource_loader.h"
 
 #include <filesystem>
@@ -79,6 +80,8 @@ TEST(DirectoryResourceLoaderTests, LoadFile_ReturnsContents)
 
 TEST(DirectoryResourceLoaderTests, LoadMissingFile_ReturnsNotFound)
 {
+    testlog::LogCapture::instance().expect_total_error_count(1);
+
     const auto tmp = fs::temp_directory_path() / "axeng_test_dir_missing";
     fs::create_directories(tmp);
 
@@ -94,6 +97,8 @@ TEST(DirectoryResourceLoaderTests, LoadMissingFile_ReturnsNotFound)
 
 TEST(DirectoryResourceLoaderTests, LoadDirectoryAsFile_ReturnsCantOpen)
 {
+    testlog::LogCapture::instance().expect_total_error_count(2);
+
     const auto tmp = fs::temp_directory_path() / "axeng_test_dir_isdir";
     fs::create_directories(tmp);
 
@@ -203,6 +208,8 @@ TEST(ResourceTest, LoadAsTextWithEmbedded)
 
 TEST(ResourceTest, LoadNotFoundDirectoryThroughResource)
 {
+    testlog::LogCapture::instance().expect_total_error_count(1);
+
     const fs::path tempDir = fs::temp_directory_path() / "AxEng_ResourceLoaderTests_NotFound";
     fs::create_directories(tempDir);
     ResourceLoader loader = DirectoryResourceLoader{ tempDir };
@@ -218,6 +225,8 @@ TEST(ResourceTest, LoadNotFoundDirectoryThroughResource)
 
 TEST(ZipResourceLoaderTest, SetupFailsWhenFileMissing)
 {
+    testlog::LogCapture::instance().expect_total_error_count(1);
+
     const fs::path missingZip = fs::temp_directory_path() / "AxEng_ZipTests_nonexistent.zip";
     // Ensure it does not exist
     std::error_code ec;

@@ -145,15 +145,20 @@
     </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="log_capture.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="test_custom_type.cpp" />
     <ClCompile Include="test_event.cpp" />
+    <ClCompile Include="test_lua_manager.cpp" />
     <ClCompile Include="test_resource_loader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\AxEngLib\AxEngLib.vcxproj">
       <Project>{b62cf5a5-a301-4266-9f4e-999707f518b9}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="log_capture.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
