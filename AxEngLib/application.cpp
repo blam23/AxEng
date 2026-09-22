@@ -48,6 +48,19 @@ void ax::Application::add_application_bindings(sol::state& state)
 
 	auto resource_lookup_texture{ state.create_table() };
 
+	auto on_update_table{ state.create_table() };
+	on_update_table["subscribe"] =
+		[this](std::function<void(double delta)> f) -> size_t
+		{
+			return m_window->get_update_event_handler().subscribe([f](const ax::WindowUpdateEvent& e) { f(e.delta); });
+		};
+	on_update_table["unsubscribe"] =
+		[this](size_t id)
+		{
+			m_window->get_update_event_handler().unsubscribe(id);
+		};
+	app["on_update"] = on_update_table;
+
 	resource_lookup_texture["get_texture"] =
 		[this, &state](const std::string& name) -> sol::table
 		{
@@ -58,6 +71,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 			if (text)
 			{
 				ret["valid"] = true;
+				ret["ptr"] = text;
 				ret["view"] = text->view();
 				ret["ui_view"] = text->imgui_view();
 				ret["width"] = text->width();
@@ -84,6 +98,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 			if (text)
 			{
 				ret["valid"] = true;
+				ret["ptr"] = text;
 				ret["view"] = text->view();
 				ret["ui_view"] = text->imgui_view();
 				ret["width"] = text->width();
@@ -155,7 +170,6 @@ void ax::Application::add_application_bindings(sol::state& state)
 				m_window->prevent_close();
 			};
 
-
 		auto on_ui_table{ state.create_table() };
 		on_ui_table["subscribe"] =
 			[this](std::function<void(double delta)> f) -> size_t
@@ -169,6 +183,19 @@ void ax::Application::add_application_bindings(sol::state& state)
 			};
 		window["on_ui"] = on_ui_table;
 
+		auto on_render_table{ state.create_table() };
+		on_render_table["subscribe"] =
+			[this](std::function<void(double delta, const wgpu::RenderPassEncoder& pass)> f) -> size_t
+			{
+				return m_window->get_render_event_handler().subscribe([f](const ax::WindowRenderEvent& e) { f(e.delta, e.pass); });
+			};
+		on_render_table["unsubscribe"] =
+			[this](size_t id)
+			{
+				m_window->get_render_event_handler().unsubscribe(id);
+			};
+		window["on_render"] = on_render_table;
+
 		auto on_close_table{ state.create_table() };
 		on_close_table["subscribe"] =
 			[this](std::function<void()> f) -> size_t
@@ -181,6 +208,30 @@ void ax::Application::add_application_bindings(sol::state& state)
 				m_window->get_ui_event_handler().unsubscribe(id);
 			};
 		window["on_close"] = on_close_table;
+
+		window["render"] =
+			sol::overload
+			(
+				[this](const sol::table& texture, float x, float y)
+				{
+					if (texture["valid"])
+						m_window->render_texture(texture["ptr"].get<ax::Texture*>(), { x, y });
+					else
+						spdlog::error("Invalid texture, cannot render");
+				},
+				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah)
+				{
+					if (texture["valid"])
+					{
+						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						m_window->render_texture(t, { x, y }, { ax, ay, aw, ah });
+					}
+					else
+					{
+						spdlog::error("Invalid texture, cannot render");
+					}
+				}
+			);
 	}
 }
 

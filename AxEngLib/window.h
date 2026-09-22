@@ -15,6 +15,9 @@
 #include <webgpu/webgpu_cpp.h>
 #include <webgpu/webgpu_cpp_print.h>
 
+// GLM
+#include "glm/glm.hpp"
+
 // AxEng
 #include "helpers.h"
 #include "event.h"
@@ -120,8 +123,12 @@ namespace ax
 			m_clearColor = color;
 		}
 
-		void setup_bind_groups(const wgpu::TextureView& view);
+		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view);
 		void reload_pipeline();
+
+		using rectf = glm::vec4;
+		void render_texture(Texture* tex, glm::vec2 position);
+		void render_texture(Texture* tex, glm::vec2 position, rectf region);
 
 	private:
 		// Rendering
@@ -162,9 +169,22 @@ namespace ax
 		wgpu::ShaderModule m_shader;
 		wgpu::RenderPipeline m_pipeline;
 		wgpu::Buffer m_uniforms;
-		wgpu::BindGroup m_binds;
 		wgpu::Sampler m_nearestSampler;
 		wgpu::BindGroupLayout m_groupLayout;
+
+		struct SpriteDefinition
+		{
+			Texture* tex{ nullptr };
+			glm::vec2 pos{ 0.0f, 0.0f };
+			rectf region{ 0.0f, 0.0f, 0.0f, 0.0f };
+			bool useRegion{ false };
+			glm::vec2 scale{ 1.0f, 1.0f };
+		};
+
+		std::vector<SpriteDefinition> m_pendingTextures;
+		size_t m_uniformStride{ 16 * sizeof(float) };
+		uint32_t m_uniformsCapacity{ 1024 };
+		uint32_t m_uniformsOffset{ 0 }; // bytes
 
 		const char* s_shader_source =
 		R"(

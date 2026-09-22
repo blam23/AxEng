@@ -298,7 +298,7 @@ void ax::Window::reload_pipeline()
 	pipelineDesc.vertex.constants = nullptr;
 
 	// Topology
-	pipelineDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleStrip;
+	pipelineDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
 	pipelineDesc.primitive.stripIndexFormat = wgpu::IndexFormat::Undefined;
 	pipelineDesc.primitive.frontFace = wgpu::FrontFace::CCW;
 	pipelineDesc.primitive.cullMode = wgpu::CullMode::None;
@@ -326,12 +326,17 @@ void ax::Window::reload_pipeline()
 	pipelineDesc.multisample.mask = ~0u;
 	pipelineDesc.multisample.alphaToCoverageEnabled = false;
 
-	// Uniforms
+	// Uniforms (ring allocator). Each slot is 4 vec4 = 16 floats = 64 bytes
+	// Dynamic uniform buffer offsets must be aligned to the device's required
+	// minUniformBufferOffsetAlignment (commonly 256). Round the stride up.
+	const size_t baseStride = 16 * sizeof(float);
+	const size_t uniformAlignment = 256; // must be a power of two; queryable from device if needed
+	m_uniformStride = ((baseStride + uniformAlignment - 1) / uniformAlignment) * uniformAlignment;
 	wgpu::BufferDescriptor bufferDesc{};
-	bufferDesc.size = 4 * sizeof(float);
+	bufferDesc.size = static_cast<uint64_t>(m_uniformStride) * static_cast<uint64_t>(m_uniformsCapacity);
 	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
 	bufferDesc.mappedAtCreation = false;
-	bufferDesc.label = "Uniforms";
+	bufferDesc.label = "UniformsRing";
 	m_uniforms = m_device.CreateBuffer(&bufferDesc);
 
 	//
@@ -342,9 +347,10 @@ void ax::Window::reload_pipeline()
 
 	// Uniforms
 	bindGroupEntries[0].binding = 0;
-	bindGroupEntries[0].visibility = wgpu::ShaderStage::Fragment;
+	bindGroupEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
 	bindGroupEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
-	bindGroupEntries[0].buffer.minBindingSize = bufferDesc.size;
+	bindGroupEntries[0].buffer.minBindingSize = static_cast<uint64_t>(m_uniformStride);
+	bindGroupEntries[0].buffer.hasDynamicOffset = true;
 	
 
 	// Texture
@@ -373,11 +379,36 @@ void ax::Window::reload_pipeline()
 	pipelineDesc.layout = layout;
 	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
 
-	static const float tintColour[4] = { 1.f, 1.f, 1.f, 1.f };
-	m_queue.WriteBuffer(m_uniforms, 0, tintColour, sizeof(float) * 4);
+	// Default uniform values: pos_size (0,0,texW,texH), region (0,0,1,1), tint (1,1,1,1), viewport (width,height,0,0)
+	float defaultUniforms[16] = { 0.f, 0.f, 0.f, 0.f,  // pos_size.x/y/width/height (width/height filled at draw time)
+								  0.f, 0.f, 1.f, 1.f,  // region u0,v0,u1,v1
+								  1.f, 1.f, 1.f, 1.f,  // tint
+								  static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f };
+	m_queue.WriteBuffer(m_uniforms, 0, defaultUniforms, sizeof(defaultUniforms));
 }
 
-void ax::Window::setup_bind_groups(const wgpu::TextureView& view)
+void ax::Window::render_texture(Texture* tex, glm::vec2 position)
+{
+	m_pendingTextures.push_back
+	({
+		.tex = tex,
+		.pos = position,
+		.useRegion = false,
+	});
+}
+
+void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region)
+{
+	m_pendingTextures.push_back
+	({
+		.tex = tex,
+		.pos = position,
+		.region = region,
+		.useRegion = true,
+	});
+}
+
+wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view)
 {
 	auto bindGroups{ std::vector<wgpu::BindGroupEntry>{ 3 } };
 
@@ -399,7 +430,8 @@ void ax::Window::setup_bind_groups(const wgpu::TextureView& view)
 	bindGroupDesc.layout = m_groupLayout;
 	bindGroupDesc.entryCount = bindGroups.size();
 	bindGroupDesc.entries = bindGroups.data();
-	m_binds = m_device.CreateBindGroup(&bindGroupDesc);
+	wgpu::BindGroup binds = m_device.CreateBindGroup(&bindGroupDesc);
+	return binds;
 }
 
 void ax::Window::handle_tick(double delta)
@@ -594,16 +626,14 @@ void ax::Window::run_wgpu_render_pass(double delta)
 
 	m_surface.Present();
 
+
+	// Let the device progress
 	m_device.Tick();
 }
 
 
 void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 {
-	// Setup pass
-	pass.SetBindGroup(0, m_binds, 0, nullptr);
-	pass.SetPipeline(m_pipeline);
-
 	// Send out the draw event
 	m_renderEventHandler.fire
 	({
@@ -611,8 +641,87 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		.pass = pass
 	});
 
+	// Draw any queued textures
+	for (const auto& p : m_pendingTextures)
+	{
+		if (p.tex == nullptr)
+			continue;
+
+		float uniforms[16]{};
+
+		const auto width{ static_cast<float>(p.tex->width()) };
+		const auto height{ static_cast<float>(p.tex->height()) };
+
+		// Vertex position and size (screen space, pixels)
+		uniforms[0] = p.pos.x;
+		uniforms[1] = p.pos.y;
+		uniforms[2] = (p.useRegion ? p.region.z : width) * p.scale.x;
+		uniforms[3] = (p.useRegion ? p.region.w : height) * p.scale.y;
+
+		// UVs (u0,v0,u1,v1) (texture space, 0-1)
+		uniforms[4] = p.useRegion ? (p.region.x / width ) : 0.0f;
+		uniforms[5] = p.useRegion ? (p.region.y / height) : 0.0f;
+		uniforms[6] = p.useRegion ? (uniforms[4] + (p.region.z / width )) : 1.0f;
+		uniforms[7] = p.useRegion ? (uniforms[5] + (p.region.w / height)) : 1.0f;
+
+		// Tint
+		uniforms[8] = 1.f; uniforms[9] = 1.f; uniforms[10] = 1.f; uniforms[11] = 1.f;
+
+		// Viewport (pixels)
+		uniforms[12] = static_cast<float>(m_width);
+		uniforms[13] = static_cast<float>(m_height);
+
+		// Unused
+		uniforms[14] = 0.f; uniforms[15] = 0.f;
+
+		// TODO: Batch calls, don't use this silly ring buffer either
+		//   Idea 1: Have each sprite be a managed object that has it's own buffer and lifetime, no need for this ring buffer crap
+		//   Idea 2: Batch all calls for same texture into a big buffer (would be much fewer draw calls, but much more effort)
+		//   Might need to do both: have the sprite be a managed object that owns a slot in the big buffer
+		//   Supporting one off draws should be simple too
+		//   Also: Should this be attached to the window or the render pass? Why did I put this in the window class??
+		const uint32_t stride = static_cast<uint32_t>(m_uniformStride);
+		const uint32_t capacityBytes = stride * m_uniformsCapacity;
+		uint32_t offset = m_uniformsOffset;
+
+		if (offset + stride > capacityBytes)
+			offset = 0;
+
+		m_queue.WriteBuffer(m_uniforms, offset, uniforms, sizeof(uniforms));
+
+		auto bindGroups{ std::vector<wgpu::BindGroupEntry>{ 3 } };
+
+		bindGroups[0].binding = 0;
+		bindGroups[0].buffer = m_uniforms;
+		bindGroups[0].offset = 0; // dynamic offset will be provided at set time
+		bindGroups[0].size = static_cast<uint64_t>(m_uniformStride);
+
+		bindGroups[1].binding = 1;
+		bindGroups[1].textureView = p.tex->view();
+
+		bindGroups[2].binding = 2;
+		bindGroups[2].sampler = m_nearestSampler;
+
+		wgpu::BindGroupDescriptor bindGroupDesc{};
+		bindGroupDesc.layout = m_groupLayout;
+		bindGroupDesc.entryCount = bindGroups.size();
+		bindGroupDesc.entries = bindGroups.data();
+		wgpu::BindGroup binds = m_device.CreateBindGroup(&bindGroupDesc);
+
+		uint32_t dynamicOffset = offset;
+		pass.SetBindGroup(0, binds, 1, &dynamicOffset);
+
+		m_uniformsOffset = offset + stride;
+		pass.SetPipeline(m_pipeline);
+
+		pass.Draw(6, 1, 0, 0);
+	}
+
 	// Draw imgui
 	render_gui(pass, delta);
+
+	// Clear the queue after rendering
+	m_pendingTextures.clear();
 }
 
 void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
