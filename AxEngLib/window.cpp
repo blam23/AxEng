@@ -339,8 +339,22 @@ void ax::Window::reload_pipeline()
 	bufferDesc.label = "SpriteBatch";
 	m_uniforms = m_device.CreateBuffer(&bufferDesc);
 
+	// Viewport
+	wgpu::BufferDescriptor vpDesc{};
+	vpDesc.size = 4 * sizeof(float);
+	vpDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
+	vpDesc.mappedAtCreation = false;
+	vpDesc.label = "ViewportUBO";
+	m_viewportBuffer = m_device.CreateBuffer(&vpDesc);
+
+	auto vpEntries{ std::vector<wgpu::BindGroupEntry>{ 1 } };
+	vpEntries[0].binding = 0;
+	vpEntries[0].buffer = m_viewportBuffer;
+	vpEntries[0].offset = 0;
+	vpEntries[0].size = vpDesc.size;
+
 	//
-	// Layout
+	// Bind Groups
 	//
 
 	auto bindGroupEntries{ std::vector<wgpu::BindGroupLayoutEntry>{ 3 } };
@@ -364,28 +378,49 @@ void ax::Window::reload_pipeline()
 	bindGroupEntries[2].visibility = wgpu::ShaderStage::Fragment;
 	bindGroupEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
 
-	// Bind em all up
+	// Viewport
+	auto globalEntries{ std::vector<wgpu::BindGroupLayoutEntry>{ 1 } };
+	globalEntries[0].binding = 0;
+	globalEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+	globalEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+	globalEntries[0].buffer.minBindingSize = static_cast<uint64_t>(4 * sizeof(float));
+
+	//
+	// Layout
+	//
+	
+	// Group 0
 	wgpu::BindGroupLayoutDescriptor layoutDesc{};
 	layoutDesc.entryCount = bindGroupEntries.size();
 	layoutDesc.entries = bindGroupEntries.data();
 	m_groupLayout = m_device.CreateBindGroupLayout(&layoutDesc);
 
+	// Group 1
+	wgpu::BindGroupLayoutDescriptor globalLayoutDesc{};
+	globalLayoutDesc.entryCount = globalEntries.size();
+	globalLayoutDesc.entries = globalEntries.data();
+	m_globalLayout = m_device.CreateBindGroupLayout(&globalLayoutDesc);
+
+	// Bind em
+	wgpu::BindGroupLayout layouts[2] = { m_groupLayout, m_globalLayout };
 	wgpu::PipelineLayoutDescriptor pipelineLayoutDesc{};
-	pipelineLayoutDesc.bindGroupLayoutCount = 1;
-	pipelineLayoutDesc.bindGroupLayouts = &m_groupLayout;
+	pipelineLayoutDesc.bindGroupLayoutCount = 2;
+	pipelineLayoutDesc.bindGroupLayouts = layouts;
 	wgpu::PipelineLayout layout{ m_device.CreatePipelineLayout(&pipelineLayoutDesc) };
 
-	// Create the pipeline
+	wgpu::BindGroupDescriptor vpBindDesc{};
+	vpBindDesc.layout = m_globalLayout;
+	vpBindDesc.entryCount = vpEntries.size();
+	vpBindDesc.entries = vpEntries.data();
+	m_viewportBindGroup = m_device.CreateBindGroup(&vpBindDesc);
+
+	//
+	// Pipeline
+	//
 	pipelineDesc.layout = layout;
 	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
-	m_textureBindGroups.clear();
 
-	// Default uniform values: pos_size (0,0,texW,texH), region (0,0,1,1), tint (1,1,1,1), viewport (width,height,0,0)
-	float defaultUniforms[16] = { 0.f, 0.f, 0.f, 0.f,  // pos_size.x/y/width/height (width/height filled at draw time)
-								  0.f, 0.f, 1.f, 1.f,  // region u0,v0,u1,v1
-								  1.f, 1.f, 1.f, 1.f,  // tint
-								  static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f };
-	m_queue.WriteBuffer(m_uniforms, 0, defaultUniforms, sizeof(defaultUniforms));
+	m_textureBindGroups.clear();
 }
 
 void ax::Window::render_texture(Texture* tex, glm::vec2 position)
@@ -615,6 +650,12 @@ void ax::Window::run_wgpu_render_pass(double delta)
 	};
 	wgpu::CommandEncoder encoder = m_device.CreateCommandEncoder(&encoderDesc);
 
+// Update global viewport uniform (width,height,0,0)
+{
+	float vp[4] = { static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f };
+	m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
+}
+
 	// Setup Render pass
 	{
 		// Clear frame
@@ -718,15 +759,13 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		// Tint
 		uniforms[8] = 1.f; uniforms[9] = 1.f; uniforms[10] = 1.f; uniforms[11] = 1.f;
 
-		// Viewport (pixels)
-		uniforms[12] = static_cast<float>(m_width);
-		uniforms[13] = static_cast<float>(m_height);
-
-		// Depth
-		uniforms[14] = p.z;
+		// Viewport is now a global uniform; per-instance slots leave these zero.
+		uniforms[12] = p.z;
 
 		// Unused
-		uniforms[15] = 0.f;
+		//uniforms[13] = 0.f;
+		//uniforms[14] = 0.f;
+		//uniforms[15] = 0.f;
 
 		groups[p.tex].insert(groups[p.tex].end(), std::begin(uniforms), std::end(uniforms));
 	}
@@ -756,6 +795,8 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		m_queue.WriteBuffer(m_uniforms, 0, batchUniforms.data(), batchUniforms.size() * sizeof(float));
 
 	pass.SetPipeline(m_pipeline);
+	// Set the global viewport bind group (group 1)
+	pass.SetBindGroup(1, m_viewportBindGroup);
 
 	for (const auto& r : ranges)
 	{

@@ -177,6 +177,9 @@ namespace ax
 		wgpu::Buffer m_uniforms;
 		wgpu::Sampler m_nearestSampler;
 		wgpu::BindGroupLayout m_groupLayout;
+		wgpu::BindGroupLayout m_globalLayout;
+		wgpu::Buffer m_viewportBuffer;
+		wgpu::BindGroup m_viewportBindGroup;
 		std::unordered_map<Texture*, wgpu::BindGroup> m_textureBindGroups;
 
 		struct SpriteDefinition
