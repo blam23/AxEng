@@ -2,6 +2,7 @@
 
 #include <imgui.h>
 #include <cstring>
+#include "perf_profiler.h"
 
 #undef min
 #undef max
@@ -43,6 +44,76 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 				deltaTimes[deltaPtr++] = (float)e.delta * 1000.0f;
 				deltaPtr %= 512;
 				ImGui::PlotHistogram("Delta Times (ms)", deltaTimes, 512);
+
+			// Dynamic profiler flame-graph style display
+			{
+				auto& prof = ax::Profiler::instance();
+				auto all = prof.all_segments();
+				if (!all.empty())
+				{
+					// Build a list of stats and sort by average desc
+					struct Item { std::string name; PerfStats s; };
+					std::vector<Item> items;
+					items.reserve(all.size());
+					for (auto &kv : all)
+					{
+						Item it;
+						it.name = kv.first;
+						it.s = kv.second->stats();
+						items.push_back(std::move(it));
+					}
+					std::sort(items.begin(), items.end(), [](auto &a, auto &b){ return a.s.averageMs > b.s.averageMs; });
+
+					// Determine frame reference (use "frame" if present, otherwise max avg)
+					double frameRef = 0.0;
+					for (auto &it : items) if (it.name == "frame") { frameRef = it.s.averageMs; break; }
+					if (frameRef <= 0.0)
+					{
+						for (auto &it : items) frameRef = std::max(frameRef, it.s.averageMs);
+						if (frameRef <= 0.0) frameRef = 1.0; // avoid divide by zero
+					}
+
+					ImDrawList* dl = ImGui::GetWindowDrawList();
+					const ImVec2 pos = ImGui::GetCursorScreenPos();
+					const float availX = ImGui::GetContentRegionAvail().x;
+					const float barHeight = 20.0f;
+
+					// Background bar
+					dl->AddRectFilled(ImVec2(pos.x, pos.y), ImVec2(pos.x + availX, pos.y + barHeight), ImGui::GetColorU32(ImGuiCol_FrameBg));
+
+					float curX = pos.x;
+					int idx = 0;
+					for (auto &it : items)
+					{
+						if (it.name == "frame")
+							continue;
+						// fraction relative to frameRef
+						double frac = it.s.averageMs / frameRef;
+						if (frac <= 0.0) continue;
+						float w = static_cast<float>(frac * availX);
+						// color variation
+						ImU32 col = ImGui::GetColorU32(ImVec4(0.2f + 0.6f * (idx % 7) / 7.0f, 0.4f, 0.6f, 1.0f));
+						dl->AddRectFilled(ImVec2(curX, pos.y), ImVec2(curX + w, pos.y + barHeight), col);
+						// label
+						char buf[128];
+						snprintf(buf, sizeof(buf), "%s: %.3fms", it.name.c_str(), it.s.averageMs);
+						dl->AddText(ImVec2(curX + 4.0f, pos.y + 2.0f), ImGui::GetColorU32(ImGuiCol_Text), buf);
+
+						// hover tooltip
+						ImVec2 mousePos = ImGui::GetIO().MousePos;
+						if (mousePos.x >= curX && mousePos.x <= curX + w && mousePos.y >= pos.y && mousePos.y <= pos.y + barHeight)
+						{
+							ImGui::SetTooltip("%s\navg=%.3fms min=%.3fms max=%.3fms samples=%zu", it.name.c_str(), it.s.averageMs, it.s.minMs, it.s.maxMs, it.s.samples);
+						}
+
+						curX += w;
+						idx++;
+					}
+
+					// advance cursor
+					ImGui::Dummy(ImVec2(availX, barHeight + 4.0f));
+				}
+			}
 			}
 			ImGui::End();
 

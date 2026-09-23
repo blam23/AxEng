@@ -1,19 +1,20 @@
-#include "window.h"
-#include "imgui_style.h"
 #include "imgui_helper.h"
+#include "imgui_style.h"
 #include "log_timer.h"
+#include "perf_profiler.h"
+#include "window.h"
 
 #include "spdlog/spdlog.h"
 
-#include "backends/imgui_impl_wgpu.h"
 #include "backends/imgui_impl_glfw.h"
-#include <imgui.h>
-#include "ImGuiNotify.hpp"
+#include "backends/imgui_impl_wgpu.h"
 #include "IconsFontAwesome6.h"
+#include "ImGuiNotify.hpp"
+#include <imgui.h>
 
-#include <iostream>
-#include <fstream>
 #include <algorithm>
+#include <fstream>
+#include <iostream>
 
 std::map<GLFWwindow*, ax::Window*> s_windows{};
 std::mutex s_windows_mutex{};
@@ -609,9 +610,27 @@ void ax::Window::run_loop()
 		updateDelta = glfwGetTime() - updatePrev;
 		updatePrev = glfwGetTime();
 
-		handle_tick(updateDelta);
-		run_wgpu_render_pass(updateDelta);
+		// Profile the per-frame regions
+		{
+			auto& prof = ax::Profiler::instance();
+			auto frameSeg = prof.segment("frame");
+			ax::Profiler::ScopedSample frameSample(frameSeg);
+
+			auto tickSeg = prof.segment("tick");
+			{
+				ax::Profiler::ScopedSample s(tickSeg);
+				handle_tick(updateDelta);
+			}
+
+			auto renderSeg = prof.segment("render_pass");
+			{
+				ax::Profiler::ScopedSample s(renderSeg);
+				run_wgpu_render_pass(updateDelta);
+			}
+		}
 	}
+
+
 
 	ax::input::KeyEventHandler::cleanup_events(m_window);
 }

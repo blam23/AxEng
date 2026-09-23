@@ -147,6 +147,9 @@
     <ClCompile Include="TextEditor.cpp">
       <Filter>exterrnal</Filter>
     </ClCompile>
+    <ClCompile Include="perf_profiler.cpp">
+      <Filter>debug</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -274,6 +277,9 @@
     </ClInclude>
     <ClInclude Include="flag_set.hpp">
       <Filter>exterrnal\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="perf_profiler.h">
+      <Filter>debug\headers</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

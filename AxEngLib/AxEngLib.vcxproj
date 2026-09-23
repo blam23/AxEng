@@ -191,6 +191,7 @@
     <ClCompile Include="lua_type_bindings.cpp" />
     <ClCompile Include="glfw3webgpu.c" />
     <ClCompile Include="lua_window_bindings.cpp" />
+    <ClCompile Include="perf_profiler.cpp" />
     <ClCompile Include="resource_loader.cpp" />
     <ClCompile Include="script.cpp" />
     <ClCompile Include="log_timer.cpp" />
@@ -234,6 +235,7 @@
     <ClInclude Include="lua_texture_bindings.h" />
     <ClInclude Include="lua_type_bindings.h" />
     <ClInclude Include="lua_window_bindings.h" />
+    <ClInclude Include="perf_profiler.h" />
     <ClInclude Include="resource_loader.h" />
     <ClInclude Include="script.h" />
     <ClInclude Include="log_timer.h" />
