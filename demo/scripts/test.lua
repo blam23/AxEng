@@ -82,6 +82,6 @@ app.window.on_render.subscribe(function(delta, pass)
     app.window.render(texture, x, y, 49, 32, 13, 15)
 end)
 
-setup_enemies(100)
+setup_enemies(1000)
 
 return error_code.Success

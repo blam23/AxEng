@@ -5,6 +5,7 @@
 
 // STD
 #include <string_view>
+#include <unordered_map>
 
 // GLFW
 #include "glfw3webgpu.h"
@@ -130,11 +131,16 @@ namespace ax
 		void render_texture(Texture* tex, glm::vec2 position);
 		void render_texture(Texture* tex, glm::vec2 position, rectf region);
 
+		// Optional overloads that accept a z-index for depth ordering
+		void render_texture(Texture* tex, glm::vec2 position, float z);
+		void render_texture(Texture* tex, glm::vec2 position, rectf region, float z);
+
 	private:
 		// Rendering
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
 		void run_wgpu_render_pass(double delta);
+		void ensure_uniform_capacity(uint32_t required);
 
 		// Logic
 		void handle_tick(double delta);
@@ -171,6 +177,7 @@ namespace ax
 		wgpu::Buffer m_uniforms;
 		wgpu::Sampler m_nearestSampler;
 		wgpu::BindGroupLayout m_groupLayout;
+		std::unordered_map<Texture*, wgpu::BindGroup> m_textureBindGroups;
 
 		struct SpriteDefinition
 		{
@@ -178,33 +185,12 @@ namespace ax
 			glm::vec2 pos{ 0.0f, 0.0f };
 			rectf region{ 0.0f, 0.0f, 0.0f, 0.0f };
 			bool useRegion{ false };
+			float z{ 0.0f };
 			glm::vec2 scale{ 1.0f, 1.0f };
 		};
 
 		std::vector<SpriteDefinition> m_pendingTextures;
 		size_t m_uniformStride{ 16 * sizeof(float) };
 		uint32_t m_uniformsCapacity{ 1024 };
-		uint32_t m_uniformsOffset{ 0 }; // bytes
-
-		const char* s_shader_source =
-		R"(
-			@vertex
-			fn vs_main(@builtin(vertex_index) in_vertex_index: u32) -> @builtin(position) vec4f {
-				var p = vec2f(0.0, 0.0);
-				if (in_vertex_index == 0u) {
-					p = vec2f(-0.5, -0.5);
-				} else if (in_vertex_index == 1u) {
-					p = vec2f(0.5, -0.5);
-				} else {
-					p = vec2f(0.0, 0.5);
-				}
-				return vec4f(p, 0.0, 1.0);
-			}
- 
-			@fragment
-			fn fs_main() -> @location(0) vec4f {
-				return vec4f(0.0, 0.4, 1.0, 1.0);
-			}
-		)";
 	};
 }

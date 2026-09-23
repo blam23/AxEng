@@ -13,6 +13,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <algorithm>
 
 std::map<GLFWwindow*, ax::Window*> s_windows{};
 std::mutex s_windows_mutex{};
@@ -262,8 +263,8 @@ void ax::Window::reload_pipeline()
 	}
 	else
 	{
-		spdlog::warn("Could not load shader file, using fallback.");
-		shaderCode = s_shader_source;
+		spdlog::error("Could not load shader file, using fallback.");
+		return;
 	}
 
 	wgpu::ShaderModuleDescriptor shaderDesc{};
@@ -277,8 +278,10 @@ void ax::Window::reload_pipeline()
 	// Depth buffer
 	wgpu::DepthStencilState depthStencilState = {};
 	depthStencilState.format = m_depthTextureFormat;
-	depthStencilState.depthWriteEnabled = wgpu::OptionalBool::False;
-	depthStencilState.depthCompare = wgpu::CompareFunction::Always;
+	// Enable depth writes and normal depth testing so z-index in instance data
+	// can determine ordering when batching across textures.
+	depthStencilState.depthWriteEnabled = wgpu::OptionalBool::True;
+	depthStencilState.depthCompare = wgpu::CompareFunction::LessEqual;
 	depthStencilState.stencilFront.compare = wgpu::CompareFunction::Always;
 	depthStencilState.stencilFront.failOp = wgpu::StencilOperation::Keep;
 	depthStencilState.stencilFront.depthFailOp = wgpu::StencilOperation::Keep;
@@ -326,17 +329,14 @@ void ax::Window::reload_pipeline()
 	pipelineDesc.multisample.mask = ~0u;
 	pipelineDesc.multisample.alphaToCoverageEnabled = false;
 
-	// Uniforms (ring allocator). Each slot is 4 vec4 = 16 floats = 64 bytes
-	// Dynamic uniform buffer offsets must be aligned to the device's required
-	// minUniformBufferOffsetAlignment (commonly 256). Round the stride up.
-	const size_t baseStride = 16 * sizeof(float);
-	const size_t uniformAlignment = 256; // must be a power of two; queryable from device if needed
-	m_uniformStride = ((baseStride + uniformAlignment - 1) / uniformAlignment) * uniformAlignment;
+	// Each instance is 4 vec4 values. Storage buffers do not need the 256-byte
+	// dynamic-uniform alignment, so the batch uses the natural 64-byte stride.
+	m_uniformStride = 16 * sizeof(float);
 	wgpu::BufferDescriptor bufferDesc{};
 	bufferDesc.size = static_cast<uint64_t>(m_uniformStride) * static_cast<uint64_t>(m_uniformsCapacity);
-	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
+	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
 	bufferDesc.mappedAtCreation = false;
-	bufferDesc.label = "UniformsRing";
+	bufferDesc.label = "SpriteBatch";
 	m_uniforms = m_device.CreateBuffer(&bufferDesc);
 
 	//
@@ -348,9 +348,9 @@ void ax::Window::reload_pipeline()
 	// Uniforms
 	bindGroupEntries[0].binding = 0;
 	bindGroupEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-	bindGroupEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+	bindGroupEntries[0].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
 	bindGroupEntries[0].buffer.minBindingSize = static_cast<uint64_t>(m_uniformStride);
-	bindGroupEntries[0].buffer.hasDynamicOffset = true;
+	bindGroupEntries[0].buffer.hasDynamicOffset = false;
 	
 
 	// Texture
@@ -378,6 +378,7 @@ void ax::Window::reload_pipeline()
 	// Create the pipeline
 	pipelineDesc.layout = layout;
 	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+	m_textureBindGroups.clear();
 
 	// Default uniform values: pos_size (0,0,texW,texH), region (0,0,1,1), tint (1,1,1,1), viewport (width,height,0,0)
 	float defaultUniforms[16] = { 0.f, 0.f, 0.f, 0.f,  // pos_size.x/y/width/height (width/height filled at draw time)
@@ -406,6 +407,46 @@ void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region)
 		.region = region,
 		.useRegion = true,
 	});
+}
+
+void ax::Window::render_texture(Texture* tex, glm::vec2 position, float z)
+{
+	m_pendingTextures.push_back
+	({
+		.tex = tex,
+		.pos = position,
+		.useRegion = false,
+		.z = z,
+	});
+}
+
+void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region, float z)
+{
+	m_pendingTextures.push_back
+	({
+		.tex = tex,
+		.pos = position,
+		.region = region,
+		.useRegion = true,
+		.z = z,
+	});
+}
+
+void ax::Window::ensure_uniform_capacity(uint32_t required)
+{
+	if (required <= m_uniformsCapacity)
+		return;
+
+	while (m_uniformsCapacity < required)
+		m_uniformsCapacity *= 2;
+
+	wgpu::BufferDescriptor bufferDesc{};
+	bufferDesc.size = static_cast<uint64_t>(m_uniformStride) * static_cast<uint64_t>(m_uniformsCapacity);
+	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
+	bufferDesc.mappedAtCreation = false;
+	bufferDesc.label = "SpriteBatch";
+	m_uniforms = m_device.CreateBuffer(&bufferDesc);
+	m_textureBindGroups.clear();
 }
 
 wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view)
@@ -641,12 +682,22 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		.pass = pass
 	});
 
-	// Draw any queued textures
+	// Gather all sprite instance data into a single storage buffer.
+	m_pendingTextures.erase
+	(
+		std::remove_if(m_pendingTextures.begin(), m_pendingTextures.end(), [](const SpriteDefinition& sprite)
+		{
+			return sprite.tex == nullptr;
+		}),
+		m_pendingTextures.end()
+	);
+
+	// Group uniforms by texture so we can issue one instanced draw per texture.
+	std::unordered_map<Texture*, std::vector<float>> groups;
+	groups.reserve(m_pendingTextures.size());
+
 	for (const auto& p : m_pendingTextures)
 	{
-		if (p.tex == nullptr)
-			continue;
-
 		float uniforms[16]{};
 
 		const auto width{ static_cast<float>(p.tex->width()) };
@@ -671,50 +722,48 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		uniforms[12] = static_cast<float>(m_width);
 		uniforms[13] = static_cast<float>(m_height);
 
+		// Depth
+		uniforms[14] = p.z;
+
 		// Unused
-		uniforms[14] = 0.f; uniforms[15] = 0.f;
+		uniforms[15] = 0.f;
 
-		// TODO: Batch calls, don't use this silly ring buffer either
-		//   Idea 1: Have each sprite be a managed object that has it's own buffer and lifetime, no need for this ring buffer crap
-		//   Idea 2: Batch all calls for same texture into a big buffer (would be much fewer draw calls, but much more effort)
-		//   Might need to do both: have the sprite be a managed object that owns a slot in the big buffer
-		//   Supporting one off draws should be simple too
-		//   Also: Should this be attached to the window or the render pass? Why did I put this in the window class??
-		const uint32_t stride = static_cast<uint32_t>(m_uniformStride);
-		const uint32_t capacityBytes = stride * m_uniformsCapacity;
-		uint32_t offset = m_uniformsOffset;
+		groups[p.tex].insert(groups[p.tex].end(), std::begin(uniforms), std::end(uniforms));
+	}
 
-		if (offset + stride > capacityBytes)
-			offset = 0;
+	struct GroupRange { Texture* tex; uint32_t start; uint32_t count; };
+	std::vector<GroupRange> ranges;
+	ranges.reserve(groups.size());
 
-		m_queue.WriteBuffer(m_uniforms, offset, uniforms, sizeof(uniforms));
+	std::vector<float> batchUniforms;
+	batchUniforms.reserve(m_pendingTextures.size() * 16);
 
-		auto bindGroups{ std::vector<wgpu::BindGroupEntry>{ 3 } };
+	uint32_t instanceCursor = 0;
+	for (auto& kv : groups)
+	{
+		Texture* tex = kv.first;
+		auto& data = kv.second;
+		const uint32_t count = static_cast<uint32_t>(data.size() / 16);
+		if (count == 0) continue;
+		ranges.push_back({ tex, instanceCursor, count });
+		batchUniforms.insert(batchUniforms.end(), data.begin(), data.end());
+		instanceCursor += count;
+	}
 
-		bindGroups[0].binding = 0;
-		bindGroups[0].buffer = m_uniforms;
-		bindGroups[0].offset = 0; // dynamic offset will be provided at set time
-		bindGroups[0].size = static_cast<uint64_t>(m_uniformStride);
+	const uint32_t spriteCount = instanceCursor;
+	ensure_uniform_capacity(spriteCount);
+	if (spriteCount != 0)
+		m_queue.WriteBuffer(m_uniforms, 0, batchUniforms.data(), batchUniforms.size() * sizeof(float));
 
-		bindGroups[1].binding = 1;
-		bindGroups[1].textureView = p.tex->view();
+	pass.SetPipeline(m_pipeline);
 
-		bindGroups[2].binding = 2;
-		bindGroups[2].sampler = m_nearestSampler;
-
-		wgpu::BindGroupDescriptor bindGroupDesc{};
-		bindGroupDesc.layout = m_groupLayout;
-		bindGroupDesc.entryCount = bindGroups.size();
-		bindGroupDesc.entries = bindGroups.data();
-		wgpu::BindGroup binds = m_device.CreateBindGroup(&bindGroupDesc);
-
-		uint32_t dynamicOffset = offset;
-		pass.SetBindGroup(0, binds, 1, &dynamicOffset);
-
-		m_uniformsOffset = offset + stride;
-		pass.SetPipeline(m_pipeline);
-
-		pass.Draw(6, 1, 0, 0);
+	for (const auto& r : ranges)
+	{
+		auto it = m_textureBindGroups.find(r.tex);
+		if (it == m_textureBindGroups.end())
+			it = m_textureBindGroups.emplace(r.tex, setup_bind_groups(r.tex->view())).first;
+		pass.SetBindGroup(0, it->second);
+		pass.Draw(6, r.count, 0, r.start);
 	}
 
 	// Draw imgui
