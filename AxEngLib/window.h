@@ -120,7 +120,7 @@ namespace ax
 		wgpu::Queue& queue() noexcept { return m_queue; }
 		const wgpu::Queue& queue() const noexcept { return m_queue; }
 
-		void set_clear_color(wgpu::Color& color)
+		void set_clear_color(const wgpu::Color& color)
 		{
 			m_clearColor = color;
 		}
@@ -130,6 +130,7 @@ namespace ax
 
 		SpriteDefinition* allocate_sprite();
 		void free_sprite(SpriteDefinition* sprite);
+		std::size_t get_sprite_count() const;
 
 		void render_texture(Texture* tex, glm::vec2 position);
 		void render_texture(Texture* tex, glm::vec2 position, rectf region);

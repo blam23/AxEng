@@ -454,6 +454,11 @@ void ax::Window::free_sprite(SpriteDefinition* sprite)
 	m_freeSpriteSlots.push_back(sprite);
 }
 
+std::size_t ax::Window::get_sprite_count() const
+{
+	return m_activeSprites.size();
+}
+
 void ax::Window::render_texture(Texture* tex, glm::vec2 position)
 {
 	SpriteDefinition sprite{};

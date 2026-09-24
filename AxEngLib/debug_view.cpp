@@ -8,6 +8,7 @@
 #undef min
 #undef max
 #include "imgui_zoomable_image.h"
+#include "IconsFontAwesome6.h"
 
 void ax::debug::View::register_debug_view(ax::Application& app)
 {
@@ -29,7 +30,7 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 
 			ImGui::ShowDemoWindow();
 
-			ImGui::Begin("Renderer");
+			ImGui::Begin(ICON_FA_PAINTBRUSH " Renderer");
 			{
 				if (ImGui::Button("Reload Pipeline"))
 				{
@@ -38,7 +39,7 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 			}
 			ImGui::End();
 
-			ImGui::Begin("Timing");
+			ImGui::Begin(ICON_FA_CLOCK " Profiler");
 			{
 				#ifdef _DEBUG
 				ImGui::PushFont(nullptr, 24.f);
@@ -60,10 +61,11 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 
 				#ifdef ENABLE_PROFILER
 				{
+					ImGui::SeparatorText(ICON_FA_FIRE " Flame Graph");
+
 					auto& prof = ax::Profiler::instance();
 					auto roots = prof.all_segments();
 					std::sort(roots.begin(), roots.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-					ImGui::TextUnformatted("Flame Graph");
 
 					if (!roots.empty())
 					{
@@ -112,9 +114,6 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 									if (width > ImGui::CalcTextSize(name.c_str()).x + 8.0f)
 										drawList->AddText(ImVec2(x + 4.0f, y + 2.0f), ImGui::GetColorU32(ImGuiCol_Text), name.c_str());
 
-									if (ImGui::IsMouseHoveringRect(min, max))
-										ImGui::SetTooltip("%s\navg=%.3f ms min=%.3f ms max=%.3f ms samples=%zu", path.c_str(), stats.averageMs, stats.minMs, stats.maxMs, stats.samples);
-
 									auto children = segment->children();
 									std::sort(children.begin(), children.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
 									double childrenMs = 0.0;
@@ -154,7 +153,8 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 					{
 						ImGui::TextUnformatted("No profiler segments yet.");
 					}
-					ImGui::Separator();
+
+					ImGui::SeparatorText(ICON_FA_LIST " Segments");
 
 					auto drawSegment = [&](auto&& self, const std::string& name,
 							const std::shared_ptr<ax::ProfilerSegment>& segment,
@@ -179,7 +179,7 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 							ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
 							auto children = segment->children();
 							const bool hasChildren = !children.empty();
-							const ImGuiTreeNodeFlags nodeFlags = ImGuiTreeNodeFlags_SpanFullWidth
+							const ImGuiTreeNodeFlags nodeFlags = ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_DefaultOpen
 								| (hasChildren ? ImGuiTreeNodeFlags_None : ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen);
 							const bool isOpen = ImGui::TreeNodeEx(name.c_str(), nodeFlags);
 							ImGui::TableNextColumn();
@@ -213,11 +213,16 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 						ImGui::EndTable();
 					}
 				}
+
+
 				#endif
+				ImGui::SeparatorText(ICON_FA_CHART_BAR " Statistics");
+
+				ImGui::Text("Sprites: %d", app.window()->get_sprite_count());
 			}
 			ImGui::End();
 
-			ImGui::Begin("Lua Debug");
+			ImGui::Begin(ICON_FA_CODE_BRANCH " Lua Debug");
 			{
 				const auto& state{ app.scripts().debug_get_state({}) };
 				const auto& env{ app.debug_get_env({}) };
@@ -392,7 +397,7 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 			}
 			ImGui::End();
 
-			ImGui::Begin("Script View");
+			ImGui::Begin(ICON_FA_FILE_CODE " Script View");
 			{
 				static lua::Script* script{ nullptr };
 				static std::string label{ "Pick a script to inspect" };
@@ -429,7 +434,7 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 			}
 			ImGui::End();
 
-			ImGui::Begin("Texture View");
+			ImGui::Begin(ICON_FA_IMAGE " Texture View");
 			{
 				static Texture* texture{ nullptr };
 				static std::string label{ "Pick a texture to inspect" };

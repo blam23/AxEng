@@ -177,6 +177,12 @@ void ax::Application::add_application_bindings(sol::state& state)
 				m_window->prevent_close();
 			};
 
+		window["set_clear_color"] =
+			[this](float r, float g, float b, float a)
+			{
+				m_window->set_clear_color({ r, g, b, a });
+			};
+
 		auto on_ui_table{ state.create_table() };
 		on_ui_table["subscribe"] =
 			[this](std::function<void(double delta)> f) -> size_t
@@ -255,31 +261,57 @@ void ax::Application::add_application_bindings(sol::state& state)
 				};
 
 			sprite_table["setup"] =
-				[this](SpriteDefinition* sprite, const sol::table& texture, float x, float y, float rx, float ry, float rw, float rh)
-				{
-					if (texture["valid"])
+				sol::overload
+				(
+					[this](SpriteDefinition* sprite, const sol::table& texture, float x, float y, float rx, float ry, float rw, float rh)
 					{
-						sprite->tex = texture["ptr"].get<Texture*>();
-						sprite->gpuData.pos.x = x;
-						sprite->gpuData.pos.y = y;
-						sprite->gpuData.useRegion = 1;
-						sprite->gpuData.region.x = rx;
-						sprite->gpuData.region.y = ry;
-						sprite->gpuData.region.z = rw;
-						sprite->gpuData.region.w = rh;
-					}
-					else
+						if (texture["valid"])
+						{
+							sprite->tex = texture["ptr"].get<Texture*>();
+							sprite->gpuData.pos.x = x;
+							sprite->gpuData.pos.y = y;
+							sprite->gpuData.useRegion = 1;
+							sprite->gpuData.region.x = rx;
+							sprite->gpuData.region.y = ry;
+							sprite->gpuData.region.z = rw;
+							sprite->gpuData.region.w = rh;
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot setup sprite");
+						}
+					},
+					[this](SpriteDefinition* sprite, const sol::table& texture, float x, float y)
 					{
-						spdlog::error("Invalid texture, cannot setup sprite");
+						if (texture["valid"])
+						{
+							sprite->tex = texture["ptr"].get<Texture*>();
+							sprite->gpuData.pos.x = x;
+							sprite->gpuData.pos.y = y;
+							sprite->gpuData.useRegion = 0;
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot setup sprite");
+						}
 					}
-				};
+				);
 
 			sprite_table["update_position"] =
-				[this](SpriteDefinition* sprite, float x, float y)
-				{
-					sprite->gpuData.pos.x = x;
-					sprite->gpuData.pos.y = y;
-				};
+				sol::overload
+				(
+					[this](SpriteDefinition* sprite, float x, float y)
+					{
+						sprite->gpuData.pos.x = x;
+						sprite->gpuData.pos.y = y;
+					},
+					[this](SpriteDefinition* sprite, float x, float y, float r)
+					{
+						sprite->gpuData.pos.x = x;
+						sprite->gpuData.pos.y = y;
+						sprite->gpuData.rotation = r;
+					}
+				);
 
 			app["sprites"] = sprite_table;
 		}
