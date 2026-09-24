@@ -45,7 +45,6 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 				ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "DEBUG BUILD");
 				ImGui::PopFont();
 				#endif
-				static float deltaTimes[512]{ 0 };
 				constexpr std::size_t deltaCount = 512;
 				static float deltaTimes[deltaCount]{ 0 };
 				static std::size_t deltaPtr = 0;
@@ -175,7 +174,6 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 								0.28f * (1.0f - intensity), 1.0f));
 
 
-
 							ImGui::TableNextRow();
 							ImGui::TableNextColumn();
 							ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
@@ -190,7 +188,6 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 							ImGui::TableNextColumn();
 							ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
 							ImGui::Text("%.3f", stats.maxMs);
-
 
 							auto children = segment->children();
 							std::sort(children.begin(), children.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
@@ -275,38 +272,116 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 					else
 						value = env[picked_key];
 
-					const auto type{ value.get_type() };
-					switch (type)
-					{
-					case sol::type::nil:
-						ImGui::Text("Value: nil");
-						break;
-					case sol::type::number:
-						ImGui::Text("Value: %f", value.as<float>());
-						break;
-					case sol::type::string:
-						ImGui::Text("Value: '%s'", value.as<std::string>().c_str());
-						break;
-					case sol::type::boolean:
-						ImGui::Text("Value: '%s'", value.as<bool>() ? "true" : "false");
-						break;
-					case sol::type::function:
-						ImGui::Text("Value: <function>");
-						break;
-					case sol::type::userdata:
-					case sol::type::lightuserdata:
-						ImGui::Text("Value: <user_data>");
-						break;
-					case sol::type::thread:
-						ImGui::Text("Value: <thread>");
-						break;
-					case sol::type::table: // todo: recurse into table
-						ImGui::Text("Value: <table>");
-						break;
-					default:
-						ImGui::Text("Value: <unknown>");
-						break;
-					}
+					auto getTypeName = [](sol::type type) -> const char*
+						{
+							switch (type)
+							{
+							case sol::type::nil: return "nil";
+							case sol::type::number: return "number";
+							case sol::type::string: return "string";
+							case sol::type::boolean: return "boolean";
+							case sol::type::function: return "function";
+							case sol::type::userdata: return "userdata";
+							case sol::type::lightuserdata: return "lightuserdata";
+							case sol::type::thread: return "thread";
+							case sol::type::table: return "table";
+							default: return "unknown";
+							}
+						};
+
+					int tableId = 0;
+					auto drawValue = [&](auto&& self, const sol::object& object, size_t depth) -> void
+						{
+							switch (object.get_type())
+							{
+							case sol::type::nil:
+								ImGui::TextUnformatted("nil");
+								break;
+							case sol::type::number:
+								ImGui::Text("%.15g", object.as<double>());
+								break;
+							case sol::type::string:
+								{
+									const auto text = object.as<std::string>();
+									ImGui::TextUnformatted(text.c_str());
+								}
+								break;
+							case sol::type::boolean:
+								ImGui::TextUnformatted(object.as<bool>() ? "true" : "false");
+								break;
+							case sol::type::function:
+								ImGui::TextUnformatted("<function>");
+								break;
+							case sol::type::userdata:
+								ImGui::TextUnformatted("<userdata>");
+								break;
+							case sol::type::lightuserdata:
+								ImGui::TextUnformatted("<lightuserdata>");
+								break;
+							case sol::type::thread:
+								ImGui::TextUnformatted("<thread>");
+								break;
+							case sol::type::table:
+								{
+									if (depth >= 8)
+									{
+										ImGui::TextUnformatted("<maximum table depth>");
+										break;
+									}
+
+									ImGui::PushID(tableId++);
+									const sol::table table = object.as<sol::table>();
+									if (ImGui::BeginTable("Lua table", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_NoSavedSettings))
+									{
+										ImGui::TableSetupColumn("Key");
+										ImGui::TableSetupColumn("Type");
+										ImGui::TableSetupColumn("Value");
+										ImGui::TableHeadersRow();
+
+										for (const auto& entry : table)
+										{
+											const sol::object& key = entry.first;
+											const sol::object& entryValue = entry.second;
+											ImGui::TableNextRow();
+											ImGui::TableNextColumn();
+											switch (key.get_type())
+											{
+											case sol::type::string:
+												{
+													const auto text = key.as<std::string>();
+													ImGui::TextUnformatted(text.c_str());
+												}
+												break;
+											case sol::type::number:
+												ImGui::Text("%.15g", key.as<double>());
+												break;
+											case sol::type::boolean:
+												ImGui::TextUnformatted(key.as<bool>() ? "true" : "false");
+												break;
+											default:
+												ImGui::Text("<%s key>", getTypeName(key.get_type()));
+												break;
+											}
+
+											ImGui::TableNextColumn();
+											ImGui::TextUnformatted(getTypeName(entryValue.get_type()));
+											ImGui::TableNextColumn();
+											self(self, entryValue, depth + 1);
+										}
+
+										ImGui::EndTable();
+									}
+									ImGui::PopID();
+								}
+								break;
+							default:
+								ImGui::TextUnformatted("<unknown>");
+								break;
+							}
+						};
+
+					ImGui::Text("Value (%s):", getTypeName(value.get_type()));
+					drawValue(drawValue, value, 0);
 				}
 			}
 			ImGui::End();
