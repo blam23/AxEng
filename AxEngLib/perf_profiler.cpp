@@ -1,5 +1,7 @@
 #include "perf_profiler.h"
 
+#ifdef ENABLE_PROFILER
+
 namespace ax
 {
 	ProfilerSegment::ProfilerSegment()
@@ -11,8 +13,8 @@ namespace ax
 	{
 		std::lock_guard lock(m_mutex);
 		m_samples[m_index] = static_cast<uint64_t>(ns.count());
-		m_index = (m_index + 1) % kProfilerSampleCount;
-		if (m_count < kProfilerSampleCount) ++m_count;
+		m_index = (m_index + 1) % PROFILER_SAMPLE_COUNT;
+		if (m_count < PROFILER_SAMPLE_COUNT) ++m_count;
 	}
 
 	PerfStats ProfilerSegment::stats() const
@@ -34,6 +36,26 @@ namespace ax
 		out.averageMs = static_cast<double>(sum) / (1000000.0 * static_cast<double>(m_count));
 		out.minMs = static_cast<double>(minv) / 1000000.0;
 		out.maxMs = static_cast<double>(maxv) / 1000000.0;
+		return out;
+	}
+
+	std::shared_ptr<ProfilerSegment> ProfilerSegment::segment(const std::string& name)
+	{
+		std::lock_guard lock(m_childrenMutex);
+		auto it = m_children.find(name);
+		if (it != m_children.end()) return it->second;
+		auto child = std::make_shared<ProfilerSegment>();
+		m_children.emplace(name, child);
+		return child;
+	}
+
+	std::vector<std::pair<std::string, std::shared_ptr<ProfilerSegment>>> ProfilerSegment::children() const
+	{
+		std::lock_guard lock(m_childrenMutex);
+		std::vector<std::pair<std::string, std::shared_ptr<ProfilerSegment>>> out;
+		out.reserve(m_children.size());
+		for (const auto& child : m_children)
+			out.emplace_back(child.first, child.second);
 		return out;
 	}
 
@@ -78,3 +100,5 @@ namespace ax
 	}
 
 }
+
+#endif

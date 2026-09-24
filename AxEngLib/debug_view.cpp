@@ -1,5 +1,6 @@
 #include "debug_view.h"
 
+#include <algorithm>
 #include <imgui.h>
 #include <cstring>
 #include "perf_profiler.h"
@@ -45,75 +46,132 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 				deltaPtr %= 512;
 				ImGui::PlotHistogram("Delta Times (ms)", deltaTimes, 512);
 
-			// Dynamic profiler flame-graph style display
-			{
-				auto& prof = ax::Profiler::instance();
-				auto all = prof.all_segments();
-				if (!all.empty())
+				#ifdef ENABLE_PROFILER
 				{
-					// Build a list of stats and sort by average desc
-					struct Item { std::string name; PerfStats s; };
-					std::vector<Item> items;
-					items.reserve(all.size());
-					for (auto &kv : all)
+					auto& prof = ax::Profiler::instance();
+					auto roots = prof.all_segments();
+					std::sort(roots.begin(), roots.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+					ImGui::TextUnformatted("Flame Graph");
+
+					if (!roots.empty())
 					{
-						Item it;
-						it.name = kv.first;
-						it.s = kv.second->stats();
-						items.push_back(std::move(it));
-					}
-					std::sort(items.begin(), items.end(), [](auto &a, auto &b){ return a.s.averageMs > b.s.averageMs; });
+						auto getDepth = 
+							[&](auto&& self, const std::shared_ptr<ax::ProfilerSegment>& segment) -> size_t
+							{
+								size_t depth = 1;
+								for (const auto& child : segment->children())
+									depth = std::max(depth, 1 + self(self, child.second));
+								return depth;
+							};
 
-					// Determine frame reference (use "frame" if present, otherwise max avg)
-					double frameRef = 0.0;
-					for (auto &it : items) if (it.name == "frame") { frameRef = it.s.averageMs; break; }
-					if (frameRef <= 0.0)
-					{
-						for (auto &it : items) frameRef = std::max(frameRef, it.s.averageMs);
-						if (frameRef <= 0.0) frameRef = 1.0; // avoid divide by zero
-					}
-
-					ImDrawList* dl = ImGui::GetWindowDrawList();
-					const ImVec2 pos = ImGui::GetCursorScreenPos();
-					const float availX = ImGui::GetContentRegionAvail().x;
-					const float barHeight = 20.0f;
-
-					// Background bar
-					dl->AddRectFilled(ImVec2(pos.x, pos.y), ImVec2(pos.x + availX, pos.y + barHeight), ImGui::GetColorU32(ImGuiCol_FrameBg));
-
-					float curX = pos.x;
-					int idx = 0;
-					for (auto &it : items)
-					{
-						if (it.name == "frame")
-							continue;
-						// fraction relative to frameRef
-						double frac = it.s.averageMs / frameRef;
-						if (frac <= 0.0) continue;
-						float w = static_cast<float>(frac * availX);
-						// color variation
-						ImU32 col = ImGui::GetColorU32(ImVec4(0.2f + 0.6f * (idx % 7) / 7.0f, 0.4f, 0.6f, 1.0f));
-						dl->AddRectFilled(ImVec2(curX, pos.y), ImVec2(curX + w, pos.y + barHeight), col);
-						// label
-						char buf[128];
-						snprintf(buf, sizeof(buf), "%s: %.3fms", it.name.c_str(), it.s.averageMs);
-						dl->AddText(ImVec2(curX + 4.0f, pos.y + 2.0f), ImGui::GetColorU32(ImGuiCol_Text), buf);
-
-						// hover tooltip
-						ImVec2 mousePos = ImGui::GetIO().MousePos;
-						if (mousePos.x >= curX && mousePos.x <= curX + w && mousePos.y >= pos.y && mousePos.y <= pos.y + barHeight)
+						double totalRootMs = 0.0;
+						size_t maxDepth = 0;
+						for (const auto& root : roots)
 						{
-							ImGui::SetTooltip("%s\navg=%.3fms min=%.3fms max=%.3fms samples=%zu", it.name.c_str(), it.s.averageMs, it.s.minMs, it.s.maxMs, it.s.samples);
+							totalRootMs += root.second->stats().averageMs;
+							maxDepth = std::max(maxDepth, getDepth(getDepth, root.second));
 						}
 
-						curX += w;
-						idx++;
-					}
+						if (totalRootMs > 0.0)
+						{
+							const ImVec2 graphPos = ImGui::GetCursorScreenPos();
+							const float graphWidth = ImGui::GetContentRegionAvail().x;
+							const float barHeight = 20.0f;
+							const float barGap = 2.0f;
+							ImDrawList* drawList = ImGui::GetWindowDrawList();
 
-					// advance cursor
-					ImGui::Dummy(ImVec2(availX, barHeight + 4.0f));
+							auto drawFlameSegment = 
+								[&](auto&& self, const std::string& name,
+									const std::string& path,
+									const std::shared_ptr<ax::ProfilerSegment>& segment,
+									float x, float y, float width, size_t depth)
+								{
+									if (width < 1.0f)
+										return;
+
+									const auto stats = segment->stats();
+									const ImVec2 min(x, y);
+									const ImVec2 max(x + width, y + barHeight);
+									const float variation = static_cast<float>((depth * 3) % 5) * 0.06f;
+									const ImU32 color = ImGui::GetColorU32(ImVec4(0.75f, 0.35f + variation, 0.2f, 1.0f));
+									drawList->AddRectFilled(min, max, color);
+									drawList->AddRect(min, max, ImGui::GetColorU32(ImGuiCol_Border));
+
+									if (width > ImGui::CalcTextSize(name.c_str()).x + 8.0f)
+										drawList->AddText(ImVec2(x + 4.0f, y + 2.0f), ImGui::GetColorU32(ImGuiCol_Text), name.c_str());
+
+									if (ImGui::IsMouseHoveringRect(min, max))
+										ImGui::SetTooltip("%s\navg=%.3f ms min=%.3f ms max=%.3f ms samples=%zu", path.c_str(), stats.averageMs, stats.minMs, stats.maxMs, stats.samples);
+
+									auto children = segment->children();
+									std::sort(children.begin(), children.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+									double childrenMs = 0.0;
+									for (const auto& child : children)
+										childrenMs += child.second->stats().averageMs;
+
+									const double childTimeScale = std::max(stats.averageMs, childrenMs);
+									if (childTimeScale <= 0.0)
+										return;
+
+									float childX = x;
+									for (const auto& child : children)
+									{
+										const auto childStats = child.second->stats();
+										const float childWidth = width * static_cast<float>(childStats.averageMs / childTimeScale);
+										self(self, child.first, path + "/" + child.first, child.second, childX, y + barHeight + barGap, childWidth, depth + 1);
+										childX += childWidth;
+									}
+								};
+
+							float rootX = graphPos.x;
+							for (const auto& root : roots)
+							{
+								const float rootWidth = graphWidth * static_cast<float>(root.second->stats().averageMs / totalRootMs);
+								drawFlameSegment(drawFlameSegment, root.first, root.first, root.second, rootX, graphPos.y, rootWidth, 0);
+								rootX += rootWidth;
+							}
+
+							ImGui::Dummy(ImVec2(graphWidth, static_cast<float>(maxDepth) * (barHeight + barGap)));
+						}
+						else
+						{
+							ImGui::TextUnformatted("No profiler samples yet.");
+						}
+					}
+					else
+					{
+						ImGui::TextUnformatted("No profiler segments yet.");
+					}
+					ImGui::Separator();
+
+					auto drawSegment = [&](auto&& self, const std::string& name, const std::shared_ptr<ax::ProfilerSegment>& segment, bool root) -> void
+						{
+							const auto stats = segment->stats();
+							auto children = segment->children();
+							std::sort(children.begin(), children.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+
+							ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth;
+							if (children.empty())
+								flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+							if (root)
+								flags |= ImGuiTreeNodeFlags_DefaultOpen;
+
+							const bool open = ImGui::TreeNodeEx(name.c_str(), flags);
+							ImGui::SameLine();
+							ImGui::Text("avg %.3f ms | min %.3f ms | max %.3f ms | %zu samples", stats.averageMs, stats.minMs, stats.maxMs, stats.samples);
+
+							if (open && !children.empty())
+							{
+								for (const auto& child : children)
+									self(self, child.first, child.second, false);
+								ImGui::TreePop();
+							}
+						};
+
+					for (const auto& root : roots)
+						drawSegment(drawSegment, root.first, root.second, true);
 				}
-			}
+				#endif
 			}
 			ImGui::End();
 
@@ -132,7 +190,7 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 
 					static size_t current{ 0 };
 					size_t n{ 0 };
-					
+
 					// Env vars
 					for (const auto& kvp : env)
 					{

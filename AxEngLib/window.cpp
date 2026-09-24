@@ -606,231 +606,250 @@ void ax::Window::run_loop()
 	{
 		glfwPollEvents();
 
-
 		updateDelta = glfwGetTime() - updatePrev;
 		updatePrev = glfwGetTime();
 
-		// Profile the per-frame regions
+		PROFILER_TOP_LEVEL(frame);
+		PROFILER_TOP_LEVEL_SEGMENT_SCOPED(frame);
 		{
-			auto& prof = ax::Profiler::instance();
-			auto frameSeg = prof.segment("frame");
-			ax::Profiler::ScopedSample frameSample(frameSeg);
+			PROFILER_SEGMENT_SCOPED(frame, tick);
+			handle_tick(updateDelta);
+		}
 
-			auto tickSeg = prof.segment("tick");
-			{
-				ax::Profiler::ScopedSample s(tickSeg);
-				handle_tick(updateDelta);
-			}
-
-			auto renderSeg = prof.segment("render_pass");
-			{
-				ax::Profiler::ScopedSample s(renderSeg);
-				run_wgpu_render_pass(updateDelta);
-			}
+		{
+			PROFILER_SEGMENT_SCOPED(frame, render);
+			run_wgpu_render_pass(updateDelta);
 		}
 	}
-
-
 
 	ax::input::KeyEventHandler::cleanup_events(m_window);
 }
 
 void ax::Window::run_wgpu_render_pass(double delta)
 {
-	m_preRenderEventHandler.fire({ .delta = delta });
-
-	wgpu::SurfaceTexture surfaceTexture;
-	m_surface.GetCurrentTexture(&surfaceTexture);
-
-	if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal)
 	{
-		spdlog::error("Failed to create new frame surface");
-		return;
+		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, pre_render);
+
+		m_preRenderEventHandler.fire({ .delta = delta });
 	}
 
-	wgpu::TextureViewDescriptor view
 	{
-		.nextInChain = nullptr,
-		.label = "frame view",
-		.format = surfaceTexture.texture.GetFormat(),
-		.dimension = wgpu::TextureViewDimension::e2D,
-		.baseMipLevel = 0,
-		.mipLevelCount = 1,
-		.baseArrayLayer = 0,
-		.arrayLayerCount = 1,
-		.aspect = wgpu::TextureAspect::All,
-	};
-	wgpu::TextureView targetView{ surfaceTexture.texture.CreateView(&view) };
+		wgpu::RenderPassEncoder pass;
+		wgpu::CommandEncoder encoder;
 
-	wgpu::CommandEncoderDescriptor encoderDesc
-	{
-		.nextInChain = nullptr,
-		.label = "frame encoder",
-	};
-	wgpu::CommandEncoder encoder = m_device.CreateCommandEncoder(&encoderDesc);
-
-// Update global viewport uniform (width,height,0,0)
-{
-	float vp[4] = { static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f };
-	m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
-}
-
-	// Setup Render pass
-	{
-		// Clear frame
-		wgpu::RenderPassColorAttachment colorAttachment
 		{
-			.view = targetView,
-			.depthSlice = wgpu::kDepthSliceUndefined,
-			.loadOp = wgpu::LoadOp::Clear,
-			.storeOp = wgpu::StoreOp::Store,
-			.clearValue = m_clearColor,
-		};
+			PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, surface_setup);
 
-		// Clear depth
-		wgpu::RenderPassDepthStencilAttachment depthAttachment
+			wgpu::SurfaceTexture surfaceTexture;
+			m_surface.GetCurrentTexture(&surfaceTexture);
+
+			if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal)
+			{
+				spdlog::error("Failed to create new frame surface");
+				return;
+			}
+
+			wgpu::TextureViewDescriptor view
+			{
+				.nextInChain = nullptr,
+				.label = "frame view",
+				.format = surfaceTexture.texture.GetFormat(),
+				.dimension = wgpu::TextureViewDimension::e2D,
+				.baseMipLevel = 0,
+				.mipLevelCount = 1,
+				.baseArrayLayer = 0,
+				.arrayLayerCount = 1,
+				.aspect = wgpu::TextureAspect::All,
+			};
+			wgpu::TextureView targetView{ surfaceTexture.texture.CreateView(&view) };
+
+			wgpu::CommandEncoderDescriptor encoderDesc
+			{
+				.nextInChain = nullptr,
+				.label = "frame encoder",
+			};
+			encoder = m_device.CreateCommandEncoder(&encoderDesc);
+
+			// Update global viewport uniform (width,height,0,0)
+			{
+				float vp[4] = { static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f };
+				m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
+			}
+
+			// Setup Render pass
+			{
+				// Clear frame
+				wgpu::RenderPassColorAttachment colorAttachment
+				{
+					.view = targetView,
+					.depthSlice = wgpu::kDepthSliceUndefined,
+					.loadOp = wgpu::LoadOp::Clear,
+					.storeOp = wgpu::StoreOp::Store,
+					.clearValue = m_clearColor,
+				};
+
+				// Clear depth
+				wgpu::RenderPassDepthStencilAttachment depthAttachment
+				{
+					.view = m_depthTextureView,
+					.depthLoadOp = wgpu::LoadOp::Clear,
+					.depthStoreOp = wgpu::StoreOp::Store,
+					.depthClearValue = 1.0f,
+					.depthReadOnly = false,
+					.stencilLoadOp = wgpu::LoadOp::Undefined,
+					.stencilStoreOp = wgpu::StoreOp::Undefined,
+					.stencilClearValue = 0,
+					.stencilReadOnly = true,
+				};
+
+				wgpu::RenderPassDescriptor passDesc
+				{
+					.nextInChain = nullptr,
+					.colorAttachmentCount = 1,
+					.colorAttachments = &colorAttachment,
+					.depthStencilAttachment = &depthAttachment,
+					.timestampWrites = nullptr,
+				};
+				pass = encoder.BeginRenderPass(&passDesc);
+			}
+		}
+
+		// Build the actual render pass (lua, sprite batching, imgui, etc.)
 		{
-			.view = m_depthTextureView,
-			.depthLoadOp = wgpu::LoadOp::Clear,
-			.depthStoreOp = wgpu::StoreOp::Store,
-			.depthClearValue = 1.0f,
-			.depthReadOnly = false,
-			.stencilLoadOp = wgpu::LoadOp::Undefined,
-			.stencilStoreOp = wgpu::StoreOp::Undefined,
-			.stencilClearValue = 0,
-			.stencilReadOnly = true,
-		};
+			handle_render_pass(pass, delta);
+			pass.End();
+		}
 
-		wgpu::RenderPassDescriptor passDesc
+		// Submit commands to GPU
 		{
-			.nextInChain = nullptr,
-			.colorAttachmentCount = 1,
-			.colorAttachments = &colorAttachment,
-			.depthStencilAttachment = &depthAttachment,
-			.timestampWrites = nullptr,
-		};
-		wgpu::RenderPassEncoder pass{ encoder.BeginRenderPass(&passDesc) };
+			PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, finalise);
 
-		handle_render_pass(pass, delta);
+			wgpu::CommandBufferDescriptor bufferDesc
+			{
+				.nextInChain = nullptr,
+				.label = "frame cmd buffer",
+			};
+			wgpu::CommandBuffer command{ encoder.Finish(&bufferDesc) };
 
-		pass.End();
+			m_queue.Submit(1, &command);
+
+			m_surface.Present();
+
+			// Let the device progress
+			m_device.Tick();
+		}
 	}
-
-	wgpu::CommandBufferDescriptor bufferDesc
-	{
-		.nextInChain = nullptr,
-		.label = "frame cmd buffer",
-	};
-	wgpu::CommandBuffer command{ encoder.Finish(&bufferDesc) };
-
-	m_queue.Submit(1, &command);
-
-	m_surface.Present();
-
-
-	// Let the device progress
-	m_device.Tick();
 }
 
 
 void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 {
-	// Send out the draw event
-	m_renderEventHandler.fire
-	({
-		.delta = delta,
-		.pass = pass
-	});
+	{
+		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, render_event);
 
-	// Gather all sprite instance data into a single storage buffer.
-	m_pendingTextures.erase
-	(
-		std::remove_if(m_pendingTextures.begin(), m_pendingTextures.end(), [](const SpriteDefinition& sprite)
+		// Send out the draw event
+		m_renderEventHandler.fire
+		({
+			.delta = delta,
+			.pass = pass
+		});
+	}
+
+	{
+		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, sprite_batch);
+
+		// Gather all sprite instance data into a single storage buffer.
+		m_pendingTextures.erase
+		(
+			std::remove_if(m_pendingTextures.begin(), m_pendingTextures.end(), [](const SpriteDefinition& sprite)
+				{
+					return sprite.tex == nullptr;
+				}),
+			m_pendingTextures.end()
+		);
+
+		// Group uniforms by texture so we can issue one instanced draw per texture.
+		std::unordered_map<Texture*, std::vector<float>> groups;
+		groups.reserve(m_pendingTextures.size());
+
+		for (const auto& p : m_pendingTextures)
 		{
-			return sprite.tex == nullptr;
-		}),
-		m_pendingTextures.end()
-	);
+			float uniforms[16]{};
 
-	// Group uniforms by texture so we can issue one instanced draw per texture.
-	std::unordered_map<Texture*, std::vector<float>> groups;
-	groups.reserve(m_pendingTextures.size());
+			const auto width{ static_cast<float>(p.tex->width()) };
+			const auto height{ static_cast<float>(p.tex->height()) };
 
-	for (const auto& p : m_pendingTextures)
-	{
-		float uniforms[16]{};
+			// Vertex position and size (screen space, pixels)
+			uniforms[0] = p.pos.x;
+			uniforms[1] = p.pos.y;
+			uniforms[2] = (p.useRegion ? p.region.z : width) * p.scale.x;
+			uniforms[3] = (p.useRegion ? p.region.w : height) * p.scale.y;
 
-		const auto width{ static_cast<float>(p.tex->width()) };
-		const auto height{ static_cast<float>(p.tex->height()) };
+			// UVs (u0,v0,u1,v1) (texture space, 0-1)
+			uniforms[4] = p.useRegion ? (p.region.x / width) : 0.0f;
+			uniforms[5] = p.useRegion ? (p.region.y / height) : 0.0f;
+			uniforms[6] = p.useRegion ? (uniforms[4] + (p.region.z / width)) : 1.0f;
+			uniforms[7] = p.useRegion ? (uniforms[5] + (p.region.w / height)) : 1.0f;
 
-		// Vertex position and size (screen space, pixels)
-		uniforms[0] = p.pos.x;
-		uniforms[1] = p.pos.y;
-		uniforms[2] = (p.useRegion ? p.region.z : width) * p.scale.x;
-		uniforms[3] = (p.useRegion ? p.region.w : height) * p.scale.y;
+			// Tint
+			uniforms[8] = 1.f; uniforms[9] = 1.f; uniforms[10] = 1.f; uniforms[11] = 1.f;
 
-		// UVs (u0,v0,u1,v1) (texture space, 0-1)
-		uniforms[4] = p.useRegion ? (p.region.x / width ) : 0.0f;
-		uniforms[5] = p.useRegion ? (p.region.y / height) : 0.0f;
-		uniforms[6] = p.useRegion ? (uniforms[4] + (p.region.z / width )) : 1.0f;
-		uniforms[7] = p.useRegion ? (uniforms[5] + (p.region.w / height)) : 1.0f;
+			// Viewport is now a global uniform; per-instance slots leave these zero.
+			uniforms[12] = p.z;
 
-		// Tint
-		uniforms[8] = 1.f; uniforms[9] = 1.f; uniforms[10] = 1.f; uniforms[11] = 1.f;
+			// Unused
+			//uniforms[13] = 0.f;
+			//uniforms[14] = 0.f;
+			//uniforms[15] = 0.f;
 
-		// Viewport is now a global uniform; per-instance slots leave these zero.
-		uniforms[12] = p.z;
+			groups[p.tex].insert(groups[p.tex].end(), std::begin(uniforms), std::end(uniforms));
+		}
 
-		// Unused
-		//uniforms[13] = 0.f;
-		//uniforms[14] = 0.f;
-		//uniforms[15] = 0.f;
+		struct GroupRange { Texture* tex; uint32_t start; uint32_t count; };
+		std::vector<GroupRange> ranges;
+		ranges.reserve(groups.size());
 
-		groups[p.tex].insert(groups[p.tex].end(), std::begin(uniforms), std::end(uniforms));
+		std::vector<float> batchUniforms;
+		batchUniforms.reserve(m_pendingTextures.size() * 16);
+
+		uint32_t instanceCursor = 0;
+		for (auto& kv : groups)
+		{
+			Texture* tex = kv.first;
+			auto& data = kv.second;
+			const uint32_t count = static_cast<uint32_t>(data.size() / 16);
+			if (count == 0) continue;
+			ranges.push_back({ tex, instanceCursor, count });
+			batchUniforms.insert(batchUniforms.end(), data.begin(), data.end());
+			instanceCursor += count;
+		}
+
+		const uint32_t spriteCount = instanceCursor;
+		ensure_uniform_capacity(spriteCount);
+		if (spriteCount != 0)
+			m_queue.WriteBuffer(m_uniforms, 0, batchUniforms.data(), batchUniforms.size() * sizeof(float));
+
+		pass.SetPipeline(m_pipeline);
+		// Set the global viewport bind group (group 1)
+		pass.SetBindGroup(1, m_viewportBindGroup);
+
+		for (const auto& r : ranges)
+		{
+			auto it = m_textureBindGroups.find(r.tex);
+			if (it == m_textureBindGroups.end())
+				it = m_textureBindGroups.emplace(r.tex, setup_bind_groups(r.tex->view())).first;
+			pass.SetBindGroup(0, it->second);
+			pass.Draw(6, r.count, 0, r.start);
+		}
+
+		m_pendingTextures.clear();
 	}
 
-	struct GroupRange { Texture* tex; uint32_t start; uint32_t count; };
-	std::vector<GroupRange> ranges;
-	ranges.reserve(groups.size());
-
-	std::vector<float> batchUniforms;
-	batchUniforms.reserve(m_pendingTextures.size() * 16);
-
-	uint32_t instanceCursor = 0;
-	for (auto& kv : groups)
 	{
-		Texture* tex = kv.first;
-		auto& data = kv.second;
-		const uint32_t count = static_cast<uint32_t>(data.size() / 16);
-		if (count == 0) continue;
-		ranges.push_back({ tex, instanceCursor, count });
-		batchUniforms.insert(batchUniforms.end(), data.begin(), data.end());
-		instanceCursor += count;
+		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, ui);
+
+		render_gui(pass, delta);
 	}
-
-	const uint32_t spriteCount = instanceCursor;
-	ensure_uniform_capacity(spriteCount);
-	if (spriteCount != 0)
-		m_queue.WriteBuffer(m_uniforms, 0, batchUniforms.data(), batchUniforms.size() * sizeof(float));
-
-	pass.SetPipeline(m_pipeline);
-	// Set the global viewport bind group (group 1)
-	pass.SetBindGroup(1, m_viewportBindGroup);
-
-	for (const auto& r : ranges)
-	{
-		auto it = m_textureBindGroups.find(r.tex);
-		if (it == m_textureBindGroups.end())
-			it = m_textureBindGroups.emplace(r.tex, setup_bind_groups(r.tex->view())).first;
-		pass.SetBindGroup(0, it->second);
-		pass.Draw(6, r.count, 0, r.start);
-	}
-
-	// Draw imgui
-	render_gui(pass, delta);
-
-	// Clear the queue after rendering
-	m_pendingTextures.clear();
 }
 
 void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
