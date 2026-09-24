@@ -12,10 +12,24 @@
 #include <GLFW/glfw3.h>
 #undef APIENTRY
 
+#include "glm/glm.hpp"
+
 #include <imgui.h>
 
 namespace ax
 {
+	using rectf = glm::vec4;
+
+	struct SpriteDefinition
+	{
+		Texture* tex{ nullptr };
+		glm::vec2 pos{ 0.0f, 0.0f };
+		rectf region{ 0.0f, 0.0f, 0.0f, 0.0f };
+		bool useRegion{ false };
+		float z{ 0.0f };
+		glm::vec2 scale{ 1.0f, 1.0f };
+	};
+
 	class Texture : public Asset
 	{
 	public:

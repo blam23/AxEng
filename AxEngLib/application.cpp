@@ -2,6 +2,9 @@
 
 #include "lua_lib_loader.h"
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include "glm/gtx/string_cast.hpp"
+
 ax::Application ax::Application::from_directory(std::string_view root)
 {
 	return { DirectoryResourceLoader{ root } };
@@ -246,13 +249,13 @@ void ax::Application::add_application_bindings(sol::state& state)
 				};
 
 			sprite_table["free"] =
-				[this](Window::SpriteDefinition* sprite)
+				[this](SpriteDefinition* sprite)
 				{
 					m_window->free_sprite(sprite);
 				};
 
 			sprite_table["setup"] =
-				[this](Window::SpriteDefinition* sprite, const sol::table& texture, float x, float y, float rx, float ry, float rw, float rh)
+				[this](SpriteDefinition* sprite, const sol::table& texture, float x, float y, float rx, float ry, float rw, float rh)
 				{
 					if (texture["valid"])
 					{
@@ -272,7 +275,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 				};
 
 			sprite_table["update_position"] =
-				[this](Window::SpriteDefinition* sprite, float x, float y)
+				[this](SpriteDefinition* sprite, float x, float y)
 				{
 					sprite->pos.x = x;
 					sprite->pos.y = y;

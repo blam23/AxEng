@@ -424,7 +424,7 @@ void ax::Window::reload_pipeline()
 	m_textureBindGroups.clear();
 }
 
-ax::Window::SpriteDefinition* ax::Window::allocate_sprite()
+ax::SpriteDefinition* ax::Window::allocate_sprite()
 {
 	SpriteDefinition* sprite;
 	if (m_freeSpriteSlots.empty())
@@ -632,6 +632,8 @@ void ax::Window::run_loop()
 	register_window_events();
 	ax::input::KeyEventHandler::register_events(m_window);
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
+
+	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
 	while (!glfwWindowShouldClose(m_window))
 	{

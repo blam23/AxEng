@@ -18,13 +18,11 @@
 #include <webgpu/webgpu_cpp.h>
 #include <webgpu/webgpu_cpp_print.h>
 
-// GLM
-#include "glm/glm.hpp"
-
 // AxEng
 #include "helpers.h"
 #include "event.h"
 #include "debug_view.h"
+#include "texture.h"
 
 namespace ax
 {
@@ -67,7 +65,6 @@ namespace ax
 		double delta;
 	};
 
-	using rectf = glm::vec4;
 
 	class Window
 	{
@@ -130,16 +127,6 @@ namespace ax
 
 		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view);
 		void reload_pipeline();
-
-		struct SpriteDefinition
-		{
-			Texture* tex{ nullptr };
-			glm::vec2 pos{ 0.0f, 0.0f };
-			rectf region{ 0.0f, 0.0f, 0.0f, 0.0f };
-			bool useRegion{ false };
-			float z{ 0.0f };
-			glm::vec2 scale{ 1.0f, 1.0f };
-		};
 
 		SpriteDefinition* allocate_sprite();
 		void free_sprite(SpriteDefinition* sprite);
