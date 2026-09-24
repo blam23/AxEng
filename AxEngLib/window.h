@@ -5,7 +5,9 @@
 
 // STD
 #include <string_view>
+#include <deque>
 #include <unordered_map>
+#include <vector>
 
 // GLFW
 #include "glfw3webgpu.h"
@@ -64,6 +66,8 @@ namespace ax
 	{
 		double delta;
 	};
+
+	using rectf = glm::vec4;
 
 	class Window
 	{
@@ -127,7 +131,19 @@ namespace ax
 		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view);
 		void reload_pipeline();
 
-		using rectf = glm::vec4;
+		struct SpriteDefinition
+		{
+			Texture* tex{ nullptr };
+			glm::vec2 pos{ 0.0f, 0.0f };
+			rectf region{ 0.0f, 0.0f, 0.0f, 0.0f };
+			bool useRegion{ false };
+			float z{ 0.0f };
+			glm::vec2 scale{ 1.0f, 1.0f };
+		};
+
+		SpriteDefinition* allocate_sprite();
+		void free_sprite(SpriteDefinition* sprite);
+
 		void render_texture(Texture* tex, glm::vec2 position);
 		void render_texture(Texture* tex, glm::vec2 position, rectf region);
 
@@ -182,17 +198,20 @@ namespace ax
 		wgpu::BindGroup m_viewportBindGroup;
 		std::unordered_map<Texture*, wgpu::BindGroup> m_textureBindGroups;
 
-		struct SpriteDefinition
+		struct SpriteGroupRange
 		{
-			Texture* tex{ nullptr };
-			glm::vec2 pos{ 0.0f, 0.0f };
-			rectf region{ 0.0f, 0.0f, 0.0f, 0.0f };
-			bool useRegion{ false };
-			float z{ 0.0f };
-			glm::vec2 scale{ 1.0f, 1.0f };
+			Texture* tex;
+			uint32_t start;
+			uint32_t count;
 		};
 
+		std::deque<SpriteDefinition> m_spriteSlots;
+		std::vector<SpriteDefinition*> m_activeSprites;
+		std::vector<SpriteDefinition*> m_freeSpriteSlots;
 		std::vector<SpriteDefinition> m_pendingTextures;
+		std::unordered_map<Texture*, std::vector<float>> m_spriteGroups;
+		std::vector<SpriteGroupRange> m_spriteGroupRanges;
+		std::vector<float> m_batchUniforms;
 		size_t m_uniformStride{ 16 * sizeof(float) };
 		uint32_t m_uniformsCapacity{ 1024 };
 	};

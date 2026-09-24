@@ -424,6 +424,37 @@ void ax::Window::reload_pipeline()
 	m_textureBindGroups.clear();
 }
 
+ax::Window::SpriteDefinition* ax::Window::allocate_sprite()
+{
+	SpriteDefinition* sprite;
+	if (m_freeSpriteSlots.empty())
+	{
+		m_spriteSlots.emplace_back();
+		sprite = &m_spriteSlots.back();
+	}
+	else
+	{
+		sprite = m_freeSpriteSlots.back();
+		m_freeSpriteSlots.pop_back();
+		*sprite = {};
+	}
+
+	m_activeSprites.push_back(sprite);
+	return sprite;
+}
+
+void ax::Window::free_sprite(SpriteDefinition* sprite)
+{
+	const auto activeSprite = std::find(m_activeSprites.begin(), m_activeSprites.end(), sprite);
+	if (activeSprite == m_activeSprites.end())
+		return;
+
+	*activeSprite = m_activeSprites.back();
+	m_activeSprites.pop_back();
+	*sprite = {};
+	m_freeSpriteSlots.push_back(sprite);
+}
+
 void ax::Window::render_texture(Texture* tex, glm::vec2 position)
 {
 	m_pendingTextures.push_back
@@ -769,11 +800,19 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		);
 
 		// Group uniforms by texture so we can issue one instanced draw per texture.
-		std::unordered_map<Texture*, std::vector<float>> groups;
-		groups.reserve(m_pendingTextures.size());
+		const size_t spriteCountEstimate = m_pendingTextures.size() + m_activeSprites.size();
+		m_spriteGroupRanges.clear();
+		m_spriteGroupRanges.reserve(m_spriteGroups.size());
+		m_batchUniforms.clear();
+		m_batchUniforms.reserve(spriteCountEstimate * 16);
+		for (auto& group : m_spriteGroups)
+			group.second.clear();
 
-		for (const auto& p : m_pendingTextures)
+		auto addSprite = [this](const SpriteDefinition& p)
 		{
+			if (p.tex == nullptr)
+				return;
+
 			float uniforms[16]{};
 
 			const auto width{ static_cast<float>(p.tex->width()) };
@@ -802,38 +841,37 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 			//uniforms[14] = 0.f;
 			//uniforms[15] = 0.f;
 
-			groups[p.tex].insert(groups[p.tex].end(), std::begin(uniforms), std::end(uniforms));
-		}
+			auto& group = m_spriteGroups[p.tex];
+			group.insert(group.end(), std::begin(uniforms), std::end(uniforms));
+		};
 
-		struct GroupRange { Texture* tex; uint32_t start; uint32_t count; };
-		std::vector<GroupRange> ranges;
-		ranges.reserve(groups.size());
-
-		std::vector<float> batchUniforms;
-		batchUniforms.reserve(m_pendingTextures.size() * 16);
+		for (const auto& sprite : m_pendingTextures)
+			addSprite(sprite);
+		for (const auto* sprite : m_activeSprites)
+			addSprite(*sprite);
 
 		uint32_t instanceCursor = 0;
-		for (auto& kv : groups)
+		for (auto& kv : m_spriteGroups)
 		{
 			Texture* tex = kv.first;
 			auto& data = kv.second;
 			const uint32_t count = static_cast<uint32_t>(data.size() / 16);
 			if (count == 0) continue;
-			ranges.push_back({ tex, instanceCursor, count });
-			batchUniforms.insert(batchUniforms.end(), data.begin(), data.end());
+			m_spriteGroupRanges.push_back({ tex, instanceCursor, count });
+			m_batchUniforms.insert(m_batchUniforms.end(), data.begin(), data.end());
 			instanceCursor += count;
 		}
 
 		const uint32_t spriteCount = instanceCursor;
 		ensure_uniform_capacity(spriteCount);
 		if (spriteCount != 0)
-			m_queue.WriteBuffer(m_uniforms, 0, batchUniforms.data(), batchUniforms.size() * sizeof(float));
+			m_queue.WriteBuffer(m_uniforms, 0, m_batchUniforms.data(), m_batchUniforms.size() * sizeof(float));
 
 		pass.SetPipeline(m_pipeline);
 		// Set the global viewport bind group (group 1)
 		pass.SetBindGroup(1, m_viewportBindGroup);
 
-		for (const auto& r : ranges)
+		for (const auto& r : m_spriteGroupRanges)
 		{
 			auto it = m_textureBindGroups.find(r.tex);
 			if (it == m_textureBindGroups.end())

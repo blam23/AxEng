@@ -46,93 +46,97 @@ void ax::Application::add_application_bindings(sol::state& state)
 {
 	const auto& app{ m_env["app"] };
 
-	auto resource_lookup_texture{ state.create_table() };
-
-	auto on_update_table{ state.create_table() };
-	on_update_table["subscribe"] =
-		[this](std::function<void(double delta)> f) -> size_t
-		{
-			return m_window->get_update_event_handler().subscribe([f](const ax::WindowUpdateEvent& e) { f(e.delta); });
-		};
-	on_update_table["unsubscribe"] =
-		[this](size_t id)
-		{
-			m_window->get_update_event_handler().unsubscribe(id);
-		};
-	app["on_update"] = on_update_table;
-
-	resource_lookup_texture["get_texture"] =
-		[this, &state](const std::string& name) -> sol::table
-		{
-			auto text{ m_textures.get(name) };
-
-			auto ret = state.create_table();
-
-			if (text)
+	{
+		auto on_update_table{ state.create_table() };
+		on_update_table["subscribe"] =
+			[this](std::function<void(double delta)> f) -> size_t
 			{
-				ret["valid"] = true;
-				ret["ptr"] = text;
-				ret["view"] = text->view();
-				ret["ui_view"] = text->imgui_view();
-				ret["width"] = text->width();
-				ret["height"] = text->height();
-			}
-			else
+				return m_window->get_update_event_handler().subscribe([f](const ax::WindowUpdateEvent& e) { f(e.delta); });
+			};
+		on_update_table["unsubscribe"] =
+			[this](size_t id)
 			{
-				ret["valid"] = false;
-			}
+				m_window->get_update_event_handler().unsubscribe(id);
+			};
+		app["on_update"] = on_update_table;
+	}
 
-			return ret;
-		};
+	{
+		auto resource_lookup_texture{ state.create_table() };
 
-	resource_lookup_texture["create_texture"] =
-		[this, &state](const std::string& name, const std::string& data) -> sol::table
-		{
-			auto text{ m_textures.get(name) };
-
-			if (text == nullptr)
-				text = m_textures.load_from_raw(name, {}, std::vector<uint8_t>{ data.begin(), data.end() });
-
-			auto ret = state.create_table();
-
-			if (text)
+		resource_lookup_texture["get_texture"] =
+			[this, &state](const std::string& name) -> sol::table
 			{
-				ret["valid"] = true;
-				ret["ptr"] = text;
-				ret["view"] = text->view();
-				ret["ui_view"] = text->imgui_view();
-				ret["width"] = text->width();
-				ret["height"] = text->height();
-			}
-			else
+				auto text{ m_textures.get(name) };
+
+				auto ret = state.create_table();
+
+				if (text)
+				{
+					ret["valid"] = true;
+					ret["ptr"] = text;
+					ret["view"] = text->view();
+					ret["ui_view"] = text->imgui_view();
+					ret["width"] = text->width();
+					ret["height"] = text->height();
+				}
+				else
+				{
+					ret["valid"] = false;
+				}
+
+				return ret;
+			};
+
+		resource_lookup_texture["create_texture"] =
+			[this, &state](const std::string& name, const std::string& data) -> sol::table
 			{
-				ret["valid"] = false;
-			}
+				auto text{ m_textures.get(name) };
 
-			return ret;
-		};
+				if (text == nullptr)
+					text = m_textures.load_from_raw(name, {}, std::vector<uint8_t>{ data.begin(), data.end() });
 
-	resource_lookup_texture["get_script"] =
-		[this, &state](const std::string& name) -> sol::table
-		{
-			auto script{ m_scripts.get(name) };
+				auto ret = state.create_table();
 
-			auto ret = state.create_table();
+				if (text)
+				{
+					ret["valid"] = true;
+					ret["ptr"] = text;
+					ret["view"] = text->view();
+					ret["ui_view"] = text->imgui_view();
+					ret["width"] = text->width();
+					ret["height"] = text->height();
+				}
+				else
+				{
+					ret["valid"] = false;
+				}
 
-			if (script)
+				return ret;
+			};
+
+		resource_lookup_texture["get_script"] =
+			[this, &state](const std::string& name) -> sol::table
 			{
-				ret["valid"] = true;
-				ret["ptr"] = script;
-			}
-			else
-			{
-				ret["valid"] = false;
-			}
+				auto script{ m_scripts.get(name) };
 
-			return ret;
-		};
+				auto ret = state.create_table();
 
-	app["res"] = resource_lookup_texture;
+				if (script)
+				{
+					ret["valid"] = true;
+					ret["ptr"] = script;
+				}
+				else
+				{
+					ret["valid"] = false;
+				}
+
+				return ret;
+			};
+
+		app["res"] = resource_lookup_texture;
+	}
 
 	app["run_in_this_environment"] = 
 		[this](const sol::table& script) -> sol::object
@@ -215,7 +219,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 				[this](const sol::table& texture, float x, float y)
 				{
 					if (texture["valid"])
-						m_window->render_texture(texture["ptr"].get<ax::Texture*>(), { x, y });
+						m_window->render_texture(texture["ptr"].get<Texture*>(), { x, y });
 					else
 						spdlog::error("Invalid texture, cannot render");
 				},
@@ -232,6 +236,50 @@ void ax::Application::add_application_bindings(sol::state& state)
 					}
 				}
 			);
+
+		{
+			auto sprite_table{ state.create_table() };
+			sprite_table["allocate"] =
+				[this]()
+				{
+					return m_window->allocate_sprite();
+				};
+
+			sprite_table["free"] =
+				[this](Window::SpriteDefinition* sprite)
+				{
+					m_window->free_sprite(sprite);
+				};
+
+			sprite_table["setup"] =
+				[this](Window::SpriteDefinition* sprite, const sol::table& texture, float x, float y, float rx, float ry, float rw, float rh)
+				{
+					if (texture["valid"])
+					{
+						sprite->tex = texture["ptr"].get<Texture*>();
+						sprite->pos.x = x;
+						sprite->pos.y = y;
+						sprite->useRegion = true;
+						sprite->region.x = rx;
+						sprite->region.y = ry;
+						sprite->region.z = rw;
+						sprite->region.w = rh;
+					}
+					else
+					{
+						spdlog::error("Invalid texture, cannot setup sprite");
+					}
+				};
+
+			sprite_table["update_position"] =
+				[this](Window::SpriteDefinition* sprite, float x, float y)
+				{
+					sprite->pos.x = x;
+					sprite->pos.y = y;
+				};
+
+			app["sprites"] = sprite_table;
+		}
 	}
 }
 
