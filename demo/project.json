@@ -8,6 +8,7 @@
    "name":"Demo Project",
    "textures":{
       "icon":"assets/icon.png",
-      "tower":"assets/tower-sheet.png"
+      "tower":"assets/tower-sheet.png",
+      "font":"assets/pixel-font.png"
    }
 }
