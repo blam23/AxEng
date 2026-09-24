@@ -448,6 +448,13 @@ void ax::Window::free_sprite(SpriteDefinition* sprite)
 	if (activeSprite == m_activeSprites.end())
 		return;
 
+	if (sprite->groupedTexture != nullptr)
+	{
+		auto group = m_spriteGroups.find(sprite->groupedTexture);
+		if (group != m_spriteGroups.end())
+			group->second.erase(std::remove(group->second.begin(), group->second.end(), sprite), group->second.end());
+	}
+
 	*activeSprite = m_activeSprites.back();
 	m_activeSprites.pop_back();
 	*sprite = {};
@@ -474,6 +481,20 @@ void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region)
 	sprite.gpuData.pos = position;
 	sprite.gpuData.region = region;
 	sprite.gpuData.useRegion = 1;
+	m_pendingTextures.push_back(sprite);
+}
+
+void ax::Window::render_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale)
+{
+	SpriteDefinition sprite{};
+	sprite.tex = tex;
+	sprite.gpuData.pos = position;
+	sprite.gpuData.rotation = r;
+	sprite.gpuData.region = region;
+	sprite.gpuData.useRegion = 1;
+	sprite.gpuData.z = z;
+	sprite.gpuData.tint = color;
+	sprite.gpuData.scale = scale;
 	m_pendingTextures.push_back(sprite);
 }
 
@@ -791,46 +812,73 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 
 		// Group sprite records by texture so we can issue one instanced draw per texture.
 		m_spriteGroupRanges.clear();
-		for (auto& group : m_spriteGroups)
-			group.second.clear();
-
-		auto addSprite = [this](const SpriteDefinition& p)
+		for (auto* sprite : m_activeSprites)
 		{
-			if (p.tex == nullptr)
-				return;
+			if (sprite->tex == sprite->groupedTexture)
+				continue;
 
-			auto& group = m_spriteGroups[p.tex];
-			group.push_back(p.gpuData);
-		};
+			if (sprite->groupedTexture != nullptr)
+			{
+				auto& oldGroup = m_spriteGroups[sprite->groupedTexture];
+				oldGroup.erase(std::remove(oldGroup.begin(), oldGroup.end(), sprite), oldGroup.end());
+			}
 
+			sprite->groupedTexture = sprite->tex;
+			if (sprite->tex != nullptr)
+				m_spriteGroups[sprite->tex].push_back(sprite);
+		}
+
+		for (auto& group : m_pendingSpriteGroups)
+			group.second.clear();
 		for (const auto& sprite : m_pendingTextures)
-			addSprite(sprite);
-		for (const auto* sprite : m_activeSprites)
-			addSprite(*sprite);
+			if (sprite.tex != nullptr)
+				m_pendingSpriteGroups[sprite.tex].push_back(&sprite);
 
 		size_t spriteCount = 0;
 		for (const auto& group : m_spriteGroups)
 			spriteCount += group.second.size();
+		for (const auto& group : m_pendingSpriteGroups)
+			spriteCount += group.second.size();
 
 		ensure_uniform_capacity(static_cast<uint32_t>(spriteCount));
 		m_spriteGroupRanges.reserve(m_spriteGroups.size());
+		m_spriteUploadData.reserve(spriteCount);
 
 		uint32_t instanceCursor = 0;
-		for (auto& kv : m_spriteGroups)
+		auto uploadGroup = [this, &instanceCursor](Texture* tex, const std::vector<const SpriteDefinition*>& activeSprites, const std::vector<const SpriteDefinition*>* pendingSprites)
 		{
-			Texture* tex = kv.first;
-			auto& data = kv.second;
-			const uint32_t count = static_cast<uint32_t>(data.size());
-			if (count == 0) continue;
+			m_spriteUploadData.clear();
+			if (pendingSprites != nullptr)
+				for (const auto* sprite : *pendingSprites)
+					m_spriteUploadData.push_back(sprite->gpuData);
+			for (const auto* sprite : activeSprites)
+				m_spriteUploadData.push_back(sprite->gpuData);
+
+			const uint32_t count = static_cast<uint32_t>(m_spriteUploadData.size());
+			if (count == 0)
+				return;
+
 			m_spriteGroupRanges.push_back({ tex, instanceCursor, count });
 			m_queue.WriteBuffer
 			(
 				m_uniforms,
 				static_cast<uint64_t>(instanceCursor) * m_uniformStride,
-				data.data(),
-				data.size() * m_uniformStride
+				m_spriteUploadData.data(),
+				m_spriteUploadData.size() * m_uniformStride
 			);
 			instanceCursor += count;
+		};
+
+		for (const auto& group : m_spriteGroups)
+		{
+			auto pendingGroup = m_pendingSpriteGroups.find(group.first);
+			uploadGroup(group.first, group.second, pendingGroup == m_pendingSpriteGroups.end() ? nullptr : &pendingGroup->second);
+		}
+		static const std::vector<const SpriteDefinition*> emptyGroup;
+		for (const auto& group : m_pendingSpriteGroups)
+		{
+			if (m_spriteGroups.find(group.first) == m_spriteGroups.end())
+				uploadGroup(group.first, emptyGroup, &group.second);
 		}
 
 		pass.SetPipeline(m_pipeline);

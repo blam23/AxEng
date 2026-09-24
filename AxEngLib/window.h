@@ -134,6 +134,7 @@ namespace ax
 
 		void render_texture(Texture* tex, glm::vec2 position);
 		void render_texture(Texture* tex, glm::vec2 position, rectf region);
+		void render_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale);
 
 		// Optional overloads that accept a z-index for depth ordering
 		void render_texture(Texture* tex, glm::vec2 position, float z);
@@ -197,7 +198,9 @@ namespace ax
 		std::vector<SpriteDefinition*> m_activeSprites;
 		std::vector<SpriteDefinition*> m_freeSpriteSlots;
 		std::vector<SpriteDefinition> m_pendingTextures;
-		std::unordered_map<Texture*, std::vector<SpriteGpuData>> m_spriteGroups;
+		std::unordered_map<Texture*, std::vector<const SpriteDefinition*>> m_spriteGroups;
+		std::unordered_map<Texture*, std::vector<const SpriteDefinition*>> m_pendingSpriteGroups;
+		std::vector<SpriteGpuData> m_spriteUploadData;
 		std::vector<SpriteGroupRange> m_spriteGroupRanges;
 		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };
 		uint32_t m_uniformsCapacity{ 1024 };

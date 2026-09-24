@@ -40,6 +40,7 @@ namespace ax
 	{
 		SpriteGpuData gpuData{};
 		Texture* tex{ nullptr };
+		Texture* groupedTexture{ nullptr };
 	};
 
 	static_assert(sizeof(glm::vec2) == 2 * sizeof(float));
