@@ -196,10 +196,9 @@ namespace ax
 		std::vector<SpriteDefinition*> m_activeSprites;
 		std::vector<SpriteDefinition*> m_freeSpriteSlots;
 		std::vector<SpriteDefinition> m_pendingTextures;
-		std::unordered_map<Texture*, std::vector<float>> m_spriteGroups;
+		std::unordered_map<Texture*, std::vector<SpriteGpuData>> m_spriteGroups;
 		std::vector<SpriteGroupRange> m_spriteGroupRanges;
-		std::vector<float> m_batchUniforms;
-		size_t m_uniformStride{ 16 * sizeof(float) };
+		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };
 		uint32_t m_uniformsCapacity{ 1024 };
 	};
 }

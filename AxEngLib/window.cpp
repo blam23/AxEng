@@ -330,9 +330,8 @@ void ax::Window::reload_pipeline()
 	pipelineDesc.multisample.mask = ~0u;
 	pipelineDesc.multisample.alphaToCoverageEnabled = false;
 
-	// Each instance is 4 vec4 values. Storage buffers do not need the 256-byte
-	// dynamic-uniform alignment, so the batch uses the natural 64-byte stride.
-	m_uniformStride = 16 * sizeof(float);
+	// SpriteGpuData matches the WGSL instance layout.
+	m_uniformStride = SpriteGpuData::gpuDataSize;
 	wgpu::BufferDescriptor bufferDesc{};
 	bufferDesc.size = static_cast<uint64_t>(m_uniformStride) * static_cast<uint64_t>(m_uniformsCapacity);
 	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
@@ -370,7 +369,7 @@ void ax::Window::reload_pipeline()
 
 	// Texture
 	bindGroupEntries[1].binding = 1;
-	bindGroupEntries[1].visibility = wgpu::ShaderStage::Fragment;
+	bindGroupEntries[1].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
 	bindGroupEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
 	bindGroupEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
 	
@@ -457,46 +456,40 @@ void ax::Window::free_sprite(SpriteDefinition* sprite)
 
 void ax::Window::render_texture(Texture* tex, glm::vec2 position)
 {
-	m_pendingTextures.push_back
-	({
-		.tex = tex,
-		.pos = position,
-		.useRegion = false,
-	});
+	SpriteDefinition sprite{};
+	sprite.tex = tex;
+	sprite.gpuData.pos = position;
+	m_pendingTextures.push_back(sprite);
 }
 
 void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region)
 {
-	m_pendingTextures.push_back
-	({
-		.tex = tex,
-		.pos = position,
-		.region = region,
-		.useRegion = true,
-	});
+	SpriteDefinition sprite{};
+	sprite.tex = tex;
+	sprite.gpuData.pos = position;
+	sprite.gpuData.region = region;
+	sprite.gpuData.useRegion = 1;
+	m_pendingTextures.push_back(sprite);
 }
 
 void ax::Window::render_texture(Texture* tex, glm::vec2 position, float z)
 {
-	m_pendingTextures.push_back
-	({
-		.tex = tex,
-		.pos = position,
-		.useRegion = false,
-		.z = z,
-	});
+	SpriteDefinition sprite{};
+	sprite.tex = tex;
+	sprite.gpuData.pos = position;
+	sprite.gpuData.z = z;
+	m_pendingTextures.push_back(sprite);
 }
 
 void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region, float z)
 {
-	m_pendingTextures.push_back
-	({
-		.tex = tex,
-		.pos = position,
-		.region = region,
-		.useRegion = true,
-		.z = z,
-	});
+	SpriteDefinition sprite{};
+	sprite.tex = tex;
+	sprite.gpuData.pos = position;
+	sprite.gpuData.region = region;
+	sprite.gpuData.useRegion = 1;
+	sprite.gpuData.z = z;
+	m_pendingTextures.push_back(sprite);
 }
 
 void ax::Window::ensure_uniform_capacity(uint32_t required)
@@ -791,22 +784,8 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 	{
 		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, sprite_batch);
 
-		// Gather all sprite instance data into a single storage buffer.
-		m_pendingTextures.erase
-		(
-			std::remove_if(m_pendingTextures.begin(), m_pendingTextures.end(), [](const SpriteDefinition& sprite)
-				{
-					return sprite.tex == nullptr;
-				}),
-			m_pendingTextures.end()
-		);
-
-		// Group uniforms by texture so we can issue one instanced draw per texture.
-		const size_t spriteCountEstimate = m_pendingTextures.size() + m_activeSprites.size();
+		// Group sprite records by texture so we can issue one instanced draw per texture.
 		m_spriteGroupRanges.clear();
-		m_spriteGroupRanges.reserve(m_spriteGroups.size());
-		m_batchUniforms.clear();
-		m_batchUniforms.reserve(spriteCountEstimate * 16);
 		for (auto& group : m_spriteGroups)
 			group.second.clear();
 
@@ -815,36 +794,8 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 			if (p.tex == nullptr)
 				return;
 
-			float uniforms[16]{};
-
-			const auto width{ static_cast<float>(p.tex->width()) };
-			const auto height{ static_cast<float>(p.tex->height()) };
-
-			// Vertex position and size (screen space, pixels)
-			uniforms[0] = p.pos.x;
-			uniforms[1] = p.pos.y;
-			uniforms[2] = (p.useRegion ? p.region.z : width) * p.scale.x;
-			uniforms[3] = (p.useRegion ? p.region.w : height) * p.scale.y;
-
-			// UVs (u0,v0,u1,v1) (texture space, 0-1)
-			uniforms[4] = p.useRegion ? (p.region.x / width) : 0.0f;
-			uniforms[5] = p.useRegion ? (p.region.y / height) : 0.0f;
-			uniforms[6] = p.useRegion ? (uniforms[4] + (p.region.z / width)) : 1.0f;
-			uniforms[7] = p.useRegion ? (uniforms[5] + (p.region.w / height)) : 1.0f;
-
-			// Tint
-			uniforms[8] = 1.f; uniforms[9] = 1.f; uniforms[10] = 1.f; uniforms[11] = 1.f;
-
-			// Viewport is now a global uniform; per-instance slots leave these zero.
-			uniforms[12] = p.z;
-
-			// Unused
-			//uniforms[13] = 0.f;
-			//uniforms[14] = 0.f;
-			//uniforms[15] = 0.f;
-
 			auto& group = m_spriteGroups[p.tex];
-			group.insert(group.end(), std::begin(uniforms), std::end(uniforms));
+			group.push_back(p.gpuData);
 		};
 
 		for (const auto& sprite : m_pendingTextures)
@@ -852,22 +803,30 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		for (const auto* sprite : m_activeSprites)
 			addSprite(*sprite);
 
+		size_t spriteCount = 0;
+		for (const auto& group : m_spriteGroups)
+			spriteCount += group.second.size();
+
+		ensure_uniform_capacity(static_cast<uint32_t>(spriteCount));
+		m_spriteGroupRanges.reserve(m_spriteGroups.size());
+
 		uint32_t instanceCursor = 0;
 		for (auto& kv : m_spriteGroups)
 		{
 			Texture* tex = kv.first;
 			auto& data = kv.second;
-			const uint32_t count = static_cast<uint32_t>(data.size() / 16);
+			const uint32_t count = static_cast<uint32_t>(data.size());
 			if (count == 0) continue;
 			m_spriteGroupRanges.push_back({ tex, instanceCursor, count });
-			m_batchUniforms.insert(m_batchUniforms.end(), data.begin(), data.end());
+			m_queue.WriteBuffer
+			(
+				m_uniforms,
+				static_cast<uint64_t>(instanceCursor) * m_uniformStride,
+				data.data(),
+				data.size() * m_uniformStride
+			);
 			instanceCursor += count;
 		}
-
-		const uint32_t spriteCount = instanceCursor;
-		ensure_uniform_capacity(spriteCount);
-		if (spriteCount != 0)
-			m_queue.WriteBuffer(m_uniforms, 0, m_batchUniforms.data(), m_batchUniforms.size() * sizeof(float));
 
 		pass.SetPipeline(m_pipeline);
 		// Set the global viewport bind group (group 1)

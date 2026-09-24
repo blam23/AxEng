@@ -9,13 +9,21 @@ enemies = {}
 function setup_enemies(count)
     for i = 1, count do
         local enemy = {}
-        enemy.x = math.random(1, 1920)
-        enemy.y = math.random(1, 1080)
+        enemy.x = math.random(-20, 1920 + 20)
+        enemy.y = math.random(-20, 1080 + 20)
         enemy.vx = 0
         enemy.vy = 0
         enemy.rand_timer = 0
         enemy.sprite = app.sprites.allocate()
         app.sprites.setup(enemy.sprite, texture, enemy.x, enemy.y, 68, 33, 8, 15)
+        local randScale = (math.random() + 0.5) * 10.0
+        enemy.sprite.scale.x = randScale
+        enemy.sprite.scale.y = randScale
+        enemy.sprite.rotation = math.random() * 2 * math.pi
+        enemy.sprite.tint.x = math.random() + 0.2
+        enemy.sprite.tint.y = math.random() + 0.2
+        enemy.sprite.tint.z = math.random() + 0.2
+        enemy.sprite.tint.w = 0.04
         table.insert(enemies, enemy)
     end
 end
@@ -25,6 +33,8 @@ function tick_enemies(delta)
         local enemy = enemies[i]
         enemy.x = enemy.x + enemy.vx * delta
         enemy.y = enemy.y + enemy.vy * delta
+        --enemy.sprite.pos.x = enemy.sprite.pos.x + enemy.vx * delta
+        --enemy.sprite.pos.y = enemy.sprite.pos.y + enemy.vy * delta
         enemy.rand_timer = enemy.rand_timer - delta
         if enemy.rand_timer <= 0 then
             enemy.vx = math.random(-10, 10)
@@ -80,5 +90,6 @@ app.window.on_render.subscribe(function(delta, pass)
     app.window.render(texture, x, y, 49, 32, 13, 15)
 end)
 
+setup_enemies(25000)
 
 return error_code.Success

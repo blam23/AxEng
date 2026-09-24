@@ -260,13 +260,13 @@ void ax::Application::add_application_bindings(sol::state& state)
 					if (texture["valid"])
 					{
 						sprite->tex = texture["ptr"].get<Texture*>();
-						sprite->pos.x = x;
-						sprite->pos.y = y;
-						sprite->useRegion = true;
-						sprite->region.x = rx;
-						sprite->region.y = ry;
-						sprite->region.z = rw;
-						sprite->region.w = rh;
+						sprite->gpuData.pos.x = x;
+						sprite->gpuData.pos.y = y;
+						sprite->gpuData.useRegion = 1;
+						sprite->gpuData.region.x = rx;
+						sprite->gpuData.region.y = ry;
+						sprite->gpuData.region.z = rw;
+						sprite->gpuData.region.w = rh;
 					}
 					else
 					{
@@ -277,8 +277,8 @@ void ax::Application::add_application_bindings(sol::state& state)
 			sprite_table["update_position"] =
 				[this](SpriteDefinition* sprite, float x, float y)
 				{
-					sprite->pos.x = x;
-					sprite->pos.y = y;
+					sprite->gpuData.pos.x = x;
+					sprite->gpuData.pos.y = y;
 				};
 
 			app["sprites"] = sprite_table;
@@ -369,11 +369,34 @@ void ax::Application::add_application_bindings(sol::state& state)
 	state.new_usertype<SpriteDefinition>
 		(
 			"sprite",
-			"pos", &SpriteDefinition::pos,
-			"region", &SpriteDefinition::region,
-			"use_region", &SpriteDefinition::useRegion,
-			"z", &SpriteDefinition::z,
-			"scale", &SpriteDefinition::scale
+			"pos", sol::property(
+				[](SpriteDefinition& sprite) -> glm::vec2& { return sprite.gpuData.pos; },
+				[](SpriteDefinition& sprite, const glm::vec2& pos) { sprite.gpuData.pos = pos; }
+			),
+			"region", sol::property(
+				[](SpriteDefinition& sprite) -> rectf& { return sprite.gpuData.region; },
+				[](SpriteDefinition& sprite, const rectf& region) { sprite.gpuData.region = region; }
+			),
+			"use_region", sol::property(
+				[](const SpriteDefinition& sprite) { return sprite.gpuData.useRegion != 0; },
+				[](SpriteDefinition& sprite, bool useRegion) { sprite.gpuData.useRegion = useRegion ? 1u : 0u; }
+			),
+			"z", sol::property(
+				[](SpriteDefinition& sprite) -> float& { return sprite.gpuData.z; },
+				[](SpriteDefinition& sprite, float z) { sprite.gpuData.z = z; }
+			),
+			"scale", sol::property(
+				[](SpriteDefinition& sprite) -> glm::vec2& { return sprite.gpuData.scale; },
+				[](SpriteDefinition& sprite, const glm::vec2& scale) { sprite.gpuData.scale = scale; }
+			),
+			"rotation", sol::property(
+				[](SpriteDefinition& sprite) -> float& { return sprite.gpuData.rotation; },
+				[](SpriteDefinition& sprite, float rotation) { sprite.gpuData.rotation = rotation; }
+			),
+			"tint", sol::property(
+				[](SpriteDefinition& sprite) -> glm::vec4& { return sprite.gpuData.tint; },
+				[](SpriteDefinition& sprite, const glm::vec4& tint) { sprite.gpuData.tint = tint; }
+			)
 		);
 }
 

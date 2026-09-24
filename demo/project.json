@@ -5,7 +5,7 @@
    "entry_point":"test",
    "highlight":"#A256FF",
    "icon":"icon",
-   "name":"My First Project",
+   "name":"Demo Project",
    "textures":{
       "icon":"assets/icon.png",
       "tower":"assets/tower-sheet.png"

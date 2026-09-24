@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 #include "helpers.h"
@@ -20,15 +22,39 @@ namespace ax
 {
 	using rectf = glm::vec4;
 
+	struct SpriteGpuData
+	{
+		glm::vec2 pos{ 0.0f, 0.0f };
+		glm::vec2 scale{ 1.0f, 1.0f };
+		rectf region{ 0.0f, 0.0f, 0.0f, 0.0f };
+		glm::vec4 tint{ 1.0f, 1.0f, 1.0f, 1.0f };
+		float z{ 0.0f };
+		float rotation{ 0.0f };
+		std::uint32_t useRegion{ 0 };
+		std::uint32_t padding{ 0 };
+
+		static constexpr std::size_t gpuDataSize{ 64 };
+	};
+
 	struct SpriteDefinition
 	{
+		SpriteGpuData gpuData{};
 		Texture* tex{ nullptr };
-		glm::vec2 pos{ 0.0f, 0.0f };
-		rectf region{ 0.0f, 0.0f, 0.0f, 0.0f };
-		bool useRegion{ false };
-		float z{ 0.0f };
-		glm::vec2 scale{ 1.0f, 1.0f };
 	};
+
+	static_assert(sizeof(glm::vec2) == 2 * sizeof(float));
+	static_assert(sizeof(glm::vec4) == 4 * sizeof(float));
+	static_assert(offsetof(SpriteGpuData, pos) == 0);
+	static_assert(offsetof(SpriteGpuData, scale) == 8);
+	static_assert(offsetof(SpriteGpuData, region) == 16);
+	static_assert(offsetof(SpriteGpuData, tint) == 32);
+	static_assert(offsetof(SpriteGpuData, z) == 48);
+	static_assert(offsetof(SpriteGpuData, rotation) == 52);
+	static_assert(offsetof(SpriteGpuData, useRegion) == 56);
+	static_assert(offsetof(SpriteGpuData, padding) == 60);
+	static_assert(sizeof(SpriteGpuData) == SpriteGpuData::gpuDataSize);
+	static_assert(offsetof(SpriteDefinition, gpuData) == 0);
+	static_assert(offsetof(SpriteDefinition, tex) == SpriteGpuData::gpuDataSize);
 
 	class Texture : public Asset
 	{
