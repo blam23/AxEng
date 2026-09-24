@@ -40,6 +40,11 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 
 			ImGui::Begin("Timing");
 			{
+				#ifdef _DEBUG
+				ImGui::PushFont(nullptr, 24.f);
+				ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "DEBUG BUILD");
+				ImGui::PopFont();
+				#endif
 				static float deltaTimes[512]{ 0 };
 				static std::size_t deltaPtr = 0;
 				deltaTimes[deltaPtr++] = (float)e.delta * 1000.0f;
