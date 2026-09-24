@@ -177,8 +177,11 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 							ImGui::TableNextRow();
 							ImGui::TableNextColumn();
 							ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
-							const std::string indentation(depth * 2, ' ');
-							ImGui::Text("%s%s", indentation.c_str(), name.c_str());
+							auto children = segment->children();
+							const bool hasChildren = !children.empty();
+							const ImGuiTreeNodeFlags nodeFlags = ImGuiTreeNodeFlags_SpanFullWidth
+								| (hasChildren ? ImGuiTreeNodeFlags_None : ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen);
+							const bool isOpen = ImGui::TreeNodeEx(name.c_str(), nodeFlags);
 							ImGui::TableNextColumn();
 							ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
 							ImGui::Text("%.3f", stats.averageMs);
@@ -189,10 +192,13 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 							ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
 							ImGui::Text("%.3f", stats.maxMs);
 
-							auto children = segment->children();
-							std::sort(children.begin(), children.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-							for (const auto& child : children)
-								self(self, child.first, child.second, topLevelMs, depth + 1);
+							if (hasChildren && isOpen)
+							{
+								std::sort(children.begin(), children.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+								for (const auto& child : children)
+									self(self, child.first, child.second, topLevelMs, depth + 1);
+								ImGui::TreePop();
+							}
 						};
 
 					if (ImGui::BeginTable("Profiler segments", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable))
