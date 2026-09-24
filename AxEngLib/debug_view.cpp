@@ -46,11 +46,18 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 				ImGui::PopFont();
 				#endif
 				static float deltaTimes[512]{ 0 };
+				constexpr std::size_t deltaCount = 512;
+				static float deltaTimes[deltaCount]{ 0 };
 				static std::size_t deltaPtr = 0;
 				deltaTimes[deltaPtr++] = (float)e.delta * 1000.0f;
-				deltaPtr %= 512;
-				ImGui::PlotHistogram("Delta Times (ms)", deltaTimes, 512);
-				ImGui::Text("FPS Average: %.1f", 1.0 / e.delta);
+				deltaPtr %= deltaCount;
+				ImGui::PlotHistogram("Delta Times (ms)", deltaTimes, deltaCount);
+
+				double allTimes = 0.0;
+				for (const auto& dt : deltaTimes)
+					allTimes += dt;
+				allTimes /= deltaCount;
+				ImGui::Text("FPS Average: %.0f", 1000.0f / allTimes);
 
 				#ifdef ENABLE_PROFILER
 				{
@@ -150,32 +157,58 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 					}
 					ImGui::Separator();
 
-					auto drawSegment = [&](auto&& self, const std::string& name, const std::shared_ptr<ax::ProfilerSegment>& segment, bool root) -> void
+					auto drawSegment = [&](auto&& self, const std::string& name,
+							const std::shared_ptr<ax::ProfilerSegment>& segment,
+							double topLevelMs, size_t depth) -> void
 						{
 							const auto stats = segment->stats();
+							float intensity = topLevelMs > 0.0
+								? std::clamp(static_cast<float>(stats.averageMs / topLevelMs), 0.0f, 1.0f)
+								: 0.0f;
+
+							if (depth == 0)
+								intensity = 0.0f; // Don't color top-level segments
+
+							const ImU32 cellColor = ImGui::GetColorU32(ImVec4(
+								0.25f + 0.65f * intensity,
+								0.28f * (1.0f - intensity),
+								0.28f * (1.0f - intensity), 1.0f));
+
+
+
+							ImGui::TableNextRow();
+							ImGui::TableNextColumn();
+							ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
+							const std::string indentation(depth * 2, ' ');
+							ImGui::Text("%s%s", indentation.c_str(), name.c_str());
+							ImGui::TableNextColumn();
+							ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
+							ImGui::Text("%.3f", stats.averageMs);
+							ImGui::TableNextColumn();
+							ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
+							ImGui::Text("%.3f", stats.minMs);
+							ImGui::TableNextColumn();
+							ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
+							ImGui::Text("%.3f", stats.maxMs);
+
+
 							auto children = segment->children();
 							std::sort(children.begin(), children.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-
-							ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth;
-							if (children.empty())
-								flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-							if (root)
-								flags |= ImGuiTreeNodeFlags_DefaultOpen;
-
-							const bool open = ImGui::TreeNodeEx(name.c_str(), flags);
-							ImGui::SameLine();
-							ImGui::Text("avg %.3f ms | min %.3f ms | max %.3f ms | %zu samples", stats.averageMs, stats.minMs, stats.maxMs, stats.samples);
-
-							if (open && !children.empty())
-							{
-								for (const auto& child : children)
-									self(self, child.first, child.second, false);
-								ImGui::TreePop();
-							}
+							for (const auto& child : children)
+								self(self, child.first, child.second, topLevelMs, depth + 1);
 						};
 
-					for (const auto& root : roots)
-						drawSegment(drawSegment, root.first, root.second, true);
+					if (ImGui::BeginTable("Profiler segments", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable))
+					{
+						ImGui::TableSetupColumn("Segment");
+						ImGui::TableSetupColumn("Avg (ms)");
+						ImGui::TableSetupColumn("Min (ms)");
+						ImGui::TableSetupColumn("Max (ms)");
+						ImGui::TableHeadersRow();
+						for (const auto& root : roots)
+							drawSegment(drawSegment, root.first, root.second, root.second->stats().averageMs, 0);
+						ImGui::EndTable();
+					}
 				}
 				#endif
 			}
