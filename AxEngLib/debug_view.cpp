@@ -50,6 +50,7 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 				deltaTimes[deltaPtr++] = (float)e.delta * 1000.0f;
 				deltaPtr %= 512;
 				ImGui::PlotHistogram("Delta Times (ms)", deltaTimes, 512);
+				ImGui::Text("FPS Average: %.1f", 1.0 / e.delta);
 
 				#ifdef ENABLE_PROFILER
 				{
