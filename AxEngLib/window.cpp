@@ -31,6 +31,7 @@ ax::Window::Window(const WindowDefinition& def)
 {
 	LogTimer _timer{ "create window" };
 	m_window = glfwCreateWindow(m_width, m_height, def.title.data(), NULL, NULL);
+	glfwSetWindowSizeCallback(m_window, &resize_event_handler);
 
 	std::lock_guard lock{ s_windows_mutex };
 	s_windows.emplace(m_window, this);
@@ -56,6 +57,18 @@ ax::Window::~Window()
 	m_surface.Unconfigure();
 }
 
+void ax::Window::resize_event_handler(GLFWwindow* window, int width, int height)
+{
+	std::lock_guard lock{ s_windows_mutex };
+	auto it = s_windows.find(window);
+	if (it != s_windows.end())
+	{
+		it->second->m_width = width;
+		it->second->m_height = height;
+		it->second->create_surfaces();
+	}
+}
+
 bool ax::setup_glfw()
 {
 	LogTimer _timer{ "glfw setup" };
@@ -70,7 +83,7 @@ bool ax::setup_glfw()
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+	//glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 	
 	return true;
 }
@@ -80,106 +93,13 @@ void ax::teardown_glfw()
 	glfwTerminate();
 }
 
-bool ax::Window::init_webgpu()
+bool ax::Window::create_surfaces()
 {
 	//
-	// Get wgpu Instance
+	// Surface
 	//
-	wgpu::InstanceDescriptor desc{};
-	desc.nextInChain = nullptr;
-	wgpu::Instance instance;
-	wgpu::RequestAdapterOptions options
-	{
-		.featureLevel = wgpu::FeatureLevel::Core
-	};
-	wgpu::Adapter adapter;
-	wgpu::Limits limits
-	{
-		.nextInChain = nullptr,
-		.maxBindGroups = 2,
-		.maxVertexBuffers = 1,
-		.maxBufferSize = 150000 * sizeof(wgpu::VertexAttribute),
-		.maxVertexAttributes = 4,
-	};
-	wgpu::DeviceDescriptor deviceDescriptor{};
-	deviceDescriptor.requiredLimits = &limits;
-	deviceDescriptor.SetUncapturedErrorCallback
-	(
-		[](const wgpu::Device&, wgpu::ErrorType error_type, wgpu::StringView message)
-		{
-			spdlog::error("Error: {} - message: {}", (uint32_t)error_type, message.data);
-		}
-	);
-	deviceDescriptor.SetDeviceLostCallback
-	(
-		wgpu::CallbackMode::AllowProcessEvents,
-		[](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
-		{
-			spdlog::error("Device Lost: {} - message: {}", (uint32_t)reason, message.data);
-		}
-	);
-
-	static const auto kTimedWaitAny = wgpu::InstanceFeatureName::TimedWaitAny;
-	wgpu::InstanceDescriptor instanceDesc
-	{
-		.requiredFeatureCount = 1,
-		.requiredFeatures = &kTimedWaitAny
-	};
-	instance = wgpu::CreateInstance(&instanceDesc);
-
-	//
-	// Get Adapter
-	//
-	auto adapter_callback =
-		[](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message, void* userdata)
-		{
-			if (status != wgpu::RequestAdapterStatus::Success)
-			{
-				spdlog::error("Failed to get an adapter: {}", message.data);
-				return;
-			}
-			*static_cast<wgpu::Adapter*>(userdata) = adapter;
-		};
-
-	auto callbackMode{ wgpu::CallbackMode::WaitAnyOnly };
-	void* userdata{ &adapter };
-	instance.WaitAny(instance.RequestAdapter(&options, callbackMode, adapter_callback, userdata), UINT64_MAX);
-	if (adapter == nullptr)
-	{
-		spdlog::error("RequestAdapter failed");
-		return false;
-	}
-
-	//
-	// Get Device
-	//
-	auto device_callback =
-		[](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message, void* userData)
-		{
-			if (status != wgpu::RequestDeviceStatus::Success)
-			{
-				spdlog::error("Failed to get a device: {}", message.data);
-				return;
-			}
-			*static_cast<wgpu::Device*>(userData) = device;
-		};
-
-	instance.WaitAny(adapter.RequestDevice(&deviceDescriptor, callbackMode, device_callback, (void*)&m_device), UINT64_MAX);
-	if (m_device == nullptr)
-	{
-		spdlog::error("RequestDevice failed");
-		return false;
-	}
-
-	m_queue = m_device.GetQueue();
-
-	//
-	// Main Surface
-	//
-	m_surface = wgpu::Surface{ glfwGetWGPUSurface(instance.Get(), m_window) };
-
 	wgpu::SurfaceCapabilities capabilities{};
-	if(m_surface.GetCapabilities(adapter, &capabilities))
+	if (m_surface.GetCapabilities(m_adapter, &capabilities))
 		m_surfaceFormat = capabilities.formats[0];
 	else
 	{
@@ -198,7 +118,7 @@ bool ax::Window::init_webgpu()
 		.viewFormatCount = 0,
 		.viewFormats = nullptr,
 		.alphaMode = wgpu::CompositeAlphaMode::Auto,
-		.presentMode = m_vsync ? wgpu::PresentMode::Immediate : wgpu::PresentMode::Immediate,
+		.presentMode = m_vsync ? wgpu::PresentMode::Fifo : wgpu::PresentMode::Immediate,
 	};
 
 	m_surface.Configure(&config);
@@ -258,6 +178,109 @@ bool ax::Window::init_webgpu()
 
 	reload_pipeline();
 	return true;
+}
+
+bool ax::Window::init_webgpu()
+{
+	//
+	// Get wgpu Instance
+	//
+	wgpu::InstanceDescriptor desc{};
+	wgpu::Instance instance;
+	desc.nextInChain = nullptr;
+
+	static const auto kTimedWaitAny = wgpu::InstanceFeatureName::TimedWaitAny;
+	wgpu::InstanceDescriptor instanceDesc
+	{
+		.requiredFeatureCount = 1,
+		.requiredFeatures = &kTimedWaitAny
+	};
+	instance = wgpu::CreateInstance(&instanceDesc);
+	
+	//
+	// Get Adapter
+	//
+	wgpu::RequestAdapterOptions options
+	{
+		.featureLevel = wgpu::FeatureLevel::Core
+	};
+
+	auto adapter_callback =
+		[](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message, void* userdata)
+		{
+			if (status != wgpu::RequestAdapterStatus::Success)
+			{
+				spdlog::error("Failed to get an adapter: {}", message.data);
+				return;
+			}
+			*static_cast<wgpu::Adapter*>(userdata) = adapter;
+		};
+
+	const auto callbackMode{ wgpu::CallbackMode::WaitAnyOnly };
+	void* userdata{ &m_adapter };
+	instance.WaitAny(instance.RequestAdapter(&options, callbackMode, adapter_callback, userdata), UINT64_MAX);
+	if (m_adapter == nullptr)
+	{
+		spdlog::error("RequestAdapter failed");
+		return false;
+	}
+
+	//
+	// Get Device
+	//
+	wgpu::Limits limits
+	{
+		.nextInChain = nullptr,
+		.maxBindGroups = 2,
+		.maxVertexBuffers = 1,
+		.maxBufferSize = 150000 * sizeof(wgpu::VertexAttribute),
+		.maxVertexAttributes = 4,
+	};
+
+	wgpu::DeviceDescriptor deviceDescriptor{};
+	deviceDescriptor.requiredLimits = &limits;
+	deviceDescriptor.SetUncapturedErrorCallback
+	(
+		[](const wgpu::Device&, wgpu::ErrorType error_type, wgpu::StringView message)
+		{
+			spdlog::error("Error: {} - message: {}", (uint32_t)error_type, message.data);
+		}
+	);
+	deviceDescriptor.SetDeviceLostCallback
+	(
+		wgpu::CallbackMode::AllowProcessEvents,
+		[](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
+		{
+			spdlog::error("Device Lost: {} - message: {}", (uint32_t)reason, message.data);
+		}
+	);
+
+	auto device_callback =
+		[](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message, void* userData)
+		{
+			if (status != wgpu::RequestDeviceStatus::Success)
+			{
+				spdlog::error("Failed to get a device: {}", message.data);
+				return;
+			}
+			*static_cast<wgpu::Device*>(userData) = device;
+		};
+
+	instance.WaitAny(m_adapter.RequestDevice(&deviceDescriptor, callbackMode, device_callback, (void*)&m_device), UINT64_MAX);
+	if (m_device == nullptr)
+	{
+		spdlog::error("RequestDevice failed");
+		return false;
+	}
+
+	m_queue = m_device.GetQueue();
+
+	//
+	// Main Surface
+	//
+	m_surface = wgpu::Surface{ glfwGetWGPUSurface(instance.Get(), m_window) };
+
+	return create_surfaces();
 }
 
 void ax::Window::reload_pipeline()
@@ -529,6 +552,11 @@ void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region, 
 	m_pendingTextures.push_back(sprite);
 }
 
+void ax::Window::call_deferred(std::function<void()> func)
+{
+	m_deferred.push_back(std::move(func));
+}
+
 void ax::Window::ensure_uniform_capacity(uint32_t required)
 {
 	if (required <= m_uniformsCapacity)
@@ -684,6 +712,10 @@ void ax::Window::run_loop()
 			PROFILER_SEGMENT_SCOPED(frame, render);
 			run_wgpu_render_pass(updateDelta);
 		}
+
+		for (auto& func : m_deferred)
+			func();
+		m_deferred.clear();
 	}
 
 	ax::input::KeyEventHandler::cleanup_events(m_window);

@@ -32,9 +32,27 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 
 			ImGui::Begin(ICON_FA_PAINTBRUSH " Renderer");
 			{
-				if (ImGui::Button("Reload Pipeline"))
+				static bool vsync = app.window()->vsync();
+				if (ImGui::Checkbox("VSync", &vsync))
 				{
-					app.window()->reload_pipeline();
+					app.call_deferred
+					(
+						[&app]() 
+						{
+							app.window()->set_vsync(vsync);
+							app.window()->create_surfaces();
+						}
+					);
+				}
+				if (ImGui::Button("Reload Window"))
+				{
+					app.call_deferred
+					(
+						[&app]()
+						{
+							app.window()->create_surfaces();
+						}
+					);
 				}
 			}
 			ImGui::End();

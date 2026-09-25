@@ -52,6 +52,8 @@ namespace ax
 
 		void set_headless() noexcept { m_create_window = false; }
 
+		void call_deferred(std::function<void()>);
+
 	private:
 		Application(ResourceLoader&& loader);
 

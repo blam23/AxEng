@@ -567,6 +567,11 @@ ax::Application::~Application()
 	m_scripts.cleanup({});
 }
 
+void ax::Application::call_deferred(std::function<void()> func)
+{
+	m_window->call_deferred(std::move(func));
+}
+
 ax::Application::Application(ResourceLoader&& loader)
 	: m_loader{ std::move(loader) }
 	, m_scripts{ {}, m_loader }

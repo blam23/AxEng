@@ -74,6 +74,9 @@ namespace ax
 		Window(const WindowDefinition&);
 		~Window();
 
+		static void resize_event_handler(GLFWwindow* window, int width, int height);
+
+
 		bool init_webgpu();
 		bool init_imgui();
 		void run_loop();
@@ -120,6 +123,10 @@ namespace ax
 		wgpu::Queue& queue() noexcept { return m_queue; }
 		const wgpu::Queue& queue() const noexcept { return m_queue; }
 
+		bool vsync() const noexcept { return m_vsync; }
+		// Must call create_surfaces() after changing vsync
+		void set_vsync(bool enabled) noexcept { m_vsync = enabled; }
+
 		void set_clear_color(const wgpu::Color& color)
 		{
 			m_clearColor = color;
@@ -127,6 +134,7 @@ namespace ax
 
 		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view);
 		void reload_pipeline();
+		bool create_surfaces();
 
 		SpriteDefinition* allocate_sprite();
 		void free_sprite(SpriteDefinition* sprite);
@@ -139,6 +147,8 @@ namespace ax
 		// Optional overloads that accept a z-index for depth ordering
 		void render_texture(Texture* tex, glm::vec2 position, float z);
 		void render_texture(Texture* tex, glm::vec2 position, rectf region, float z);
+
+		void call_deferred(std::function<void()> func);
 
 	private:
 		// Rendering
@@ -169,6 +179,7 @@ namespace ax
 		static void window_close_handler(GLFWwindow* window);
 
 		// WGPU
+		wgpu::Adapter m_adapter;
 		wgpu::Device m_device;
 		wgpu::Queue m_queue;
 		wgpu::Surface m_surface;
@@ -206,5 +217,7 @@ namespace ax
 		std::vector<SpriteGroupRange> m_spriteGroupRanges;
 		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };
 		uint32_t m_uniformsCapacity{ 1024 };
+
+		std::vector<std::function<void()>> m_deferred{};
 	};
 }
