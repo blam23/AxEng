@@ -8,21 +8,20 @@
 #include <deque>
 #include <unordered_map>
 #include <vector>
+#include <memory>
 
 // GLFW
-#include "glfw3webgpu.h"
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 // GFX
-#include <webgpu/webgpu_cpp.h>
-#include <webgpu/webgpu_cpp_print.h>
+#include "vulkan_context.h"
 
 // AxEng
 #include "helpers.h"
 #include "event.h"
-#include "debug_view.h"
 #include "texture.h"
+#include "debug_view.h"
 
 namespace ax
 {
@@ -57,7 +56,7 @@ namespace ax
 	struct WindowRenderEvent
 	{
 		double delta;
-		wgpu::RenderPassEncoder& pass;
+		VkCommandBuffer commandBuffer;
 	};
 
 	struct WindowUIEvent
@@ -74,7 +73,7 @@ namespace ax
 		Window(const WindowDefinition&);
 		~Window();
 
-		bool init_webgpu();
+		bool init_vulkan();
 		bool init_imgui();
 		void run_loop();
 
@@ -115,17 +114,14 @@ namespace ax
 			return m_requestCloseEventHandler;
 		}
 
-		wgpu::Device& device() noexcept { return m_device; }
-		const wgpu::Device& device() const noexcept { return m_device; }
-		wgpu::Queue& queue() noexcept { return m_queue; }
-		const wgpu::Queue& queue() const noexcept { return m_queue; }
+		const std::shared_ptr<VulkanContext>& vulkan_context() const noexcept { return m_context; }
 
-		void set_clear_color(const wgpu::Color& color)
+		void set_clear_color(const glm::vec4& color)
 		{
 			m_clearColor = color;
 		}
 
-		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view);
+		VkDescriptorSet setup_bind_groups(Texture* texture);
 		void reload_pipeline();
 
 		SpriteDefinition* allocate_sprite();
@@ -142,10 +138,19 @@ namespace ax
 
 	private:
 		// Rendering
-		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
-		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
-		void run_wgpu_render_pass(double delta);
+		void handle_render_pass(VkCommandBuffer commandBuffer, double delta);
+		void render_gui(VkCommandBuffer commandBuffer, double delta);
+		void run_vulkan_render_pass(double delta);
 		void ensure_uniform_capacity(uint32_t required);
+		bool create_swapchain();
+		bool create_render_pass();
+		bool create_framebuffers();
+		bool create_sprite_pipeline();
+		bool create_sync_objects();
+		void destroy_swapchain();
+		VkShaderModule load_shader(const std::string& path) const;
+		void create_descriptor_resources();
+		void create_depth_resources();
 
 		// Logic
 		void handle_tick(double delta);
@@ -168,26 +173,37 @@ namespace ax
 		void register_window_events();
 		static void window_close_handler(GLFWwindow* window);
 
-		// WGPU
-		wgpu::Device m_device;
-		wgpu::Queue m_queue;
-		wgpu::Surface m_surface;
-		wgpu::TextureFormat m_surfaceFormat{};
-		wgpu::Color m_clearColor{ 0.0, 0.0, 0.0, 1.0 };
-		wgpu::Texture m_depthTexture;
-		wgpu::TextureView m_depthTextureView;
-		wgpu::TextureFormat m_depthTextureFormat{ wgpu::TextureFormat::Depth24Plus };
-		wgpu::Texture m_multisampleTexture;
-		wgpu::ShaderModule m_shader;
-		wgpu::RenderPipeline m_pipeline;
-		wgpu::Buffer m_uniforms;
-		wgpu::Sampler m_nearestSampler;
-		wgpu::Sampler m_linearSampler;
-		wgpu::BindGroupLayout m_groupLayout;
-		wgpu::BindGroupLayout m_globalLayout;
-		wgpu::Buffer m_viewportBuffer;
-		wgpu::BindGroup m_viewportBindGroup;
-		std::unordered_map<Texture*, wgpu::BindGroup> m_textureBindGroups;
+		// Vulkan
+		std::shared_ptr<VulkanContext> m_context;
+		VkSwapchainKHR m_swapchain{ VK_NULL_HANDLE };
+		VkFormat m_surfaceFormat{ VK_FORMAT_UNDEFINED };
+		VkFormat m_depthFormat{ VK_FORMAT_D32_SFLOAT };
+		VkExtent2D m_swapchainExtent{};
+		std::vector<VkImage> m_swapchainImages;
+		std::vector<VkImageView> m_swapchainImageViews;
+		VkRenderPass m_renderPass{ VK_NULL_HANDLE };
+		std::vector<VkFramebuffer> m_framebuffers;
+		VkImage m_depthImage{ VK_NULL_HANDLE };
+		VkDeviceMemory m_depthMemory{ VK_NULL_HANDLE };
+		VkImageView m_depthView{ VK_NULL_HANDLE };
+		VkDescriptorSetLayout m_spriteSetLayout{ VK_NULL_HANDLE };
+		VkDescriptorSetLayout m_viewportSetLayout{ VK_NULL_HANDLE };
+		VkPipelineLayout m_pipelineLayout{ VK_NULL_HANDLE };
+		VkPipeline m_pipeline{ VK_NULL_HANDLE };
+		VkDescriptorPool m_spriteDescriptorPool{ VK_NULL_HANDLE };
+		VkDescriptorSet m_viewportDescriptorSet{ VK_NULL_HANDLE };
+		VkBuffer m_spriteBuffer{ VK_NULL_HANDLE };
+		VkDeviceMemory m_spriteMemory{ VK_NULL_HANDLE };
+		void* m_spriteMapped{ nullptr };
+		VkBuffer m_viewportBuffer{ VK_NULL_HANDLE };
+		VkDeviceMemory m_viewportMemory{ VK_NULL_HANDLE };
+		VkSampler m_sampler{ VK_NULL_HANDLE };
+		VkCommandBuffer m_commandBuffer{ VK_NULL_HANDLE };
+		VkSemaphore m_imageAvailable{ VK_NULL_HANDLE };
+		VkSemaphore m_renderFinished{ VK_NULL_HANDLE };
+		VkFence m_inFlight{ VK_NULL_HANDLE };
+		glm::vec4 m_clearColor{ 0.0f, 0.0f, 0.0f, 1.0f };
+		std::unordered_map<Texture*, VkDescriptorSet> m_textureBindGroups;
 
 		struct SpriteGroupRange
 		{

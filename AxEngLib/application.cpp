@@ -1,4 +1,6 @@
 #include "application.h"
+#include "vulkan_context.h"
+#include "lua_engine.h"
 
 #include "lua_lib_loader.h"
 
@@ -22,7 +24,7 @@ ax::Application ax::Application::from_zip(std::string_view zipFile)
 
 bool ax::Application::init_window()
 {
-	LogTimer _timer{ "wgpu initial setup" };
+	LogTimer _timer{ "Vulkan initial setup" };
 
 	const auto& app{ m_env["app"] };
 	const auto& window{ app["window"] };
@@ -35,11 +37,11 @@ bool ax::Application::init_window()
 	});
 
 	bool success{ true };
-	success = m_window->init_webgpu();
+	success = m_window->init_vulkan();
 	if (!success)
 		return false;
 
-	m_textures.set_device(m_window->device());
+	m_textures.set_context(m_window->vulkan_context());
 
 	success = m_window->init_imgui();
 	return success;
@@ -78,7 +80,6 @@ void ax::Application::add_application_bindings(sol::state& state)
 				{
 					ret["valid"] = true;
 					ret["ptr"] = text;
-					ret["view"] = text->view();
 					ret["ui_view"] = text->imgui_view();
 					ret["width"] = text->width();
 					ret["height"] = text->height();
@@ -105,7 +106,6 @@ void ax::Application::add_application_bindings(sol::state& state)
 				{
 					ret["valid"] = true;
 					ret["ptr"] = text;
-					ret["view"] = text->view();
 					ret["ui_view"] = text->imgui_view();
 					ret["width"] = text->width();
 					ret["height"] = text->height();
@@ -198,9 +198,9 @@ void ax::Application::add_application_bindings(sol::state& state)
 
 		auto on_render_table{ state.create_table() };
 		on_render_table["subscribe"] =
-			[this](std::function<void(double delta, const wgpu::RenderPassEncoder& pass)> f) -> size_t
+			[this](std::function<void(double delta, std::uintptr_t commandBuffer)> f) -> size_t
 			{
-				return m_window->get_render_event_handler().subscribe([f](const ax::WindowRenderEvent& e) { f(e.delta, e.pass); });
+				return m_window->get_render_event_handler().subscribe([f](const ax::WindowRenderEvent& e) { f(e.delta, reinterpret_cast<std::uintptr_t>(e.commandBuffer)); });
 			};
 		on_render_table["unsubscribe"] =
 			[this](size_t id)
@@ -552,6 +552,7 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 void ax::Application::cleanup()
 {
 	m_scripts.cleanup({});
+	m_textures.unload_all(Badge<Application>{});
 
 	if (m_window)
 		m_window = nullptr;

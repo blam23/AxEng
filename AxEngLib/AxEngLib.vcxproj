@@ -18,7 +18,7 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
-  <PropertyGroup Label="Globals">
+  <PropertyGroup Label="Globals"><VcpkgEnableManifest>true</VcpkgEnableManifest>
     <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{b62cf5a5-a301-4266-9f4e-999707f518b9}</ProjectGuid>
@@ -76,15 +76,14 @@
   <PropertyGroup Label="UserMacros" />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
-      <WarningLevel>Level4</WarningLevel>
+      <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;ENABLE_PROFILER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <TreatWarningAsError>true</TreatWarningAsError>
       <LanguageStandard_C>stdclatest</LanguageStandard_C>
       <AdditionalUsingDirectories>%(AdditionalUsingDirectories)</AdditionalUsingDirectories>
-      <AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /bigobj /Zc:u8EscapeEncoding %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -99,17 +98,16 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <WarningLevel>Level4</WarningLevel>
+      <WarningLevel>Level3</WarningLevel>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;ENABLE_PROFILER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <TreatWarningAsError>true</TreatWarningAsError>
       <LanguageStandard_C>stdclatest</LanguageStandard_C>
       <AdditionalUsingDirectories>%(AdditionalUsingDirectories)</AdditionalUsingDirectories>
-    </ClCompile>
+    <AdditionalOptions>/Zc:u8EscapeEncoding %(AdditionalOptions)</AdditionalOptions></ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -123,14 +121,13 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <WarningLevel>Level4</WarningLevel>
+      <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>_DEBUG;_CONSOLE;IMGUI_IMPL_WEBGPU_BACKEND_DAWN;ENABLE_PROFILER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_CONSOLE;ENABLE_PROFILER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpplatest</LanguageStandard>
       <LanguageStandard_C>stdclatest</LanguageStandard_C>
-      <AdditionalOptions>/utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions>
-      <TreatWarningAsError>true</TreatWarningAsError>
+      <AdditionalOptions>/utf-8 /bigobj /Zc:u8EscapeEncoding %(AdditionalOptions)</AdditionalOptions>
       <AdditionalUsingDirectories>%(AdditionalUsingDirectories)</AdditionalUsingDirectories>
     </ClCompile>
     <Link>
@@ -150,10 +147,10 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>NDEBUG;_CONSOLE;IMGUI_IMPL_WEBGPU_BACKEND_DAWN;ENABLE_PROFILER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_CONSOLE;ENABLE_PROFILER;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpplatest</LanguageStandard>
-      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/utf-8 /Zc:u8EscapeEncoding %(AdditionalOptions)</AdditionalOptions>
       <TreatWarningAsError>true</TreatWarningAsError>
       <LanguageStandard_C>stdclatest</LanguageStandard_C>
       <AdditionalUsingDirectories>%(AdditionalUsingDirectories)</AdditionalUsingDirectories>
@@ -173,7 +170,7 @@
     <ClCompile Include="asset.cpp" />
     <ClCompile Include="axeng.cpp" />
     <ClCompile Include="backends\imgui_impl_glfw.cpp" />
-    <ClCompile Include="backends\imgui_impl_wgpu.cpp" />
+    
     <ClCompile Include="bind_all.cpp" />
     <ClCompile Include="compiler.cpp" />
     <ClCompile Include="custom_type.cpp" />
@@ -194,7 +191,7 @@
     <ClCompile Include="application.cpp" />
     <ClCompile Include="lua_texture_bindings.cpp" />
     <ClCompile Include="lua_type_bindings.cpp" />
-    <ClCompile Include="glfw3webgpu.c" />
+    
     <ClCompile Include="lua_window_bindings.cpp" />
     <ClCompile Include="perf_profiler.cpp" />
     <ClCompile Include="resource_loader.cpp" />
@@ -203,13 +200,14 @@
     <ClCompile Include="TextEditor.cpp" />
     <ClCompile Include="texture.cpp" />
     <ClCompile Include="window.cpp" />
+    <ClCompile Include="vulkan_context.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="asset.h" />
     <ClInclude Include="asset_manager.h" />
     <ClInclude Include="axeng.h" />
     <ClInclude Include="backends\imgui_impl_glfw.h" />
-    <ClInclude Include="backends\imgui_impl_wgpu.h" />
+    
     <ClInclude Include="bind_all.h" />
     <ClInclude Include="compiler.h" />
     <ClInclude Include="custom_type.h" />
@@ -227,7 +225,7 @@
     <ClInclude Include="lua_bindings.h" />
     <ClInclude Include="lua_engine.h" />
     <ClInclude Include="application.h" />
-    <ClInclude Include="glfw3webgpu.h" />
+    
     <ClInclude Include="helpers.h" />
     <ClInclude Include="imgui_style.h" />
     <ClInclude Include="lua_error_bindings.h" />
@@ -248,6 +246,7 @@
     <ClInclude Include="TextEditor.h" />
     <ClInclude Include="texture.h" />
     <ClInclude Include="window.h" />
+    <ClInclude Include="vulkan_context.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\lua_libs\json.lua">
@@ -258,6 +257,18 @@
     <None Include="..\lua_libs\compiler_core.lua" />
     <None Include="..\lua_libs\init.lua" />
     <None Include="..\lua_libs\std.lua" />
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="..\shaders\sprite.vert">
+      <Command>"$(MSBuildProjectDirectory)\..\vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\tools\shaderc\glslc.exe" --target-env=vulkan1.1 -fshader-stage=vert "%(FullPath)" -o "$(MSBuildProjectDirectory)\..\shaders\sprite.vert.spv"</Command>
+      <Outputs>$(MSBuildProjectDirectory)\..\shaders\sprite.vert.spv</Outputs>
+      <AdditionalInputs>%(FullPath)</AdditionalInputs>
+    </CustomBuild>
+    <CustomBuild Include="..\shaders\sprite.frag">
+      <Command>"$(MSBuildProjectDirectory)\..\vcpkg_installed\$(VcpkgTriplet)\$(VcpkgTriplet)\tools\shaderc\glslc.exe" --target-env=vulkan1.1 -fshader-stage=frag "%(FullPath)" -o "$(MSBuildProjectDirectory)\..\shaders\sprite.frag.spv"</Command>
+      <Outputs>$(MSBuildProjectDirectory)\..\shaders\sprite.frag.spv</Outputs>
+      <AdditionalInputs>%(FullPath)</AdditionalInputs>
+    </CustomBuild>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

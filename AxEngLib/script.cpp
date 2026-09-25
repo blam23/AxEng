@@ -1,4 +1,5 @@
 #include "script.h"
+#include "vulkan_context.h"
 
 // Logging
 #include "spdlog/spdlog.h"

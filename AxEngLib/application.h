@@ -4,19 +4,16 @@
 #include <memory>
 #include <queue>
 
+#include "vulkan_context.h"
+#include "window.h"
+
 // AxEng
 #include "helpers.h"
 #include "texture.h"
-#include "lua_engine.h"
 #include "script.h"
-#include "window.h"
 #include "resource_loader.h"
 #include "log_timer.h"
 #include "custom_type.h"
-
-// GFX
-#include <webgpu/webgpu_cpp.h>
-#include <webgpu/webgpu_cpp_print.h>
 
 namespace ax
 {

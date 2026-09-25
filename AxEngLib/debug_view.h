@@ -1,7 +1,11 @@
 #pragma once
 
-#include "application.h"
 #include "keyboard.h"
+
+namespace ax
+{
+	class Application;
+}
 
 namespace ax::debug
 {

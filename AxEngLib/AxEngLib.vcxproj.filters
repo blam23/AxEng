@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
     <Filter Include="core">
@@ -60,19 +60,16 @@
     <ClCompile Include="window.cpp">
       <Filter>core</Filter>
     </ClCompile>
+    <ClCompile Include="vulkan_context.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
     <ClCompile Include="log_timer.cpp">
       <Filter>core</Filter>
     </ClCompile>
     <ClCompile Include="event.cpp">
       <Filter>core</Filter>
     </ClCompile>
-    <ClCompile Include="glfw3webgpu.c">
-      <Filter>exterrnal</Filter>
-    </ClCompile>
     <ClCompile Include="backends\imgui_impl_glfw.cpp">
-      <Filter>exterrnal</Filter>
-    </ClCompile>
-    <ClCompile Include="backends\imgui_impl_wgpu.cpp">
       <Filter>exterrnal</Filter>
     </ClCompile>
     <ClCompile Include="asset.cpp">
@@ -164,6 +161,9 @@
     <ClInclude Include="window.h">
       <Filter>core\headers</Filter>
     </ClInclude>
+    <ClInclude Include="vulkan_context.h">
+      <Filter>core\headers</Filter>
+    </ClInclude>
     <ClInclude Include="resource_loader.h">
       <Filter>core\headers</Filter>
     </ClInclude>
@@ -174,9 +174,6 @@
       <Filter>exterrnal\headers</Filter>
     </ClInclude>
     <ClInclude Include="backends\imgui_impl_glfw.h">
-      <Filter>exterrnal\headers</Filter>
-    </ClInclude>
-    <ClInclude Include="backends\imgui_impl_wgpu.h">
       <Filter>exterrnal\headers</Filter>
     </ClInclude>
     <ClInclude Include="imgui_style.h">
@@ -270,9 +267,6 @@
       <Filter>core\headers</Filter>
     </ClInclude>
     <ClInclude Include="TextEditor.h">
-      <Filter>exterrnal\headers</Filter>
-    </ClInclude>
-    <ClInclude Include="glfw3webgpu.h">
       <Filter>exterrnal\headers</Filter>
     </ClInclude>
     <ClInclude Include="flag_set.hpp">

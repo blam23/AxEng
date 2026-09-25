@@ -8,11 +8,11 @@
 #include "asset.h"
 #include "asset_manager.h"
 
-#include <webgpu/webgpu_cpp.h>
-#include <webgpu/webgpu_cpp_print.h>
-
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #undef APIENTRY
+
+#include "vulkan_context.h"
 
 #include "glm/glm.hpp"
 
@@ -64,20 +64,23 @@ namespace ax
 
 		using Descriptor = std::string;
 
-		Texture(Badge<TextureManager>, const std::string& name, const std::vector<uint8_t> data, wgpu::Device& device);
+		Texture(Badge<TextureManager>, const std::string& name, const std::vector<uint8_t> data, std::shared_ptr<VulkanContext> context);
 		~Texture();
 
-		const wgpu::Texture& texture() const { return m_texture; }
-		const wgpu::TextureView& view() const { return m_view; }
-		const ImTextureID imgui_view() const { return (ImTextureID)(intptr_t)m_view.Get(); }
+		VkImage image() const { return m_image; }
+		VkImageView view() const { return m_view; }
+		ImTextureID imgui_view() const;
 		uint32_t width() const { return m_width; }
 		uint32_t height() const { return m_height; }
 
 		GLFWimage create_glfw_image() const;
 
 	private:
-		wgpu::Texture m_texture;
-		wgpu::TextureView m_view;
+		std::shared_ptr<VulkanContext> m_context;
+		VkImage m_image{ VK_NULL_HANDLE };
+		VkDeviceMemory m_imageMemory{ VK_NULL_HANDLE };
+		VkImageView m_view{ VK_NULL_HANDLE };
+		mutable VkDescriptorSet m_imguiDescriptor{ VK_NULL_HANDLE };
 		void* m_stbiPtr{ nullptr };
 
 		uint32_t m_width{ 0 };
@@ -88,10 +91,10 @@ namespace ax
 	{
 	public:
 		TextureManager(Badge<Application>, ResourceLoader& loader);
-		void set_device(wgpu::Device& device);
+		void set_context(std::shared_ptr<VulkanContext> context);
 
 	private:
-		wgpu::Device* m_device;
+		std::shared_ptr<VulkanContext> m_context;
 
 		std::unique_ptr<Texture> load_from_raw_impl(const std::string& name, const std::vector<uint8_t>& data);
 		std::unique_ptr<Texture> load_impl(const std::string& name, const Texture::Descriptor& description);

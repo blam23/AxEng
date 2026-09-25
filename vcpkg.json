@@ -1,0 +1,22 @@
+{
+  "name": "axeng",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "glfw3",
+    "glm",
+    {
+      "name": "imgui",
+      "features": [
+        "docking-experimental",
+        "vulkan-binding"
+      ]
+    },
+    "lua",
+    "minizip-ng",
+    "sol2",
+    "spdlog",
+    "gtest",
+    "shaderc",
+    "vulkan"
+  ]
+}

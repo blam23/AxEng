@@ -1,4 +1,5 @@
 #include "debug_view.h"
+#include "application.h"
 
 #include <algorithm>
 #include <imgui.h>
@@ -438,7 +439,6 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 			{
 				static Texture* texture{ nullptr };
 				static std::string label{ "Pick a texture to inspect" };
-				static bool filter{ false };
 				static ImGuiImage::State zoomState;
 
 				if (ImGui::BeginCombo("##textures", label.c_str()))
@@ -465,20 +465,10 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 					ImGui::EndCombo();
 
 				}
-				ImGui::SameLine();
-				ImGui::Checkbox("Filter", &filter);
-
-
 				if (texture != nullptr)
 				{
-					if (!filter)
-						ImGui::GetWindowDrawList()->AddCallback(ImGui::GetPlatformIO().DrawCallback_SetSamplerNearest);
-
 					ImVec2 displaySize = ImGui::GetContentRegionAvail();
-					if (texture == nullptr)
-						spdlog::error("Unable to load texture 'tower'");
-					else
-						ImGuiImage::Zoomable((ImTextureID)(intptr_t)texture->view().Get(), displaySize, &zoomState);
+					ImGuiImage::Zoomable(texture->imgui_view(), displaySize, &zoomState);
 				}
 			}
 			ImGui::End();

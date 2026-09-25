@@ -3,18 +3,24 @@
 #include "log_timer.h"
 #include "perf_profiler.h"
 #include "window.h"
+#include "texture.h"
 
 #include "spdlog/spdlog.h"
 
 #include "backends/imgui_impl_glfw.h"
-#include "backends/imgui_impl_wgpu.h"
+#include <imgui_impl_vulkan.h>
 #include "IconsFontAwesome6.h"
 #include "ImGuiNotify.hpp"
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <fstream>
 #include <iostream>
+#include <limits>
+#include <ranges>
+#include <stdexcept>
 
 std::map<GLFWwindow*, ax::Window*> s_windows{};
 std::mutex s_windows_mutex{};
@@ -38,6 +44,9 @@ ax::Window::Window(const WindowDefinition& def)
 
 ax::Window::~Window()
 {
+	if (m_context && m_context->device != VK_NULL_HANDLE)
+		vkDeviceWaitIdle(m_context->device);
+
 	if (m_window)
 	{
 		{
@@ -47,13 +56,55 @@ ax::Window::~Window()
 			if (s_windows.size() == 0)
 			{
 				ImGui_ImplGlfw_Shutdown();
-				ImGui_ImplWGPU_Shutdown();
+				ImGui_ImplVulkan_Shutdown();
 			}
 		}
-		glfwDestroyWindow(m_window);
 	}
 
-	m_surface.Unconfigure();
+	if (m_context && m_context->device != VK_NULL_HANDLE)
+	{
+		if (m_spriteMapped)
+			vkUnmapMemory(m_context->device, m_spriteMemory);
+
+		if (m_pipeline != VK_NULL_HANDLE)
+			vkDestroyPipeline(m_context->device, m_pipeline, nullptr);
+		if (m_pipelineLayout != VK_NULL_HANDLE)
+			vkDestroyPipelineLayout(m_context->device, m_pipelineLayout, nullptr);
+		if (m_spriteDescriptorPool != VK_NULL_HANDLE)
+			vkDestroyDescriptorPool(m_context->device, m_spriteDescriptorPool, nullptr);
+		if (m_spriteSetLayout != VK_NULL_HANDLE)
+			vkDestroyDescriptorSetLayout(m_context->device, m_spriteSetLayout, nullptr);
+		if (m_viewportSetLayout != VK_NULL_HANDLE)
+			vkDestroyDescriptorSetLayout(m_context->device, m_viewportSetLayout, nullptr);
+		if (m_sampler != VK_NULL_HANDLE)
+			vkDestroySampler(m_context->device, m_sampler, nullptr);
+		if (m_spriteBuffer != VK_NULL_HANDLE)
+			vkDestroyBuffer(m_context->device, m_spriteBuffer, nullptr);
+		if (m_spriteMemory != VK_NULL_HANDLE)
+			vkFreeMemory(m_context->device, m_spriteMemory, nullptr);
+		if (m_viewportBuffer != VK_NULL_HANDLE)
+			vkDestroyBuffer(m_context->device, m_viewportBuffer, nullptr);
+		if (m_viewportMemory != VK_NULL_HANDLE)
+			vkFreeMemory(m_context->device, m_viewportMemory, nullptr);
+		destroy_swapchain();
+		if (m_renderPass != VK_NULL_HANDLE)
+			vkDestroyRenderPass(m_context->device, m_renderPass, nullptr);
+		if (m_depthView != VK_NULL_HANDLE)
+			vkDestroyImageView(m_context->device, m_depthView, nullptr);
+		if (m_depthImage != VK_NULL_HANDLE)
+			vkDestroyImage(m_context->device, m_depthImage, nullptr);
+		if (m_depthMemory != VK_NULL_HANDLE)
+			vkFreeMemory(m_context->device, m_depthMemory, nullptr);
+		if (m_imageAvailable != VK_NULL_HANDLE)
+			vkDestroySemaphore(m_context->device, m_imageAvailable, nullptr);
+		if (m_renderFinished != VK_NULL_HANDLE)
+			vkDestroySemaphore(m_context->device, m_renderFinished, nullptr);
+		if (m_inFlight != VK_NULL_HANDLE)
+			vkDestroyFence(m_context->device, m_inFlight, nullptr);
+	}
+
+	if (m_window)
+		glfwDestroyWindow(m_window);
 }
 
 bool ax::setup_glfw()
@@ -69,7 +120,6 @@ bool ax::setup_glfw()
 	}
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 	
 	return true;
@@ -80,358 +130,419 @@ void ax::teardown_glfw()
 	glfwTerminate();
 }
 
-bool ax::Window::init_webgpu()
+bool ax::Window::init_vulkan()
 {
-	//
-	// Get wgpu Instance
-	//
-	wgpu::InstanceDescriptor desc{};
-	desc.nextInChain = nullptr;
-	wgpu::Instance instance;
-	wgpu::RequestAdapterOptions options
+	LogTimer _timer{ "Vulkan initial setup" };
+	try
 	{
-		.featureLevel = wgpu::FeatureLevel::Core
-	};
-	wgpu::Adapter adapter;
-	wgpu::Limits limits
+		m_context = std::make_shared<VulkanContext>();
+		if (!m_context->initialize(m_window) || !create_swapchain())
+			return false;
+		create_depth_resources();
+		if (!create_render_pass() || !create_framebuffers())
+			return false;
+		create_descriptor_resources();
+		VkSamplerCreateInfo samplerInfo{ VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+		samplerInfo.magFilter = VK_FILTER_LINEAR;
+		samplerInfo.minFilter = VK_FILTER_LINEAR;
+		samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		samplerInfo.maxAnisotropy = 1.0f;
+		samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+		samplerInfo.unnormalizedCoordinates = VK_FALSE;
+		samplerInfo.compareEnable = VK_FALSE;
+		samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+		if (vkCreateSampler(m_context->device, &samplerInfo, nullptr, &m_sampler) != VK_SUCCESS)
+			throw std::runtime_error("Failed to create Vulkan sampler");
+		ensure_uniform_capacity(m_uniformsCapacity);
+		if (!create_sprite_pipeline())
+			return false;
+		return create_sync_objects();
+	}
+	catch (const std::exception& e)
 	{
-		.nextInChain = nullptr,
-		.maxBindGroups = 2,
-		.maxVertexBuffers = 1,
-		.maxBufferSize = 150000 * sizeof(wgpu::VertexAttribute),
-		.maxVertexAttributes = 4,
-	};
-	wgpu::DeviceDescriptor deviceDescriptor{};
-	deviceDescriptor.requiredLimits = &limits;
-	deviceDescriptor.SetUncapturedErrorCallback
-	(
-		[](const wgpu::Device&, wgpu::ErrorType error_type, wgpu::StringView message)
-		{
-			spdlog::error("Error: {} - message: {}", (uint32_t)error_type, message.data);
-		}
-	);
-	deviceDescriptor.SetDeviceLostCallback
-	(
-		wgpu::CallbackMode::AllowProcessEvents,
-		[](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
-		{
-			spdlog::error("Device Lost: {} - message: {}", (uint32_t)reason, message.data);
-		}
-	);
-
-	static const auto kTimedWaitAny = wgpu::InstanceFeatureName::TimedWaitAny;
-	wgpu::InstanceDescriptor instanceDesc
-	{
-		.requiredFeatureCount = 1,
-		.requiredFeatures = &kTimedWaitAny
-	};
-	instance = wgpu::CreateInstance(&instanceDesc);
-
-	//
-	// Get Adapter
-	//
-	auto adapter_callback =
-		[](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message, void* userdata)
-		{
-			if (status != wgpu::RequestAdapterStatus::Success)
-			{
-				spdlog::error("Failed to get an adapter: {}", message.data);
-				return;
-			}
-			*static_cast<wgpu::Adapter*>(userdata) = adapter;
-		};
-
-	auto callbackMode{ wgpu::CallbackMode::WaitAnyOnly };
-	void* userdata{ &adapter };
-	instance.WaitAny(instance.RequestAdapter(&options, callbackMode, adapter_callback, userdata), UINT64_MAX);
-	if (adapter == nullptr)
-	{
-		spdlog::error("RequestAdapter failed");
+		spdlog::error("Vulkan initialization failed: {}", e.what());
 		return false;
 	}
-
-	//
-	// Get Device
-	//
-	auto device_callback =
-		[](wgpu::RequestDeviceStatus status, wgpu::Device device, wgpu::StringView message, void* userData)
-		{
-			if (status != wgpu::RequestDeviceStatus::Success)
-			{
-				spdlog::error("Failed to get a device: {}", message.data);
-				return;
-			}
-			*static_cast<wgpu::Device*>(userData) = device;
-		};
-
-	instance.WaitAny(adapter.RequestDevice(&deviceDescriptor, callbackMode, device_callback, (void*)&m_device), UINT64_MAX);
-	if (m_device == nullptr)
-	{
-		spdlog::error("RequestDevice failed");
-		return false;
-	}
-
-	m_queue = m_device.GetQueue();
-
-	//
-	// Main Surface
-	//
-	m_surface = wgpu::Surface{ glfwGetWGPUSurface(instance.Get(), m_window) };
-
-	wgpu::SurfaceCapabilities capabilities{};
-	if(m_surface.GetCapabilities(adapter, &capabilities))
-		m_surfaceFormat = capabilities.formats[0];
-	else
-	{
-		spdlog::error("Failed to get surface capabilities..");
-		return false;
-	}
-
-	wgpu::SurfaceConfiguration config
-	{
-		.nextInChain = nullptr,
-		.device = m_device,
-		.format = m_surfaceFormat,
-		.usage = wgpu::TextureUsage::RenderAttachment,
-		.width = m_width,
-		.height = m_height,
-		.viewFormatCount = 0,
-		.viewFormats = nullptr,
-		.alphaMode = wgpu::CompositeAlphaMode::Auto,
-		.presentMode = m_vsync ? wgpu::PresentMode::Immediate : wgpu::PresentMode::Immediate,
-	};
-
-	m_surface.Configure(&config);
-
-	//
-	// Depth Texture
-	//
-	wgpu::TextureDescriptor depthTextureDesc
-	{
-		.usage = wgpu::TextureUsage::RenderAttachment,
-		.dimension = wgpu::TextureDimension::e2D,
-		.size = { m_width, m_height },
-		.format = m_depthTextureFormat,
-		.mipLevelCount = 1,
-		.sampleCount = 4,
-		.viewFormatCount = 1,
-		.viewFormats = &m_depthTextureFormat,
-	};
-	m_depthTexture = m_device.CreateTexture(&depthTextureDesc);
-
-	wgpu::TextureViewDescriptor depthTextureViewDesc
-	{
-		.format = m_depthTextureFormat,
-		.dimension = wgpu::TextureViewDimension::e2D,
-		.baseMipLevel = 0,
-		.mipLevelCount = 1,
-		.baseArrayLayer = 0,
-		.arrayLayerCount = 1,
-		.aspect = wgpu::TextureAspect::DepthOnly,
-	};
-	m_depthTextureView = m_depthTexture.CreateView(&depthTextureViewDesc);
-
-	//
-	// Setup Default Samplers
-	//
-	wgpu::SamplerDescriptor samplerNearestDesc
-	{
-		.addressModeU = wgpu::AddressMode::ClampToEdge,
-		.addressModeV = wgpu::AddressMode::ClampToEdge,
-		.addressModeW = wgpu::AddressMode::ClampToEdge,
-		.magFilter = wgpu::FilterMode::Nearest,
-		.minFilter = wgpu::FilterMode::Nearest,
-		.mipmapFilter = wgpu::MipmapFilterMode::Nearest,
-	};
-	m_nearestSampler = m_device.CreateSampler(&samplerNearestDesc);
-
-	wgpu::SamplerDescriptor samplerLinearDesc
-	{
-		.addressModeU = wgpu::AddressMode::ClampToEdge,
-		.addressModeV = wgpu::AddressMode::ClampToEdge,
-		.addressModeW = wgpu::AddressMode::ClampToEdge,
-		.magFilter = wgpu::FilterMode::Linear,
-		.minFilter = wgpu::FilterMode::Linear,
-		.mipmapFilter = wgpu::MipmapFilterMode::Linear,
-	};
-	m_linearSampler = m_device.CreateSampler(&samplerLinearDesc);
-
-	reload_pipeline();
-	return true;
 }
 
 void ax::Window::reload_pipeline()
 {
-	LogTimer _timer{ "pipeline load" };
+	if (m_context && m_context->device != VK_NULL_HANDLE)
+		create_sprite_pipeline();
+}
 
-	// Load shader
-	std::string shaderCode;
-	std::ifstream file{ "shaders/basic_shader.wgsl" };
-	if (file)
+bool ax::Window::create_swapchain()
+{
+	VkSurfaceCapabilitiesKHR capabilities{};
+	if (vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_context->physicalDevice, m_context->surface, &capabilities) != VK_SUCCESS)
+		return false;
+
+	uint32_t formatCount{};
+	vkGetPhysicalDeviceSurfaceFormatsKHR(m_context->physicalDevice, m_context->surface, &formatCount, nullptr);
+	std::vector<VkSurfaceFormatKHR> formats(formatCount);
+	vkGetPhysicalDeviceSurfaceFormatsKHR(m_context->physicalDevice, m_context->surface, &formatCount, formats.data());
+	if (formats.empty())
+		return false;
+	auto selectedFormat = formats.front();
+	for (const auto preferredFormat : { VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM })
 	{
-		std::ostringstream stream;
-		stream << file.rdbuf();
-		shaderCode = stream.str();
+		const auto it = std::ranges::find_if(formats, [preferredFormat](const auto& format)
+		{
+			return format.format == preferredFormat && format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+		});
+		if (it != formats.end())
+		{
+			selectedFormat = *it;
+			break;
+		}
 	}
+	m_surfaceFormat = selectedFormat.format;
+
+	uint32_t modeCount{};
+	vkGetPhysicalDeviceSurfacePresentModesKHR(m_context->physicalDevice, m_context->surface, &modeCount, nullptr);
+	std::vector<VkPresentModeKHR> modes(modeCount);
+	vkGetPhysicalDeviceSurfacePresentModesKHR(m_context->physicalDevice, m_context->surface, &modeCount, modes.data());
+	VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
+	if (!m_vsync && std::ranges::find(modes, VK_PRESENT_MODE_IMMEDIATE_KHR) != modes.end())
+		presentMode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+
+	if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max())
+		m_swapchainExtent = capabilities.currentExtent;
 	else
 	{
-		spdlog::error("Could not load shader file, using fallback.");
-		return;
+		int width{}, height{};
+		glfwGetFramebufferSize(m_window, &width, &height);
+		m_swapchainExtent.width = std::clamp(static_cast<uint32_t>(width), capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+		m_swapchainExtent.height = std::clamp(static_cast<uint32_t>(height), capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
 	}
+	uint32_t imageCount = std::max(2u, capabilities.minImageCount);
+	if (capabilities.maxImageCount > 0)
+		imageCount = std::min(imageCount, capabilities.maxImageCount);
 
-	wgpu::ShaderModuleDescriptor shaderDesc{};
-	wgpu::ShaderSourceWGSL shaderCodeDesc;
-	shaderCodeDesc.code = shaderCode.data();
-	shaderDesc.nextInChain = &shaderCodeDesc;
-	m_shader = m_device.CreateShaderModule(&shaderDesc);
+	VkSwapchainCreateInfoKHR swapchainInfo{ VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
+	swapchainInfo.surface = m_context->surface;
+	swapchainInfo.minImageCount = imageCount;
+	swapchainInfo.imageFormat = selectedFormat.format;
+	swapchainInfo.imageColorSpace = selectedFormat.colorSpace;
+	swapchainInfo.imageExtent = m_swapchainExtent;
+	swapchainInfo.imageArrayLayers = 1;
+	swapchainInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	const uint32_t queueFamilies[]{ m_context->graphicsQueueFamily, m_context->presentQueueFamily };
+	if (m_context->graphicsQueueFamily != m_context->presentQueueFamily)
+	{
+		swapchainInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+		swapchainInfo.queueFamilyIndexCount = 2;
+		swapchainInfo.pQueueFamilyIndices = queueFamilies;
+	}
+	else
+		swapchainInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	swapchainInfo.preTransform = capabilities.currentTransform;
+	swapchainInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	swapchainInfo.presentMode = presentMode;
+	swapchainInfo.clipped = VK_TRUE;
+	if (vkCreateSwapchainKHR(m_context->device, &swapchainInfo, nullptr, &m_swapchain) != VK_SUCCESS)
+		return false;
 
-	wgpu::RenderPipelineDescriptor pipelineDesc{};
+	vkGetSwapchainImagesKHR(m_context->device, m_swapchain, &imageCount, nullptr);
+	m_swapchainImages.resize(imageCount);
+	vkGetSwapchainImagesKHR(m_context->device, m_swapchain, &imageCount, m_swapchainImages.data());
+	m_swapchainImageViews.resize(imageCount);
+	for (uint32_t i = 0; i < imageCount; ++i)
+	{
+		VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+		viewInfo.image = m_swapchainImages[i];
+		viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		viewInfo.format = m_surfaceFormat;
+		viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		viewInfo.subresourceRange.baseMipLevel = 0;
+		viewInfo.subresourceRange.levelCount = 1;
+		viewInfo.subresourceRange.baseArrayLayer = 0;
+		viewInfo.subresourceRange.layerCount = 1;
+		if (vkCreateImageView(m_context->device, &viewInfo, nullptr, &m_swapchainImageViews[i]) != VK_SUCCESS)
+			return false;
+	}
+	return true;
+}
 
-	// Depth buffer
-	wgpu::DepthStencilState depthStencilState = {};
-	depthStencilState.format = m_depthTextureFormat;
-	// Enable depth writes and normal depth testing so z-index in instance data
-	// can determine ordering when batching across textures.
-	depthStencilState.depthWriteEnabled = wgpu::OptionalBool::True;
-	depthStencilState.depthCompare = wgpu::CompareFunction::LessEqual;
-	depthStencilState.stencilFront.compare = wgpu::CompareFunction::Always;
-	depthStencilState.stencilFront.failOp = wgpu::StencilOperation::Keep;
-	depthStencilState.stencilFront.depthFailOp = wgpu::StencilOperation::Keep;
-	depthStencilState.stencilFront.passOp = wgpu::StencilOperation::Keep;
-	depthStencilState.stencilBack.compare = wgpu::CompareFunction::Always;
-	depthStencilState.stencilBack.failOp = wgpu::StencilOperation::Keep;
-	depthStencilState.stencilBack.depthFailOp = wgpu::StencilOperation::Keep;
-	depthStencilState.stencilBack.passOp = wgpu::StencilOperation::Keep;
-	pipelineDesc.depthStencil = &depthStencilState;
+bool ax::Window::create_render_pass()
+{
+	VkAttachmentDescription color{};
+	color.format = m_surfaceFormat;
+	color.samples = VK_SAMPLE_COUNT_1_BIT;
+	color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	color.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	color.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	color.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-	// Vertex
-	pipelineDesc.vertex.bufferCount = 0;
-	pipelineDesc.vertex.buffers = nullptr;
-	pipelineDesc.vertex.module = m_shader;
-	pipelineDesc.vertex.entryPoint = "vs_main";
-	pipelineDesc.vertex.constantCount = 0;
-	pipelineDesc.vertex.constants = nullptr;
+	VkAttachmentDescription depth{};
+	depth.format = VK_FORMAT_D32_SFLOAT;
+	depth.samples = VK_SAMPLE_COUNT_1_BIT;
+	depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depth.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	depth.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depth.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	depth.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-	// Topology
-	pipelineDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
-	pipelineDesc.primitive.stripIndexFormat = wgpu::IndexFormat::Undefined;
-	pipelineDesc.primitive.frontFace = wgpu::FrontFace::CCW;
-	pipelineDesc.primitive.cullMode = wgpu::CullMode::None;
+	VkAttachmentReference colorReference{ 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL };
+	VkAttachmentReference depthReference{ 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL };
+	VkSubpassDescription subpass{};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorReference;
+	subpass.pDepthStencilAttachment = &depthReference;
+	VkSubpassDependency dependency{};
+	dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+	dependency.dstSubpass = 0;
+	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+	dependency.dstStageMask = dependency.srcStageMask;
+	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+	const VkAttachmentDescription attachments[]{ color, depth };
+	VkRenderPassCreateInfo info{ VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO };
+	info.attachmentCount = 2;
+	info.pAttachments = attachments;
+	info.subpassCount = 1;
+	info.pSubpasses = &subpass;
+	info.dependencyCount = 1;
+	info.pDependencies = &dependency;
+	return vkCreateRenderPass(m_context->device, &info, nullptr, &m_renderPass) == VK_SUCCESS;
+}
 
-	// Fragment Setup
-	wgpu::FragmentState fragmentState;
-	fragmentState.module = m_shader;
-	fragmentState.entryPoint = "fs_main";
-	fragmentState.constantCount = 0;
-	fragmentState.constants = nullptr;
-	wgpu::BlendState blendState;
-	wgpu::ColorTargetState colorTarget;
-	colorTarget.format = m_surfaceFormat;
-	colorTarget.blend = &blendState;
-	colorTarget.writeMask = wgpu::ColorWriteMask::All;
-	fragmentState.targetCount = 1;
-	fragmentState.targets = &colorTarget;
-	pipelineDesc.fragment = &fragmentState;
-	blendState.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
-	blendState.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
-	blendState.color.operation = wgpu::BlendOperation::Add;
+void ax::Window::create_depth_resources()
+{
+	VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
+	VkFormatProperties properties{};
+	vkGetPhysicalDeviceFormatProperties(m_context->physicalDevice, depthFormat, &properties);
+	if (!(properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
+		depthFormat = VK_FORMAT_D24_UNORM_S8_UINT;
+	m_depthFormat = depthFormat;
+	m_context->create_image(m_swapchainExtent.width, m_swapchainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_depthImage, m_depthMemory);
+	VkImageViewCreateInfo viewInfo{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+	viewInfo.image = m_depthImage;
+	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	viewInfo.format = depthFormat;
+	viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	viewInfo.subresourceRange.baseMipLevel = 0;
+	viewInfo.subresourceRange.levelCount = 1;
+	viewInfo.subresourceRange.baseArrayLayer = 0;
+	viewInfo.subresourceRange.layerCount = 1;
+	if (vkCreateImageView(m_context->device, &viewInfo, nullptr, &m_depthView) != VK_SUCCESS)
+		throw std::runtime_error("Failed to create depth image view");
+}
 
-	// Multisampling (x4)
-	pipelineDesc.multisample.count = 4;
-	pipelineDesc.multisample.mask = ~0u;
-	pipelineDesc.multisample.alphaToCoverageEnabled = false;
+bool ax::Window::create_framebuffers()
+{
+	m_framebuffers.resize(m_swapchainImageViews.size());
+	for (size_t i = 0; i < m_swapchainImageViews.size(); ++i)
+	{
+		const VkImageView attachments[]{ m_swapchainImageViews[i], m_depthView };
+		VkFramebufferCreateInfo info{ VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO };
+		info.renderPass = m_renderPass;
+		info.attachmentCount = 2;
+		info.pAttachments = attachments;
+		info.width = m_swapchainExtent.width;
+		info.height = m_swapchainExtent.height;
+		info.layers = 1;
+		if (vkCreateFramebuffer(m_context->device, &info, nullptr, &m_framebuffers[i]) != VK_SUCCESS)
+			return false;
+	}
+	return true;
+}
 
-	// SpriteGpuData matches the WGSL instance layout.
-	m_uniformStride = SpriteGpuData::gpuDataSize;
-	wgpu::BufferDescriptor bufferDesc{};
-	bufferDesc.size = static_cast<uint64_t>(m_uniformStride) * static_cast<uint64_t>(m_uniformsCapacity);
-	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
-	bufferDesc.mappedAtCreation = false;
-	bufferDesc.label = "SpriteBatch";
-	m_uniforms = m_device.CreateBuffer(&bufferDesc);
+void ax::Window::create_descriptor_resources()
+{
+	VkDescriptorSetLayoutBinding spriteBindings[2]{};
+	spriteBindings[0].binding = 0;
+	spriteBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	spriteBindings[0].descriptorCount = 1;
+	spriteBindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	spriteBindings[1].binding = 1;
+	spriteBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	spriteBindings[1].descriptorCount = 1;
+	spriteBindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	VkDescriptorSetLayoutCreateInfo spriteLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	spriteLayoutInfo.bindingCount = 2;
+	spriteLayoutInfo.pBindings = spriteBindings;
+	if (vkCreateDescriptorSetLayout(m_context->device, &spriteLayoutInfo, nullptr, &m_spriteSetLayout) != VK_SUCCESS)
+		throw std::runtime_error("Failed to create sprite descriptor layout");
 
-	// Viewport
-	wgpu::BufferDescriptor vpDesc{};
-	vpDesc.size = 4 * sizeof(float);
-	vpDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
-	vpDesc.mappedAtCreation = false;
-	vpDesc.label = "ViewportUBO";
-	m_viewportBuffer = m_device.CreateBuffer(&vpDesc);
+	VkDescriptorSetLayoutBinding viewportBinding{};
+	viewportBinding.binding = 0;
+	viewportBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	viewportBinding.descriptorCount = 1;
+	viewportBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	VkDescriptorSetLayoutCreateInfo viewportLayoutInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+	viewportLayoutInfo.bindingCount = 1;
+	viewportLayoutInfo.pBindings = &viewportBinding;
+	if (vkCreateDescriptorSetLayout(m_context->device, &viewportLayoutInfo, nullptr, &m_viewportSetLayout) != VK_SUCCESS)
+		throw std::runtime_error("Failed to create viewport descriptor layout");
 
-	auto vpEntries{ std::vector<wgpu::BindGroupEntry>{ 1 } };
-	vpEntries[0].binding = 0;
-	vpEntries[0].buffer = m_viewportBuffer;
-	vpEntries[0].offset = 0;
-	vpEntries[0].size = vpDesc.size;
+	const VkDescriptorPoolSize poolSizes[]{
+		{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4096 },
+		{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4096 },
+		{ VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1 }
+	};
+	VkDescriptorPoolCreateInfo poolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+	poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	poolInfo.maxSets = 4097;
+	poolInfo.poolSizeCount = 3;
+	poolInfo.pPoolSizes = poolSizes;
+	if (vkCreateDescriptorPool(m_context->device, &poolInfo, nullptr, &m_spriteDescriptorPool) != VK_SUCCESS)
+		throw std::runtime_error("Failed to create sprite descriptor pool");
 
-	//
-	// Bind Groups
-	//
+	m_context->create_buffer(sizeof(float) * 4, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_viewportBuffer, m_viewportMemory);
+	VkDescriptorSetAllocateInfo allocateInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	allocateInfo.descriptorPool = m_spriteDescriptorPool;
+	allocateInfo.descriptorSetCount = 1;
+	allocateInfo.pSetLayouts = &m_viewportSetLayout;
+	if (vkAllocateDescriptorSets(m_context->device, &allocateInfo, &m_viewportDescriptorSet) != VK_SUCCESS)
+		throw std::runtime_error("Failed to allocate viewport descriptor set");
+	VkDescriptorBufferInfo bufferInfo{ m_viewportBuffer, 0, sizeof(float) * 4 };
+	VkWriteDescriptorSet write{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+	write.dstSet = m_viewportDescriptorSet;
+	write.dstBinding = 0;
+	write.descriptorCount = 1;
+	write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	write.pBufferInfo = &bufferInfo;
+	vkUpdateDescriptorSets(m_context->device, 1, &write, 0, nullptr);
+}
 
-	auto bindGroupEntries{ std::vector<wgpu::BindGroupLayoutEntry>{ 3 } };
+VkShaderModule ax::Window::load_shader(const std::string& path) const
+{
+	std::ifstream file{ path, std::ios::ate | std::ios::binary };
+	if (!file)
+		throw std::runtime_error("Could not load shader file: " + path);
+	const auto size = file.tellg();
+	if (size <= 0 || size % sizeof(uint32_t) != 0)
+		throw std::runtime_error("Invalid SPIR-V shader file: " + path);
+	std::vector<uint32_t> code(static_cast<size_t>(size) / sizeof(uint32_t));
+	file.seekg(0);
+	file.read(reinterpret_cast<char*>(code.data()), size);
+	VkShaderModuleCreateInfo info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+	info.codeSize = static_cast<size_t>(size);
+	info.pCode = code.data();
+	VkShaderModule module{};
+	if (vkCreateShaderModule(m_context->device, &info, nullptr, &module) != VK_SUCCESS)
+		throw std::runtime_error("Failed to create shader module: " + path);
+	return module;
+}
 
-	// Uniforms
-	bindGroupEntries[0].binding = 0;
-	bindGroupEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-	bindGroupEntries[0].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
-	bindGroupEntries[0].buffer.minBindingSize = static_cast<uint64_t>(m_uniformStride);
-	bindGroupEntries[0].buffer.hasDynamicOffset = false;
-	
+bool ax::Window::create_sprite_pipeline()
+{
+	try
+	{
+		if (m_pipeline != VK_NULL_HANDLE)
+			vkDestroyPipeline(m_context->device, m_pipeline, nullptr);
+		if (m_pipelineLayout != VK_NULL_HANDLE)
+			vkDestroyPipelineLayout(m_context->device, m_pipelineLayout, nullptr);
+		const auto vertexShader = load_shader("shaders/sprite.vert.spv");
+		const auto fragmentShader = load_shader("shaders/sprite.frag.spv");
+		VkPipelineShaderStageCreateInfo stages[2]{};
+		stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+		stages[0].module = vertexShader;
+		stages[0].pName = "main";
+		stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+		stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+		stages[1].module = fragmentShader;
+		stages[1].pName = "main";
+		VkPipelineVertexInputStateCreateInfo vertexInput{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+		VkPipelineInputAssemblyStateCreateInfo assembly{ VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+		assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		VkViewport viewport{ 0.0f, 0.0f, static_cast<float>(m_swapchainExtent.width), static_cast<float>(m_swapchainExtent.height), 0.0f, 1.0f };
+		VkRect2D scissor{ { 0, 0 }, m_swapchainExtent };
+		VkPipelineViewportStateCreateInfo viewportState{ VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+		viewportState.viewportCount = 1;
+		viewportState.pViewports = &viewport;
+		viewportState.scissorCount = 1;
+		viewportState.pScissors = &scissor;
+		VkPipelineRasterizationStateCreateInfo raster{ VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+		raster.polygonMode = VK_POLYGON_MODE_FILL;
+		raster.cullMode = VK_CULL_MODE_NONE;
+		raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+		raster.lineWidth = 1.0f;
+		VkPipelineMultisampleStateCreateInfo multisample{ VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+		multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+		VkPipelineDepthStencilStateCreateInfo depth{ VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+		depth.depthTestEnable = VK_TRUE;
+		depth.depthWriteEnable = VK_TRUE;
+		depth.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+		VkPipelineColorBlendAttachmentState blend{};
+		blend.blendEnable = VK_TRUE;
+		blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+		blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		blend.colorBlendOp = VK_BLEND_OP_ADD;
+		blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+		blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		blend.alphaBlendOp = VK_BLEND_OP_ADD;
+		blend.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+		VkPipelineColorBlendStateCreateInfo blendState{ VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+		blendState.attachmentCount = 1;
+		blendState.pAttachments = &blend;
 
-	// Texture
-	bindGroupEntries[1].binding = 1;
-	bindGroupEntries[1].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-	bindGroupEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
-	bindGroupEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
-	
-	// Sampler
-	bindGroupEntries[2].binding = 2;
-	bindGroupEntries[2].visibility = wgpu::ShaderStage::Fragment;
-	bindGroupEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+		const VkDescriptorSetLayout setLayouts[]{ m_spriteSetLayout, m_viewportSetLayout };
+		VkPipelineLayoutCreateInfo layoutInfo{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+		layoutInfo.setLayoutCount = 2;
+		layoutInfo.pSetLayouts = setLayouts;
+		if (vkCreatePipelineLayout(m_context->device, &layoutInfo, nullptr, &m_pipelineLayout) != VK_SUCCESS)
+			throw std::runtime_error("Failed to create sprite pipeline layout");
+		VkGraphicsPipelineCreateInfo pipelineInfo{ VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+		pipelineInfo.stageCount = 2;
+		pipelineInfo.pStages = stages;
+		pipelineInfo.pVertexInputState = &vertexInput;
+		pipelineInfo.pInputAssemblyState = &assembly;
+		pipelineInfo.pViewportState = &viewportState;
+		pipelineInfo.pRasterizationState = &raster;
+		pipelineInfo.pMultisampleState = &multisample;
+		pipelineInfo.pDepthStencilState = &depth;
+		pipelineInfo.pColorBlendState = &blendState;
+		pipelineInfo.layout = m_pipelineLayout;
+		pipelineInfo.renderPass = m_renderPass;
+		pipelineInfo.subpass = 0;
+		const auto result = vkCreateGraphicsPipelines(m_context->device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_pipeline);
+		vkDestroyShaderModule(m_context->device, fragmentShader, nullptr);
+		vkDestroyShaderModule(m_context->device, vertexShader, nullptr);
+		return result == VK_SUCCESS;
+	}
+	catch (const std::exception& e)
+	{
+		spdlog::error("Failed to create Vulkan sprite pipeline: {}", e.what());
+		return false;
+	}
+}
 
-	// Viewport
-	auto globalEntries{ std::vector<wgpu::BindGroupLayoutEntry>{ 1 } };
-	globalEntries[0].binding = 0;
-	globalEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-	globalEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
-	globalEntries[0].buffer.minBindingSize = static_cast<uint64_t>(4 * sizeof(float));
+bool ax::Window::create_sync_objects()
+{
+	VkCommandBufferAllocateInfo commandInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+	commandInfo.commandPool = m_context->commandPool;
+	commandInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	commandInfo.commandBufferCount = 1;
+	if (vkAllocateCommandBuffers(m_context->device, &commandInfo, &m_commandBuffer) != VK_SUCCESS)
+		return false;
+	VkSemaphoreCreateInfo semaphoreInfo{ VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+	VkFenceCreateInfo fenceInfo{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+	fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+	return vkCreateSemaphore(m_context->device, &semaphoreInfo, nullptr, &m_imageAvailable) == VK_SUCCESS &&
+		vkCreateSemaphore(m_context->device, &semaphoreInfo, nullptr, &m_renderFinished) == VK_SUCCESS &&
+		vkCreateFence(m_context->device, &fenceInfo, nullptr, &m_inFlight) == VK_SUCCESS;
+}
 
-	//
-	// Layout
-	//
-	
-	// Group 0
-	wgpu::BindGroupLayoutDescriptor layoutDesc{};
-	layoutDesc.entryCount = bindGroupEntries.size();
-	layoutDesc.entries = bindGroupEntries.data();
-	m_groupLayout = m_device.CreateBindGroupLayout(&layoutDesc);
-
-	// Group 1
-	wgpu::BindGroupLayoutDescriptor globalLayoutDesc{};
-	globalLayoutDesc.entryCount = globalEntries.size();
-	globalLayoutDesc.entries = globalEntries.data();
-	m_globalLayout = m_device.CreateBindGroupLayout(&globalLayoutDesc);
-
-	// Bind em
-	wgpu::BindGroupLayout layouts[2] = { m_groupLayout, m_globalLayout };
-	wgpu::PipelineLayoutDescriptor pipelineLayoutDesc{};
-	pipelineLayoutDesc.bindGroupLayoutCount = 2;
-	pipelineLayoutDesc.bindGroupLayouts = layouts;
-	wgpu::PipelineLayout layout{ m_device.CreatePipelineLayout(&pipelineLayoutDesc) };
-
-	wgpu::BindGroupDescriptor vpBindDesc{};
-	vpBindDesc.layout = m_globalLayout;
-	vpBindDesc.entryCount = vpEntries.size();
-	vpBindDesc.entries = vpEntries.data();
-	m_viewportBindGroup = m_device.CreateBindGroup(&vpBindDesc);
-
-	//
-	// Pipeline
-	//
-	pipelineDesc.layout = layout;
-	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
-
-	m_textureBindGroups.clear();
+void ax::Window::destroy_swapchain()
+{
+	for (const auto framebuffer : m_framebuffers)
+		vkDestroyFramebuffer(m_context->device, framebuffer, nullptr);
+	m_framebuffers.clear();
+	for (const auto view : m_swapchainImageViews)
+		vkDestroyImageView(m_context->device, view, nullptr);
+	m_swapchainImageViews.clear();
+	m_swapchainImages.clear();
+	if (m_swapchain != VK_NULL_HANDLE)
+		vkDestroySwapchainKHR(m_context->device, m_swapchain, nullptr);
+	m_swapchain = VK_NULL_HANDLE;
 }
 
 ax::SpriteDefinition* ax::Window::allocate_sprite()
@@ -531,45 +642,54 @@ void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region, 
 
 void ax::Window::ensure_uniform_capacity(uint32_t required)
 {
-	if (required <= m_uniformsCapacity)
+	if (required <= m_uniformsCapacity && m_spriteBuffer != VK_NULL_HANDLE)
 		return;
 
 	while (m_uniformsCapacity < required)
 		m_uniformsCapacity *= 2;
-
-	wgpu::BufferDescriptor bufferDesc{};
-	bufferDesc.size = static_cast<uint64_t>(m_uniformStride) * static_cast<uint64_t>(m_uniformsCapacity);
-	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
-	bufferDesc.mappedAtCreation = false;
-	bufferDesc.label = "SpriteBatch";
-	m_uniforms = m_device.CreateBuffer(&bufferDesc);
+	if (m_spriteMapped)
+	{
+		vkUnmapMemory(m_context->device, m_spriteMemory);
+		m_spriteMapped = nullptr;
+	}
+	for (const auto& entry : m_textureBindGroups)
+		vkFreeDescriptorSets(m_context->device, m_spriteDescriptorPool, 1, &entry.second);
 	m_textureBindGroups.clear();
+	if (m_spriteBuffer != VK_NULL_HANDLE)
+		vkDestroyBuffer(m_context->device, m_spriteBuffer, nullptr);
+	if (m_spriteMemory != VK_NULL_HANDLE)
+		vkFreeMemory(m_context->device, m_spriteMemory, nullptr);
+	m_context->create_buffer(static_cast<VkDeviceSize>(m_uniformStride) * m_uniformsCapacity, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, m_spriteBuffer, m_spriteMemory);
+	if (vkMapMemory(m_context->device, m_spriteMemory, 0, VK_WHOLE_SIZE, 0, &m_spriteMapped) != VK_SUCCESS)
+		throw std::runtime_error("Failed to map Vulkan sprite buffer");
 }
 
-wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view)
+VkDescriptorSet ax::Window::setup_bind_groups(Texture* texture)
 {
-	auto bindGroups{ std::vector<wgpu::BindGroupEntry>{ 3 } };
-
-	// Uniforms
-	bindGroups[0].binding = 0;
-	bindGroups[0].buffer = m_uniforms;
-	bindGroups[0].offset = 0;
-	bindGroups[0].size = m_uniforms.GetSize();
-
-	// Texture
-	bindGroups[1].binding = 1;
-	bindGroups[1].textureView = view;
-
-	// Sampler
-	bindGroups[2].binding = 2;
-	bindGroups[2].sampler = m_linearSampler;
-
-	wgpu::BindGroupDescriptor bindGroupDesc{};
-	bindGroupDesc.layout = m_groupLayout;
-	bindGroupDesc.entryCount = bindGroups.size();
-	bindGroupDesc.entries = bindGroups.data();
-	wgpu::BindGroup binds = m_device.CreateBindGroup(&bindGroupDesc);
-	return binds;
+	VkDescriptorSetAllocateInfo allocation{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+	allocation.descriptorPool = m_spriteDescriptorPool;
+	allocation.descriptorSetCount = 1;
+	allocation.pSetLayouts = &m_spriteSetLayout;
+	VkDescriptorSet descriptor{};
+	if (vkAllocateDescriptorSets(m_context->device, &allocation, &descriptor) != VK_SUCCESS)
+		throw std::runtime_error("Failed to allocate sprite descriptor set");
+	VkDescriptorBufferInfo bufferInfo{ m_spriteBuffer, 0, static_cast<VkDeviceSize>(m_uniformStride) * m_uniformsCapacity };
+	VkDescriptorImageInfo imageInfo{ m_sampler, texture->view(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+	VkWriteDescriptorSet writes[2]{};
+	writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[0].dstSet = descriptor;
+	writes[0].dstBinding = 0;
+	writes[0].descriptorCount = 1;
+	writes[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+	writes[0].pBufferInfo = &bufferInfo;
+	writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	writes[1].dstSet = descriptor;
+	writes[1].dstBinding = 1;
+	writes[1].descriptorCount = 1;
+	writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	writes[1].pImageInfo = &imageInfo;
+	vkUpdateDescriptorSets(m_context->device, 2, writes, 0, nullptr);
+	return descriptor;
 }
 
 void ax::Window::handle_tick(double delta)
@@ -590,14 +710,23 @@ bool ax::Window::init_imgui()
 	ImGui::CreateContext();
 	ImGui::GetIO();
 
-	ImGui_ImplGlfw_InitForOther(m_window, false);
-
-	ImGui_ImplWGPU_InitInfo info{};
-	info.Device = m_device.Get();
-	info.DepthStencilFormat = static_cast<WGPUTextureFormat>(m_depthTextureFormat);
-	info.RenderTargetFormat = static_cast<WGPUTextureFormat>(m_surfaceFormat);
-	info.PipelineMultisampleState.count = 4;
-	ImGui_ImplWGPU_Init(&info);
+	if (!ImGui_ImplGlfw_InitForVulkan(m_window, false))
+		return false;
+	ImGui_ImplVulkan_InitInfo info{};
+	info.ApiVersion = VK_API_VERSION_1_1;
+	info.Instance = m_context->instance;
+	info.PhysicalDevice = m_context->physicalDevice;
+	info.Device = m_context->device;
+	info.QueueFamily = m_context->graphicsQueueFamily;
+	info.Queue = m_context->graphicsQueue;
+	info.DescriptorPoolSize = 2048;
+	info.MinImageCount = 2;
+	info.ImageCount = static_cast<uint32_t>(m_swapchainImages.size());
+	info.PipelineInfoMain.RenderPass = m_renderPass;
+	info.PipelineInfoMain.Subpass = 0;
+	info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+	if (!ImGui_ImplVulkan_Init(&info))
+		return false;
 
 	ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 	ax::setup_imgui_style();
@@ -664,7 +793,7 @@ void ax::Window::run_loop()
 	ax::input::KeyEventHandler::register_events(m_window);
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
 
-	//SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
 	while (!glfwWindowShouldClose(m_window))
 	{
@@ -682,155 +811,75 @@ void ax::Window::run_loop()
 
 		{
 			PROFILER_SEGMENT_SCOPED(frame, render);
-			run_wgpu_render_pass(updateDelta);
+			run_vulkan_render_pass(updateDelta);
 		}
 	}
 
 	ax::input::KeyEventHandler::cleanup_events(m_window);
 }
 
-void ax::Window::run_wgpu_render_pass(double delta)
+void ax::Window::run_vulkan_render_pass(double delta)
 {
+	m_preRenderEventHandler.fire({ .delta = delta });
+	if (vkWaitForFences(m_context->device, 1, &m_inFlight, VK_TRUE, UINT64_MAX) != VK_SUCCESS)
+		return;
+	uint32_t imageIndex{};
+	const auto acquireResult = vkAcquireNextImageKHR(m_context->device, m_swapchain, UINT64_MAX, m_imageAvailable, VK_NULL_HANDLE, &imageIndex);
+	if (acquireResult != VK_SUCCESS && acquireResult != VK_SUBOPTIMAL_KHR)
 	{
-		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, pre_render);
-
-		m_preRenderEventHandler.fire({ .delta = delta });
+		spdlog::error("Failed to acquire Vulkan swapchain image: {}", static_cast<int>(acquireResult));
+		return;
 	}
-
+	vkResetFences(m_context->device, 1, &m_inFlight);
+	vkResetCommandBuffer(m_commandBuffer, 0);
+	VkCommandBufferBeginInfo beginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+	if (vkBeginCommandBuffer(m_commandBuffer, &beginInfo) != VK_SUCCESS)
+		return;
+	VkClearValue clears[2]{};
+	clears[0].color = { { m_clearColor.r, m_clearColor.g, m_clearColor.b, m_clearColor.a } };
+	clears[1].depthStencil = { 1.0f, 0 };
+	VkRenderPassBeginInfo passInfo{ VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO };
+	passInfo.renderPass = m_renderPass;
+	passInfo.framebuffer = m_framebuffers[imageIndex];
+	passInfo.renderArea = { { 0, 0 }, m_swapchainExtent };
+	passInfo.clearValueCount = 2;
+	passInfo.pClearValues = clears;
+	vkCmdBeginRenderPass(m_commandBuffer, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
+	const float viewport[4]{ static_cast<float>(m_swapchainExtent.width), static_cast<float>(m_swapchainExtent.height), 0.0f, 0.0f };
+	void* mapped{};
+	if (vkMapMemory(m_context->device, m_viewportMemory, 0, sizeof(viewport), 0, &mapped) == VK_SUCCESS)
 	{
-		wgpu::RenderPassEncoder pass;
-		wgpu::CommandEncoder encoder;
-
-		{
-			PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, surface_setup);
-			PROFILER_NEW_SUBSEGMENT(surface_setup, create_texture);
-
-			if (m_multisampleTexture.Get() == nullptr || m_multisampleTexture.GetWidth() != m_width || m_multisampleTexture.GetHeight() != m_height)
-			{
-				wgpu::TextureDescriptor msaaDesc
-				{
-					.usage = wgpu::TextureUsage::RenderAttachment,
-					.dimension = wgpu::TextureDimension::e2D,
-					.size = { m_width, m_height },
-					.format = m_surfaceFormat,
-					.mipLevelCount = 1,
-					.sampleCount = 4,
-					.viewFormatCount = 1,
-					.viewFormats = &m_surfaceFormat,
-				};
-				m_multisampleTexture = m_device.CreateTexture(&msaaDesc);
-			}
-
-			wgpu::TextureViewDescriptor view
-			{
-				.nextInChain = nullptr,
-				.label = "frame view",
-				.format = m_multisampleTexture.GetFormat(),
-				.dimension = wgpu::TextureViewDimension::e2D,
-				.baseMipLevel = 0,
-				.mipLevelCount = 1,
-				.baseArrayLayer = 0,
-				.arrayLayerCount = 1,
-				.aspect = wgpu::TextureAspect::All,
-			};
-			wgpu::TextureView targetView{ m_multisampleTexture.CreateView(&view) };
-
-			wgpu::CommandEncoderDescriptor encoderDesc
-			{
-				.nextInChain = nullptr,
-				.label = "frame encoder",
-			};
-			encoder = m_device.CreateCommandEncoder(&encoderDesc);
-
-			// Update global viewport uniform (width,height,0,0)
-			{
-				float vp[4] = { static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f };
-				m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
-			}
-
-			// Setup Render pass
-			{
-				PROFILER_SUBSEGMENT_CHANGE_FROM_TO(surface_setup, create_texture, get_surface_texture);
-
-				// Get current render surface
-				wgpu::SurfaceTexture surfaceTexture;
-				m_surface.GetCurrentTexture(&surfaceTexture);
-				if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal)
-				{
-					spdlog::error("Failed to get new frame surface");
-					return;
-				}
-
-				PROFILER_SUBSEGMENT_CHANGE_FROM_TO(surface_setup, get_surface_texture, begin_pass);
-
-				// Clear frame
-				wgpu::RenderPassColorAttachment colorAttachment
-				{
-					.view = targetView,
-					.depthSlice = wgpu::kDepthSliceUndefined,
-					.resolveTarget = surfaceTexture.texture.CreateView(),
-					.loadOp = wgpu::LoadOp::Clear,
-					.storeOp = wgpu::StoreOp::Store,
-					.clearValue = m_clearColor,
-				};
-
-				// Clear depth
-				wgpu::RenderPassDepthStencilAttachment depthAttachment
-				{
-					.view = m_depthTextureView,
-					.depthLoadOp = wgpu::LoadOp::Clear,
-					.depthStoreOp = wgpu::StoreOp::Store,
-					.depthClearValue = 1.0f,
-					.depthReadOnly = false,
-					.stencilLoadOp = wgpu::LoadOp::Undefined,
-					.stencilStoreOp = wgpu::StoreOp::Undefined,
-					.stencilClearValue = 0,
-					.stencilReadOnly = true,
-				};
-
-				wgpu::RenderPassDescriptor passDesc
-				{
-					.nextInChain = nullptr,
-					.colorAttachmentCount = 1,
-					.colorAttachments = &colorAttachment,
-					.depthStencilAttachment = &depthAttachment,
-					.timestampWrites = nullptr,
-				};
-				pass = encoder.BeginRenderPass(&passDesc);
-
-				PROFILER_END_SUBSEGMENT(begin_pass);
-			}
-		}
-
-		// Build the actual render pass (lua, sprite batching, imgui, etc.)
-		{
-			handle_render_pass(pass, delta);
-			pass.End();
-		}
-
-		// Submit commands to GPU
-		{
-			PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, finalise);
-
-			wgpu::CommandBufferDescriptor bufferDesc
-			{
-				.nextInChain = nullptr,
-				.label = "frame cmd buffer",
-			};
-			wgpu::CommandBuffer command{ encoder.Finish(&bufferDesc) };
-
-			m_queue.Submit(1, &command);
-
-			m_surface.Present();
-
-			// Let the device progress
-			m_device.Tick();
-		}
+		std::memcpy(mapped, viewport, sizeof(viewport));
+		vkUnmapMemory(m_context->device, m_viewportMemory);
 	}
+	handle_render_pass(m_commandBuffer, delta);
+	vkCmdEndRenderPass(m_commandBuffer);
+	if (vkEndCommandBuffer(m_commandBuffer) != VK_SUCCESS)
+		return;
+	const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	VkSubmitInfo submit{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+	submit.waitSemaphoreCount = 1;
+	submit.pWaitSemaphores = &m_imageAvailable;
+	submit.pWaitDstStageMask = &waitStage;
+	submit.commandBufferCount = 1;
+	submit.pCommandBuffers = &m_commandBuffer;
+	submit.signalSemaphoreCount = 1;
+	submit.pSignalSemaphores = &m_renderFinished;
+	if (vkQueueSubmit(m_context->graphicsQueue, 1, &submit, m_inFlight) != VK_SUCCESS)
+		return;
+	VkPresentInfoKHR present{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
+	present.waitSemaphoreCount = 1;
+	present.pWaitSemaphores = &m_renderFinished;
+	present.swapchainCount = 1;
+	present.pSwapchains = &m_swapchain;
+	present.pImageIndices = &imageIndex;
+	const auto presentResult = vkQueuePresentKHR(m_context->presentQueue, &present);
+	if (presentResult != VK_SUCCESS && presentResult != VK_SUBOPTIMAL_KHR)
+		spdlog::error("Failed to present Vulkan frame: {}", static_cast<int>(presentResult));
 }
 
 
-void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
+void ax::Window::handle_render_pass(VkCommandBuffer commandBuffer, double delta)
 {
 	{
 		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, render_event);
@@ -839,7 +888,7 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		m_renderEventHandler.fire
 		({
 			.delta = delta,
-			.pass = pass
+			.commandBuffer = commandBuffer
 		});
 	}
 
@@ -895,13 +944,7 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 				return;
 
 			m_spriteGroupRanges.push_back({ tex, instanceCursor, count });
-			m_queue.WriteBuffer
-			(
-				m_uniforms,
-				static_cast<uint64_t>(instanceCursor) * m_uniformStride,
-				m_spriteUploadData.data(),
-				m_spriteUploadData.size() * m_uniformStride
-			);
+			std::memcpy(static_cast<std::byte*>(m_spriteMapped) + static_cast<size_t>(instanceCursor) * m_uniformStride, m_spriteUploadData.data(), m_spriteUploadData.size() * m_uniformStride);
 			instanceCursor += count;
 		};
 
@@ -917,17 +960,16 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 				uploadGroup(group.first, emptyGroup, &group.second);
 		}
 
-		pass.SetPipeline(m_pipeline);
-		// Set the global viewport bind group (group 1)
-		pass.SetBindGroup(1, m_viewportBindGroup);
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
+		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 1, 1, &m_viewportDescriptorSet, 0, nullptr);
 
 		for (const auto& r : m_spriteGroupRanges)
 		{
 			auto it = m_textureBindGroups.find(r.tex);
 			if (it == m_textureBindGroups.end())
-				it = m_textureBindGroups.emplace(r.tex, setup_bind_groups(r.tex->view())).first;
-			pass.SetBindGroup(0, it->second);
-			pass.Draw(6, r.count, 0, r.start);
+				it = m_textureBindGroups.emplace(r.tex, setup_bind_groups(r.tex)).first;
+			vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &it->second, 0, nullptr);
+			vkCmdDraw(commandBuffer, 6, r.count, 0, r.start);
 		}
 
 		m_pendingTextures.clear();
@@ -936,15 +978,13 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 	{
 		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, ui);
 
-		render_gui(pass, delta);
+		render_gui(commandBuffer, delta);
 	}
 }
 
-void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
+void ax::Window::render_gui(VkCommandBuffer commandBuffer, double delta)
 {
-	static ImVec4 clearColor{ 0.45f, 0.55f, 0.60f, 1.00f };
-
-	ImGui_ImplWGPU_NewFrame();
+	ImGui_ImplVulkan_NewFrame();
 	ImGui_ImplGlfw_NewFrame();
 
 	ImGui::NewFrame();
@@ -965,6 +1005,6 @@ void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
 
 	ImGui::Render();
 
-	ImGui_ImplWGPU_RenderDrawData(ImGui::GetDrawData(), pass.Get());
+	ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
 }
 
