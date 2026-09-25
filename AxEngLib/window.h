@@ -177,10 +177,12 @@ namespace ax
 		wgpu::Texture m_depthTexture;
 		wgpu::TextureView m_depthTextureView;
 		wgpu::TextureFormat m_depthTextureFormat{ wgpu::TextureFormat::Depth24Plus };
+		wgpu::Texture m_multisampleTexture;
 		wgpu::ShaderModule m_shader;
 		wgpu::RenderPipeline m_pipeline;
 		wgpu::Buffer m_uniforms;
 		wgpu::Sampler m_nearestSampler;
+		wgpu::Sampler m_linearSampler;
 		wgpu::BindGroupLayout m_groupLayout;
 		wgpu::BindGroupLayout m_globalLayout;
 		wgpu::Buffer m_viewportBuffer;

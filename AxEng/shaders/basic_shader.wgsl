@@ -68,6 +68,13 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 
 @fragment
 fn fs_main(in_: VSOut) -> @location(0) vec4<f32> {
-	let col = textureSample(tex, samp, in_.uv) * in_.tint;
+	let texturePixelSize = vec2<f32>(1.0) / vec2<f32>(textureDimensions(tex, 0));
+	let spriteScreenResolution = vec2<f32>(1.0) / fwidth(in_.uv);
+	let uvPixelSrc = floor(in_.uv / texturePixelSize + vec2<f32>(0.499));
+	let edge = uvPixelSrc * texturePixelSize * spriteScreenResolution;
+	let uvPixel = in_.uv * spriteScreenResolution;
+	let uvFactor = clamp(uvPixel - edge + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
+	let uv = (mix(uvPixelSrc - vec2<f32>(1.0), uvPixelSrc, uvFactor) + vec2<f32>(0.5)) * texturePixelSize;
+	let col = textureSample(tex, samp, uv) * in_.tint;
 	return col;
 }

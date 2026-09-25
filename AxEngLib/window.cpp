@@ -198,7 +198,7 @@ bool ax::Window::init_webgpu()
 		.viewFormatCount = 0,
 		.viewFormats = nullptr,
 		.alphaMode = wgpu::CompositeAlphaMode::Auto,
-		.presentMode = m_vsync ? wgpu::PresentMode::Fifo : wgpu::PresentMode::Immediate,
+		.presentMode = m_vsync ? wgpu::PresentMode::Immediate : wgpu::PresentMode::Immediate,
 	};
 
 	m_surface.Configure(&config);
@@ -213,7 +213,7 @@ bool ax::Window::init_webgpu()
 		.size = { m_width, m_height },
 		.format = m_depthTextureFormat,
 		.mipLevelCount = 1,
-		.sampleCount = 1,
+		.sampleCount = 4,
 		.viewFormatCount = 1,
 		.viewFormats = &m_depthTextureFormat,
 	};
@@ -234,7 +234,7 @@ bool ax::Window::init_webgpu()
 	//
 	// Setup Default Samplers
 	//
-	wgpu::SamplerDescriptor samplerDesc
+	wgpu::SamplerDescriptor samplerNearestDesc
 	{
 		.addressModeU = wgpu::AddressMode::ClampToEdge,
 		.addressModeV = wgpu::AddressMode::ClampToEdge,
@@ -243,7 +243,18 @@ bool ax::Window::init_webgpu()
 		.minFilter = wgpu::FilterMode::Nearest,
 		.mipmapFilter = wgpu::MipmapFilterMode::Nearest,
 	};
-	m_nearestSampler = m_device.CreateSampler(&samplerDesc);
+	m_nearestSampler = m_device.CreateSampler(&samplerNearestDesc);
+
+	wgpu::SamplerDescriptor samplerLinearDesc
+	{
+		.addressModeU = wgpu::AddressMode::ClampToEdge,
+		.addressModeV = wgpu::AddressMode::ClampToEdge,
+		.addressModeW = wgpu::AddressMode::ClampToEdge,
+		.magFilter = wgpu::FilterMode::Linear,
+		.minFilter = wgpu::FilterMode::Linear,
+		.mipmapFilter = wgpu::MipmapFilterMode::Linear,
+	};
+	m_linearSampler = m_device.CreateSampler(&samplerLinearDesc);
 
 	reload_pipeline();
 	return true;
@@ -325,8 +336,8 @@ void ax::Window::reload_pipeline()
 	blendState.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
 	blendState.color.operation = wgpu::BlendOperation::Add;
 
-	// Multisampling (off)
-	pipelineDesc.multisample.count = 1;
+	// Multisampling (x4)
+	pipelineDesc.multisample.count = 4;
 	pipelineDesc.multisample.mask = ~0u;
 	pipelineDesc.multisample.alphaToCoverageEnabled = false;
 
@@ -551,7 +562,7 @@ wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view)
 
 	// Sampler
 	bindGroups[2].binding = 2;
-	bindGroups[2].sampler = m_nearestSampler;
+	bindGroups[2].sampler = m_linearSampler;
 
 	wgpu::BindGroupDescriptor bindGroupDesc{};
 	bindGroupDesc.layout = m_groupLayout;
@@ -585,6 +596,7 @@ bool ax::Window::init_imgui()
 	info.Device = m_device.Get();
 	info.DepthStencilFormat = static_cast<WGPUTextureFormat>(m_depthTextureFormat);
 	info.RenderTargetFormat = static_cast<WGPUTextureFormat>(m_surfaceFormat);
+	info.PipelineMultisampleState.count = 4;
 	ImGui_ImplWGPU_Init(&info);
 
 	ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -652,7 +664,7 @@ void ax::Window::run_loop()
 	ax::input::KeyEventHandler::register_events(m_window);
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
 
-	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+	//SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
 
 	while (!glfwWindowShouldClose(m_window))
 	{
@@ -691,21 +703,29 @@ void ax::Window::run_wgpu_render_pass(double delta)
 
 		{
 			PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, surface_setup);
+			PROFILER_NEW_SUBSEGMENT(surface_setup, create_texture);
 
-			wgpu::SurfaceTexture surfaceTexture;
-			m_surface.GetCurrentTexture(&surfaceTexture);
-
-			if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal)
+			if (m_multisampleTexture.Get() == nullptr || m_multisampleTexture.GetWidth() != m_width || m_multisampleTexture.GetHeight() != m_height)
 			{
-				spdlog::error("Failed to create new frame surface");
-				return;
+				wgpu::TextureDescriptor msaaDesc
+				{
+					.usage = wgpu::TextureUsage::RenderAttachment,
+					.dimension = wgpu::TextureDimension::e2D,
+					.size = { m_width, m_height },
+					.format = m_surfaceFormat,
+					.mipLevelCount = 1,
+					.sampleCount = 4,
+					.viewFormatCount = 1,
+					.viewFormats = &m_surfaceFormat,
+				};
+				m_multisampleTexture = m_device.CreateTexture(&msaaDesc);
 			}
 
 			wgpu::TextureViewDescriptor view
 			{
 				.nextInChain = nullptr,
 				.label = "frame view",
-				.format = surfaceTexture.texture.GetFormat(),
+				.format = m_multisampleTexture.GetFormat(),
 				.dimension = wgpu::TextureViewDimension::e2D,
 				.baseMipLevel = 0,
 				.mipLevelCount = 1,
@@ -713,7 +733,7 @@ void ax::Window::run_wgpu_render_pass(double delta)
 				.arrayLayerCount = 1,
 				.aspect = wgpu::TextureAspect::All,
 			};
-			wgpu::TextureView targetView{ surfaceTexture.texture.CreateView(&view) };
+			wgpu::TextureView targetView{ m_multisampleTexture.CreateView(&view) };
 
 			wgpu::CommandEncoderDescriptor encoderDesc
 			{
@@ -730,11 +750,25 @@ void ax::Window::run_wgpu_render_pass(double delta)
 
 			// Setup Render pass
 			{
+				PROFILER_SUBSEGMENT_CHANGE_FROM_TO(surface_setup, create_texture, get_surface_texture);
+
+				// Get current render surface
+				wgpu::SurfaceTexture surfaceTexture;
+				m_surface.GetCurrentTexture(&surfaceTexture);
+				if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal)
+				{
+					spdlog::error("Failed to get new frame surface");
+					return;
+				}
+
+				PROFILER_SUBSEGMENT_CHANGE_FROM_TO(surface_setup, get_surface_texture, begin_pass);
+
 				// Clear frame
 				wgpu::RenderPassColorAttachment colorAttachment
 				{
 					.view = targetView,
 					.depthSlice = wgpu::kDepthSliceUndefined,
+					.resolveTarget = surfaceTexture.texture.CreateView(),
 					.loadOp = wgpu::LoadOp::Clear,
 					.storeOp = wgpu::StoreOp::Store,
 					.clearValue = m_clearColor,
@@ -763,6 +797,8 @@ void ax::Window::run_wgpu_render_pass(double delta)
 					.timestampWrites = nullptr,
 				};
 				pass = encoder.BeginRenderPass(&passDesc);
+
+				PROFILER_END_SUBSEGMENT(begin_pass);
 			}
 		}
 
