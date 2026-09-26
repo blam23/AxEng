@@ -1,0 +1,21 @@
+{
+   "scripts":{
+      "main":"scripts/main.lua",
+      "draw_helpers":"scripts/draw_helpers.lua",
+      "math_helpers":"scripts/math_helpers.lua",
+      "game":"scripts/scenes/game.lua",
+      "menu":"scripts/scenes/menu.lua",
+      "options":"scripts/scenes/options.lua",
+      "pause":"scripts/scenes/pause.lua"
+   },
+   "entry_point":"main",
+   "highlight":"#A256FF",
+   "icon":"icon",
+   "name":"Tower Mancer",
+   "textures":{
+      "icon":"assets/icon.png",
+      "tower":"assets/tower-sheet.png",
+      "font":"assets/pixel-font.png",
+      "paused":"assets/paused.png"
+   }
+}
