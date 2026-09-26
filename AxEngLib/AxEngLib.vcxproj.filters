@@ -150,6 +150,12 @@
     <ClCompile Include="perf_profiler.cpp">
       <Filter>debug</Filter>
     </ClCompile>
+    <ClCompile Include="mouse.cpp">
+      <Filter>core\input</Filter>
+    </ClCompile>
+    <ClCompile Include="lua_mouse_bindings.cpp">
+      <Filter>core\lua\bindings</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -280,6 +286,12 @@
     </ClInclude>
     <ClInclude Include="perf_profiler.h">
       <Filter>debug\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="mouse.h">
+      <Filter>core\input\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="lua_mouse_bindings.h">
+      <Filter>core\lua\bindings\headers</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

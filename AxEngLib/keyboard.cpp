@@ -33,13 +33,13 @@ ax::input::KeyEventHandler::~KeyEventHandler()
 	std::erase(s_eventHandlers, this);
 }
 
-void ax::input::KeyEventHandler::glfw_callback(GLFWwindow*, int key, int scancode, int action, int mods)
+void ax::input::KeyEventHandler::glfw_callback(GLFWwindow*, int key, [[maybe_unused]] int scancode, int action, int mods)
 {
 	// For now we ignore repeat (when key is held), used more for text input and such.
 	if (action == GLFW_REPEAT)
 		return;
 
-	spdlog::trace("KeyEventHandler: {}, scancode: {}, action: {}, mods: {}", key, scancode, action, mods);
+	SPDLOG_TRACE("KeyEventHandler: {}, scancode: {}, action: {}, mods: {}", key, scancode, action, mods);
 	
 	if (key > GLFW_KEY_LAST)
 	{

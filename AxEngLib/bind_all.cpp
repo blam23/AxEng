@@ -5,6 +5,7 @@
 #include "lua_event_bindings.h"
 #include "lua_type_bindings.h"
 #include "lua_key_bindings.h"
+#include "lua_mouse_bindings.h"
 #include "lua_window_bindings.h"
 #include "lua_imgui_bindings.h"
 #include "lua_texture_bindings.h"
@@ -21,6 +22,9 @@ void ax::lua::bindings::setup()
 
 	bindings::register_binding("keyboard", &setup_key_bindings);
 	bindings::register_cleanup("keyboard", &cleanup_key_bindings);
+
+	bindings::register_binding("mouse", &setup_mouse_bindings);
+	bindings::register_cleanup("mouse", &cleanup_mouse_bindings);
 
 	bindings::register_binding("window", &setup_window_bindings);
 

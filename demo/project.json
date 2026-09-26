@@ -4,10 +4,11 @@
    },
    "entry_point":"test",
    "highlight":"#A256FF",
-   "icon":"icon",
+   "icon":"icon2",
    "name":"Demo Project",
    "textures":{
       "icon":"assets/icon.png",
+      "icon2":"assets/icon_2.png",
       "tower":"assets/tower-sheet.png",
       "font":"assets/pixel-font.png"
    }

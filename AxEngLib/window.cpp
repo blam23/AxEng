@@ -3,6 +3,7 @@
 #include "log_timer.h"
 #include "perf_profiler.h"
 #include "window.h"
+#include "mouse.h"
 
 #include "spdlog/spdlog.h"
 
@@ -31,7 +32,6 @@ ax::Window::Window(const WindowDefinition& def)
 {
 	LogTimer _timer{ "create window" };
 	m_window = glfwCreateWindow(m_width, m_height, def.title.data(), NULL, NULL);
-	glfwSetWindowSizeCallback(m_window, &resize_event_handler);
 
 	std::lock_guard lock{ s_windows_mutex };
 	s_windows.emplace(m_window, this);
@@ -662,7 +662,12 @@ bool ax::Window::init_imgui()
 
 void ax::Window::register_window_events()
 {
+	glfwSetWindowSizeCallback(m_window, &resize_event_handler);
 	glfwSetWindowCloseCallback(m_window, ax::Window::window_close_handler);
+
+	ax::input::KeyEventHandler::register_events(m_window);
+	ax::input::MouseButtonEventHandler::register_events(m_window);
+	ax::input::MouseMoveEventHandler::register_events(m_window);
 }
 
 void ax::Window::window_close_handler(GLFWwindow* window)
@@ -689,7 +694,6 @@ double updateDelta{ 0 };
 void ax::Window::run_loop()
 {
 	register_window_events();
-	ax::input::KeyEventHandler::register_events(m_window);
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
 
 	//SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);

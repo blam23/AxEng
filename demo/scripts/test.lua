@@ -69,32 +69,44 @@ texture = app.res.get_texture("tower")
 texture2 = app.res.get_texture("icon")
 font_texture = app.res.get_texture("font")
 
+local function lerp(a, b, t)
+    return a + (b - a) * t
+end
+
+local function slerp(a, b, t)
+    return a + (b - a) * math.sin(t * math.pi * 0.5)
+end
+
 time = 0
 local function tick(delta)
     time = time + delta
 
     tick_enemies(delta)
 
-    vx = 0
-    vy = 0
-    if down[ax.key_map.w] then
-        vy = -100
-    end
-    if down[ax.key_map.a] then
-        vx = -100
-    end
-    if down[ax.key_map.s] then
-        vy = 100
-    end
-    if down[ax.key_map.d] then
-        vx = 100
-    end
+    -- vx = 0
+    -- vy = 0
+    -- if down[ax.key_map.w] then
+    --     vy = -100
+    -- end
+    -- if down[ax.key_map.a] then
+    --     vx = -100
+    -- end
+    -- if down[ax.key_map.s] then
+    --     vy = 100
+    -- end
+    -- if down[ax.key_map.d] then
+    --     vx = 100
+    -- end
 
-    x = x + vx * delta
-    y = y + vy * delta
+    -- x = x + vx * delta
+    -- y = y + vy * delta
 
-    app.sprites.update_position(player_sprite, x, y, math.sin(time))
-    app.sprites.update_position(player_shadow_sprite, x + 5, y + 5, math.sin(time))
+    local mx, my = mouse.get_position()
+    x = slerp(x, mx - ((13*5)/2) + math.sin(time * 10) * 100, 0.07)
+    y = slerp(y, my - ((15*5)/2) - math.cos(time * 10) * 100, 0.07)
+
+    app.sprites.update_position(player_sprite, x, y, 0)
+    app.sprites.update_position(player_shadow_sprite, x + 5, y + 5, 0)
 end
 
 function draw_string(x, y, text, rotation, color, scale, bold)
@@ -133,8 +145,8 @@ function draw_string(x, y, text, rotation, color, scale, bold)
         if c ~= 999 then
             app.window.render(
                 font_texture, x + x_offset, y + (18 * y_offset * scale.y),
-                stride * col, 16 * row, stride, height,
-                rotation, 0,
+                stride * col + 1, 16 * row + 1, stride - 1, height - 1,
+                math.sin(time * 3.0 + i) * 0.1, 0,
                 color.r, color.g, color.b, color.a,
                 scale.x, scale.y
             )
@@ -151,12 +163,27 @@ end
 app.on_update.subscribe(tick)
 
 app.window.on_render.subscribe(function(delta, pass)
-    draw_shadowed_string(50, 50, "ABCDEFGHIJKLMNOPQRSTUVWXYZ\nabcdefghijklmnopqrstuvwxyz\n\n0123456789", {r = 0.7, g = 1.2, b = 1.2, a = 1}, {x = 2, y = 2}, false)
-    draw_shadowed_string(50, 350, "ABCDEFGHIJKLMNOPQRSTUVWXYZ\nabcdefghijklmnopqrstuvwxyz\n\n0123456789", {r = 0.7, g = 1.2, b = 1.2, a = 1}, {x = 2, y = 2}, true)
-    draw_shadowed_string(50, 550, "You can feel your tongue\nin your mouth", {r = 0.5, g = 0.0, b = 0.7, a = 1}, {x = 5, y = 5}, true)
+    local play_color = {r = 0.0, g = 0.7, b = 0.7, a = 1}
+    local options_color = {r = 0.0, g = 0.7, b = 0.7, a = 1}
+
+    local mx, my = mouse.get_position()
+    
+    if mx > 140 and mx < 360 and my > 240 and my < 320 then
+        play_color = {r = 0.7, g = 0.0, b = 0.0, a = 1}
+        mouse.set_cursor(app.window.handle, mouse.cursors.pointing)
+    elseif mx > 140 and mx < 430 and my > 340 and my < 420 then
+        options_color = {r = 0.7, g = 0.0, b = 0.0, a = 1}
+        mouse.set_cursor(app.window.handle, mouse.cursors.pointing)    
+    else
+        mouse.set_cursor(app.window.handle, mouse.cursors.arrow)
+    end
+
+    draw_shadowed_string(50, 50, "TOWER MANCER", {r = 0.5, g = 0.0, b = 0.7, a = 1}, {x = 5, y = 5}, true)
+    draw_shadowed_string(150, 250, "Play", play_color, {x = 3, y = 3}, true)
+    draw_shadowed_string(150, 350, "Options", options_color, {x = 3, y = 3}, true)
 end)
 
-setup_enemies(500)
+setup_enemies(100)
 
 player_shadow_sprite = app.sprites.allocate()
 app.sprites.setup(player_shadow_sprite, texture, x + 5, y + 5, 49, 32, 13, 15)
@@ -172,6 +199,6 @@ app.sprites.setup(player_sprite, texture, x, y, 49, 32, 13, 15)
 player_sprite.scale.x = 5.0
 player_sprite.scale.y = 5.0
 
-app.window.set_clear_color(1.0, 1.0, 1.0, 1.0)
+app.window.set_clear_color(0.0, 0.0, 0.0, 1.0)
 
 return error_code.Success

@@ -5,8 +5,8 @@
 #include <vector>
 #include <mutex>
 
-std::vector<std::unique_ptr<ax::input::KeyEventHandler>> s_handlers{};
-std::mutex s_handlerMutex{};
+std::vector<std::unique_ptr<ax::input::KeyEventHandler>> s_keyHandlers{};
+std::mutex s_keyHandlerMutex{};
 
 void ax::lua::bindings::setup_key_bindings(sol::state& state)
 {
@@ -21,7 +21,7 @@ void ax::lua::bindings::setup_key_bindings(sol::state& state)
 	key_table["subscribe_key"] =
 		[](int key, const std::function<void(bool pressed, int mods)>& callback)
 		{
-			std::lock_guard lock{ s_handlerMutex };
+			std::lock_guard lock{ s_keyHandlerMutex };
 
 			spdlog::debug("Registering key: {}", key);
 			auto ptr{ std::make_unique<ax::input::KeyEventHandler>(key) };
@@ -33,13 +33,13 @@ void ax::lua::bindings::setup_key_bindings(sol::state& state)
 				}
 			);
 
-			s_handlers.push_back(std::move(ptr));
+			s_keyHandlers.push_back(std::move(ptr));
 		};
 
 	key_table["subscribe_all"] =
 		[](const std::function<void(int key, bool pressed, int mods)>& callback)
 		{
-			std::lock_guard lock{ s_handlerMutex };
+			std::lock_guard lock{ s_keyHandlerMutex };
 
 			ax::input::KeyEventHandler::globalEventHandler.subscribe
 			(
@@ -61,6 +61,6 @@ void ax::lua::bindings::setup_key_bindings(sol::state& state)
 
 void ax::lua::bindings::cleanup_key_bindings(sol::state&)
 {
-	std::lock_guard lock{ s_handlerMutex };
-	s_handlers.clear();
+	std::lock_guard lock{ s_keyHandlerMutex };
+	s_keyHandlers.clear();
 }
