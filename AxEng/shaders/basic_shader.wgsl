@@ -67,8 +67,7 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	return out;
 }
 
-@fragment
-fn fs_main(in_: VSOut) -> @location(0) vec4<f32> {
+fn sprite_color(in_: VSOut) -> vec4<f32> {
 	let texturePixelSize = vec2<f32>(1.0) / vec2<f32>(textureDimensions(tex, 0));
 	let spriteScreenResolution = vec2<f32>(1.0) / fwidth(in_.uv);
 	let uvPixelSrc = floor(in_.uv / texturePixelSize + vec2<f32>(0.499));
@@ -76,9 +75,44 @@ fn fs_main(in_: VSOut) -> @location(0) vec4<f32> {
 	let uvPixel = in_.uv * spriteScreenResolution;
 	let uvFactor = clamp(uvPixel - edge + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
 	let uv = (mix(uvPixelSrc - vec2<f32>(1.0), uvPixelSrc, uvFactor) + vec2<f32>(0.5)) * texturePixelSize;
-	let col = textureSample(tex, samp, uv) * in_.tint;
+	return textureSample(tex, samp, uv) * in_.tint;
+}
+
+@fragment
+fn fs_main(in_: VSOut) -> @location(0) vec4<f32> {
+	let col = sprite_color(in_);
 	if (col.a <= 0.0) {
 		discard;
 	}
 	return col;
+}
+
+@fragment
+fn fs_opaque(in_: VSOut) -> @location(0) vec4<f32> {
+	let col = sprite_color(in_);
+	if (col.a < 1.0) {
+		discard;
+	}
+	return col;
+}
+
+struct OitOutput {
+	@location(0) accumulation: vec4<f32>,
+	@location(1) revealage: f32,
+};
+
+@fragment
+fn fs_oit(in_: VSOut) -> OitOutput {
+	let col = sprite_color(in_);
+	let alpha = clamp(col.a, 0.0, 1.0);
+	if (alpha <= 0.0 || alpha >= 1.0) {
+		discard;
+	}
+
+	let depthWeight = 0.01 + 8.0 * in_.pos.z * in_.pos.z * in_.pos.z;
+	let weight = clamp(depthWeight, 0.01, 8.0);
+	var out: OitOutput;
+	out.accumulation = vec4<f32>(col.rgb * alpha * weight, alpha * weight);
+	out.revealage = alpha;
+	return out;
 }

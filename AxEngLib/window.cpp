@@ -151,6 +151,29 @@ bool ax::Window::create_surfaces()
 	};
 	m_depthTextureView = m_depthTexture.CreateView(&depthTextureViewDesc);
 
+	wgpu::TextureDescriptor accumulationTextureDesc{};
+	accumulationTextureDesc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
+	accumulationTextureDesc.dimension = wgpu::TextureDimension::e2D;
+	accumulationTextureDesc.size = { m_width, m_height };
+	accumulationTextureDesc.format = wgpu::TextureFormat::RGBA16Float;
+	accumulationTextureDesc.mipLevelCount = 1;
+	accumulationTextureDesc.sampleCount = 4;
+	m_oitAccumulationTexture = m_device.CreateTexture(&accumulationTextureDesc);
+	m_oitAccumulationView = m_oitAccumulationTexture.CreateView();
+
+	wgpu::TextureDescriptor revealageTextureDesc{};
+	revealageTextureDesc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
+	revealageTextureDesc.dimension = wgpu::TextureDimension::e2D;
+	revealageTextureDesc.size = { m_width, m_height };
+	revealageTextureDesc.format = wgpu::TextureFormat::R8Unorm;
+	revealageTextureDesc.mipLevelCount = 1;
+	revealageTextureDesc.sampleCount = 4;
+	m_oitRevealageTexture = m_device.CreateTexture(&revealageTextureDesc);
+	m_oitRevealageView = m_oitRevealageTexture.CreateView();
+
+	if (m_compositeGroupLayout)
+		create_composite_bind_group();
+
 	//
 	// Setup Default Samplers
 	//
@@ -343,20 +366,16 @@ void ax::Window::reload_pipeline()
 	// Fragment Setup
 	wgpu::FragmentState fragmentState;
 	fragmentState.module = m_shader;
-	fragmentState.entryPoint = "fs_main";
+	fragmentState.entryPoint = "fs_opaque";
 	fragmentState.constantCount = 0;
 	fragmentState.constants = nullptr;
-	wgpu::BlendState blendState;
 	wgpu::ColorTargetState colorTarget;
 	colorTarget.format = m_surfaceFormat;
-	colorTarget.blend = &blendState;
+	colorTarget.blend = nullptr;
 	colorTarget.writeMask = wgpu::ColorWriteMask::All;
 	fragmentState.targetCount = 1;
 	fragmentState.targets = &colorTarget;
 	pipelineDesc.fragment = &fragmentState;
-	blendState.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
-	blendState.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
-	blendState.color.operation = wgpu::BlendOperation::Add;
 
 	// Multisampling (x4)
 	pipelineDesc.multisample.count = 4;
@@ -453,7 +472,111 @@ void ax::Window::reload_pipeline()
 	pipelineDesc.layout = layout;
 	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
 
+	depthStencilState.depthWriteEnabled = wgpu::OptionalBool::False;
+	wgpu::BlendState accumulationBlend{};
+	accumulationBlend.color.srcFactor = wgpu::BlendFactor::One;
+	accumulationBlend.color.dstFactor = wgpu::BlendFactor::One;
+	accumulationBlend.color.operation = wgpu::BlendOperation::Add;
+	accumulationBlend.alpha.srcFactor = wgpu::BlendFactor::One;
+	accumulationBlend.alpha.dstFactor = wgpu::BlendFactor::One;
+	accumulationBlend.alpha.operation = wgpu::BlendOperation::Add;
+	wgpu::BlendState revealageBlend{};
+	revealageBlend.color.srcFactor = wgpu::BlendFactor::Zero;
+	revealageBlend.color.dstFactor = wgpu::BlendFactor::OneMinusSrc;
+	revealageBlend.color.operation = wgpu::BlendOperation::Add;
+	wgpu::ColorTargetState oitTargets[2]{};
+	oitTargets[0].format = wgpu::TextureFormat::RGBA16Float;
+	oitTargets[0].blend = &accumulationBlend;
+	oitTargets[0].writeMask = wgpu::ColorWriteMask::All;
+	oitTargets[1].format = wgpu::TextureFormat::R8Unorm;
+	oitTargets[1].blend = &revealageBlend;
+	oitTargets[1].writeMask = wgpu::ColorWriteMask::All;
+	fragmentState.entryPoint = "fs_oit";
+	fragmentState.targetCount = 2;
+	fragmentState.targets = oitTargets;
+	m_oitPipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+
+	std::string compositeShaderCode;
+	std::ifstream compositeFile{ "shaders/composite_shader.wgsl" };
+	if (compositeFile)
+	{
+		std::ostringstream stream;
+		stream << compositeFile.rdbuf();
+		compositeShaderCode = stream.str();
+	}
+	else
+	{
+		spdlog::error("Could not load OIT composite shader file.");
+		return;
+	}
+	wgpu::ShaderModuleDescriptor compositeShaderDesc{};
+	wgpu::ShaderSourceWGSL compositeShaderCodeDesc;
+	compositeShaderCodeDesc.code = compositeShaderCode.data();
+	compositeShaderDesc.nextInChain = &compositeShaderCodeDesc;
+	m_compositeShader = m_device.CreateShaderModule(&compositeShaderDesc);
+
+	wgpu::BindGroupLayoutEntry compositeEntries[2]{};
+	for (uint32_t i = 0; i < 2; ++i)
+	{
+		compositeEntries[i].binding = i;
+		compositeEntries[i].visibility = wgpu::ShaderStage::Fragment;
+		compositeEntries[i].texture.sampleType = wgpu::TextureSampleType::UnfilterableFloat;
+		compositeEntries[i].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+		compositeEntries[i].texture.multisampled = true;
+	}
+	wgpu::BindGroupLayoutDescriptor compositeLayoutDesc{};
+	compositeLayoutDesc.entryCount = 2;
+	compositeLayoutDesc.entries = compositeEntries;
+	m_compositeGroupLayout = m_device.CreateBindGroupLayout(&compositeLayoutDesc);
+	create_composite_bind_group();
+
+	wgpu::PipelineLayoutDescriptor compositePipelineLayoutDesc{};
+	compositePipelineLayoutDesc.bindGroupLayoutCount = 1;
+	compositePipelineLayoutDesc.bindGroupLayouts = &m_compositeGroupLayout;
+	wgpu::PipelineLayout compositePipelineLayout = m_device.CreatePipelineLayout(&compositePipelineLayoutDesc);
+	wgpu::RenderPipelineDescriptor compositePipelineDesc{};
+	compositePipelineDesc.layout = compositePipelineLayout;
+	compositePipelineDesc.vertex.module = m_compositeShader;
+	compositePipelineDesc.vertex.entryPoint = "vs_main";
+	compositePipelineDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+	compositePipelineDesc.primitive.frontFace = wgpu::FrontFace::CCW;
+	compositePipelineDesc.primitive.cullMode = wgpu::CullMode::None;
+	compositePipelineDesc.multisample.count = 4;
+	compositePipelineDesc.multisample.mask = ~0u;
+	wgpu::BlendState compositeBlend{};
+	compositeBlend.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
+	compositeBlend.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+	compositeBlend.color.operation = wgpu::BlendOperation::Add;
+	compositeBlend.alpha.srcFactor = wgpu::BlendFactor::One;
+	compositeBlend.alpha.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+	compositeBlend.alpha.operation = wgpu::BlendOperation::Add;
+	wgpu::ColorTargetState compositeTarget{};
+	compositeTarget.format = m_surfaceFormat;
+	compositeTarget.blend = &compositeBlend;
+	compositeTarget.writeMask = wgpu::ColorWriteMask::All;
+	wgpu::FragmentState compositeFragment{};
+	compositeFragment.module = m_compositeShader;
+	compositeFragment.entryPoint = "fs_main";
+	compositeFragment.targetCount = 1;
+	compositeFragment.targets = &compositeTarget;
+	compositePipelineDesc.fragment = &compositeFragment;
+	m_compositePipeline = m_device.CreateRenderPipeline(&compositePipelineDesc);
+
 	m_textureBindGroups.clear();
+}
+
+void ax::Window::create_composite_bind_group()
+{
+	wgpu::BindGroupEntry entries[2]{};
+	entries[0].binding = 0;
+	entries[0].textureView = m_oitAccumulationView;
+	entries[1].binding = 1;
+	entries[1].textureView = m_oitRevealageView;
+	wgpu::BindGroupDescriptor bindGroupDesc{};
+	bindGroupDesc.layout = m_compositeGroupLayout;
+	bindGroupDesc.entryCount = 2;
+	bindGroupDesc.entries = entries;
+	m_compositeBindGroup = m_device.CreateBindGroup(&bindGroupDesc);
 }
 
 ax::SpriteDefinition* ax::Window::allocate_sprite()
@@ -749,108 +872,166 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 	}
 
 	{
-		wgpu::RenderPassEncoder pass;
-		wgpu::CommandEncoder encoder;
+		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, surface_setup);
+		PROFILER_NEW_SUBSEGMENT(surface_setup, create_texture);
 
+		if (m_multisampleTexture.Get() == nullptr || m_multisampleTexture.GetWidth() != m_width || m_multisampleTexture.GetHeight() != m_height)
 		{
-			PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, surface_setup);
-			PROFILER_NEW_SUBSEGMENT(surface_setup, create_texture);
-
-			if (m_multisampleTexture.Get() == nullptr || m_multisampleTexture.GetWidth() != m_width || m_multisampleTexture.GetHeight() != m_height)
+			wgpu::TextureDescriptor msaaDesc
 			{
-				wgpu::TextureDescriptor msaaDesc
-				{
-					.usage = wgpu::TextureUsage::RenderAttachment,
-					.dimension = wgpu::TextureDimension::e2D,
-					.size = { m_width, m_height },
-					.format = m_surfaceFormat,
-					.mipLevelCount = 1,
-					.sampleCount = 4,
-					.viewFormatCount = 1,
-					.viewFormats = &m_surfaceFormat,
-				};
-				m_multisampleTexture = m_device.CreateTexture(&msaaDesc);
-			}
-
-			wgpu::TextureViewDescriptor view
-			{
-				.nextInChain = nullptr,
-				.label = "frame view",
-				.format = m_multisampleTexture.GetFormat(),
-				.dimension = wgpu::TextureViewDimension::e2D,
-				.baseMipLevel = 0,
+				.usage = wgpu::TextureUsage::RenderAttachment,
+				.dimension = wgpu::TextureDimension::e2D,
+				.size = { m_width, m_height },
+				.format = m_surfaceFormat,
 				.mipLevelCount = 1,
-				.baseArrayLayer = 0,
-				.arrayLayerCount = 1,
-				.aspect = wgpu::TextureAspect::All,
+				.sampleCount = 4,
+				.viewFormatCount = 1,
+				.viewFormats = &m_surfaceFormat,
 			};
-			wgpu::TextureView targetView{ m_multisampleTexture.CreateView(&view) };
-
-			wgpu::CommandEncoderDescriptor encoderDesc
-			{
-				.nextInChain = nullptr,
-				.label = "frame encoder",
-			};
-			encoder = m_device.CreateCommandEncoder(&encoderDesc);
-
-			// Update global viewport uniform (width,height,0,0)
-			{
-				float vp[4] = { static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f };
-				m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
-			}
-
-			// Setup Render pass
-			{
-				PROFILER_SUBSEGMENT_CHANGE_FROM_TO(surface_setup, create_texture, get_surface_texture);
-
-				const auto surfaceTexture = surfaceFuture.get();
-
-				PROFILER_SUBSEGMENT_CHANGE_FROM_TO(surface_setup, get_surface_texture, begin_pass);
-
-				// Clear frame
-				wgpu::RenderPassColorAttachment colorAttachment
-				{
-					.view = targetView,
-					.depthSlice = wgpu::kDepthSliceUndefined,
-					.resolveTarget = surfaceTexture.texture.CreateView(),
-					.loadOp = wgpu::LoadOp::Clear,
-					.storeOp = wgpu::StoreOp::Store,
-					.clearValue = m_clearColor,
-				};
-
-				// Clear depth
-				wgpu::RenderPassDepthStencilAttachment depthAttachment
-				{
-					.view = m_depthTextureView,
-					.depthLoadOp = wgpu::LoadOp::Clear,
-					.depthStoreOp = wgpu::StoreOp::Store,
-					.depthClearValue = 0.0f,
-					.depthReadOnly = false,
-					.stencilLoadOp = wgpu::LoadOp::Undefined,
-					.stencilStoreOp = wgpu::StoreOp::Undefined,
-					.stencilClearValue = 0,
-					.stencilReadOnly = true,
-				};
-
-				wgpu::RenderPassDescriptor passDesc
-				{
-					.nextInChain = nullptr,
-					.colorAttachmentCount = 1,
-					.colorAttachments = &colorAttachment,
-					.depthStencilAttachment = &depthAttachment,
-					.timestampWrites = nullptr,
-				};
-				pass = encoder.BeginRenderPass(&passDesc);
-
-				PROFILER_END_SUBSEGMENT(begin_pass);
-			}
+			m_multisampleTexture = m_device.CreateTexture(&msaaDesc);
 		}
 
-		// Build the actual render pass (lua, sprite batching, imgui, etc.)
+		wgpu::TextureViewDescriptor view
 		{
-			handle_render_pass(pass, delta);
-			pass.End();
+			.nextInChain = nullptr,
+			.label = "frame view",
+			.format = m_multisampleTexture.GetFormat(),
+			.dimension = wgpu::TextureViewDimension::e2D,
+			.baseMipLevel = 0,
+			.mipLevelCount = 1,
+			.baseArrayLayer = 0,
+			.arrayLayerCount = 1,
+			.aspect = wgpu::TextureAspect::All,
+		};
+		wgpu::TextureView targetView{ m_multisampleTexture.CreateView(&view) };
+		const auto surfaceTexture = surfaceFuture.get();
+		const auto surfaceView = surfaceTexture.texture.CreateView();
+
+		wgpu::CommandEncoderDescriptor encoderDesc
+		{
+			.nextInChain = nullptr,
+			.label = "frame encoder",
+		};
+		wgpu::CommandEncoder encoder = m_device.CreateCommandEncoder(&encoderDesc);
+
+		float vp[4] = { static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f };
+		m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
+
+		wgpu::RenderPassColorAttachment sceneColorAttachment
+		{
+			.view = targetView,
+			.depthSlice = wgpu::kDepthSliceUndefined,
+			.resolveTarget = nullptr,
+			.loadOp = wgpu::LoadOp::Clear,
+			.storeOp = wgpu::StoreOp::Store,
+			.clearValue = m_clearColor,
+		};
+		wgpu::RenderPassDepthStencilAttachment sceneDepthAttachment
+		{
+			.view = m_depthTextureView,
+			.depthLoadOp = wgpu::LoadOp::Clear,
+			.depthStoreOp = wgpu::StoreOp::Store,
+			.depthClearValue = 0.0f,
+			.depthReadOnly = false,
+			.stencilLoadOp = wgpu::LoadOp::Undefined,
+			.stencilStoreOp = wgpu::StoreOp::Undefined,
+			.stencilClearValue = 0,
+			.stencilReadOnly = true,
+		};
+		wgpu::RenderPassDescriptor scenePassDesc{};
+		scenePassDesc.colorAttachmentCount = 1;
+		scenePassDesc.colorAttachments = &sceneColorAttachment;
+		scenePassDesc.depthStencilAttachment = &sceneDepthAttachment;
+		auto scenePass = encoder.BeginRenderPass(&scenePassDesc);
+		handle_render_pass(scenePass, delta);
+		scenePass.End();
+
+		wgpu::RenderPassColorAttachment oitColorAttachments[2]
+		{
+			{
+				.view = m_oitAccumulationView,
+				.depthSlice = wgpu::kDepthSliceUndefined,
+				.resolveTarget = nullptr,
+				.loadOp = wgpu::LoadOp::Clear,
+				.storeOp = wgpu::StoreOp::Store,
+				.clearValue = { 0.0, 0.0, 0.0, 0.0 },
+			},
+			{
+				.view = m_oitRevealageView,
+				.depthSlice = wgpu::kDepthSliceUndefined,
+				.resolveTarget = nullptr,
+				.loadOp = wgpu::LoadOp::Clear,
+				.storeOp = wgpu::StoreOp::Store,
+				.clearValue = { 1.0, 1.0, 1.0, 1.0 },
+			},
+		};
+		wgpu::RenderPassDepthStencilAttachment oitDepthAttachment
+		{
+			.view = m_depthTextureView,
+			.depthLoadOp = wgpu::LoadOp::Undefined,
+			.depthStoreOp = wgpu::StoreOp::Undefined,
+			.depthClearValue = 0.0f,
+			.depthReadOnly = true,
+			.stencilLoadOp = wgpu::LoadOp::Undefined,
+			.stencilStoreOp = wgpu::StoreOp::Undefined,
+			.stencilClearValue = 0,
+			.stencilReadOnly = true,
+		};
+		wgpu::RenderPassDescriptor oitPassDesc{};
+		oitPassDesc.colorAttachmentCount = 2;
+		oitPassDesc.colorAttachments = oitColorAttachments;
+		oitPassDesc.depthStencilAttachment = &oitDepthAttachment;
+		auto oitPass = encoder.BeginRenderPass(&oitPassDesc);
+		draw_transparent_sprites(oitPass);
+		oitPass.End();
+
+		wgpu::RenderPassColorAttachment compositeColorAttachment
+		{
+			.view = targetView,
+			.depthSlice = wgpu::kDepthSliceUndefined,
+			.resolveTarget = nullptr,
+			.loadOp = wgpu::LoadOp::Load,
+			.storeOp = wgpu::StoreOp::Store,
+		};
+		wgpu::RenderPassDescriptor compositePassDesc{};
+		compositePassDesc.colorAttachmentCount = 1;
+		compositePassDesc.colorAttachments = &compositeColorAttachment;
+		auto compositePass = encoder.BeginRenderPass(&compositePassDesc);
+		compositePass.SetPipeline(m_compositePipeline);
+		compositePass.SetBindGroup(0, m_compositeBindGroup);
+		compositePass.Draw(3, 1, 0, 0);
+		compositePass.End();
+
+		wgpu::RenderPassColorAttachment uiColorAttachment
+		{
+			.view = targetView,
+			.depthSlice = wgpu::kDepthSliceUndefined,
+			.resolveTarget = surfaceView,
+			.loadOp = wgpu::LoadOp::Load,
+			.storeOp = wgpu::StoreOp::Store,
+		};
+		wgpu::RenderPassDepthStencilAttachment uiDepthAttachment
+		{
+			.view = m_depthTextureView,
+			.depthLoadOp = wgpu::LoadOp::Undefined,
+			.depthStoreOp = wgpu::StoreOp::Undefined,
+			.depthClearValue = 0.0f,
+			.depthReadOnly = true,
+			.stencilLoadOp = wgpu::LoadOp::Undefined,
+			.stencilStoreOp = wgpu::StoreOp::Undefined,
+			.stencilClearValue = 0,
+			.stencilReadOnly = true,
+		};
+		wgpu::RenderPassDescriptor uiPassDesc{};
+		uiPassDesc.colorAttachmentCount = 1;
+		uiPassDesc.colorAttachments = &uiColorAttachment;
+		uiPassDesc.depthStencilAttachment = &uiDepthAttachment;
+		auto uiPass = encoder.BeginRenderPass(&uiPassDesc);
+		{
+			PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, ui);
+			render_gui(uiPass, delta);
 		}
+		uiPass.End();
 
 		// Submit commands to GPU
 		{
@@ -961,27 +1142,29 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 				uploadGroup(group.first, emptyGroup, &group.second);
 		}
 
-		pass.SetPipeline(m_pipeline);
-		// Set the global viewport bind group (group 1)
-		pass.SetBindGroup(1, m_viewportBindGroup);
-
-		for (const auto& r : m_spriteGroupRanges)
-		{
-			auto it = m_textureBindGroups.find(r.tex);
-			if (it == m_textureBindGroups.end())
-				it = m_textureBindGroups.emplace(r.tex, setup_bind_groups(r.tex->view())).first;
-			pass.SetBindGroup(0, it->second);
-			pass.Draw(6, r.count, 0, r.start);
-		}
-
-		m_pendingTextures.clear();
+		draw_sprite_batches(pass, m_pipeline);
 	}
+}
 
+
+void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline)
+{
+	pass.SetPipeline(pipeline);
+	pass.SetBindGroup(1, m_viewportBindGroup);
+	for (const auto& range : m_spriteGroupRanges)
 	{
-		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, ui);
-
-		render_gui(pass, delta);
+		auto it = m_textureBindGroups.find(range.tex);
+		if (it == m_textureBindGroups.end())
+			it = m_textureBindGroups.emplace(range.tex, setup_bind_groups(range.tex->view())).first;
+		pass.SetBindGroup(0, it->second);
+		pass.Draw(6, range.count, 0, range.start);
 	}
+}
+
+void ax::Window::draw_transparent_sprites(wgpu::RenderPassEncoder& pass)
+{
+	draw_sprite_batches(pass, m_oitPipeline);
+	m_pendingTextures.clear();
 }
 
 void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)

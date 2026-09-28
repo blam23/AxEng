@@ -154,9 +154,12 @@ namespace ax
 	private:
 		// Rendering
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
+		void draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline);
+		void draw_transparent_sprites(wgpu::RenderPassEncoder& pass);
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
 		void run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture);
 		void ensure_uniform_capacity(uint32_t required);
+		void create_composite_bind_group();
 
 		// Logic
 		void handle_tick(double delta);
@@ -191,7 +194,16 @@ namespace ax
 		wgpu::TextureFormat m_depthTextureFormat{ wgpu::TextureFormat::Depth24Plus };
 		wgpu::Texture m_multisampleTexture;
 		wgpu::ShaderModule m_shader;
+		wgpu::ShaderModule m_compositeShader;
 		wgpu::RenderPipeline m_pipeline;
+		wgpu::RenderPipeline m_oitPipeline;
+		wgpu::RenderPipeline m_compositePipeline;
+		wgpu::Texture m_oitAccumulationTexture;
+		wgpu::TextureView m_oitAccumulationView;
+		wgpu::Texture m_oitRevealageTexture;
+		wgpu::TextureView m_oitRevealageView;
+		wgpu::BindGroupLayout m_compositeGroupLayout;
+		wgpu::BindGroup m_compositeBindGroup;
 		wgpu::Buffer m_uniforms;
 		wgpu::Sampler m_nearestSampler;
 		wgpu::Sampler m_linearSampler;
