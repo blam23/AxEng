@@ -60,7 +60,8 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	let ndcX = (worldPos.x / viewport.x) * 2.0 - 1.0;
 	let ndcY = 1.0 - (worldPos.y / viewport.y) * 2.0;
 
-	out.pos = vec4<f32>(ndcX, ndcY, u.z_idx, 1.0);
+	let depth = 0.5 + atan(u.z_idx) / 3.141592653589793;
+	out.pos = vec4<f32>(ndcX, ndcY, depth, 1.0);
 	out.uv = uv;
 	out.tint = u.tint;
 	return out;
@@ -76,5 +77,8 @@ fn fs_main(in_: VSOut) -> @location(0) vec4<f32> {
 	let uvFactor = clamp(uvPixel - edge + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
 	let uv = (mix(uvPixelSrc - vec2<f32>(1.0), uvPixelSrc, uvFactor) + vec2<f32>(0.5)) * texturePixelSize;
 	let col = textureSample(tex, samp, uv) * in_.tint;
+	if (col.a <= 0.0) {
+		discard;
+	}
 	return col;
 }

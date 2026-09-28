@@ -313,10 +313,9 @@ void ax::Window::reload_pipeline()
 	// Depth buffer
 	wgpu::DepthStencilState depthStencilState = {};
 	depthStencilState.format = m_depthTextureFormat;
-	// Enable depth writes and normal depth testing so z-index in instance data
-	// can determine ordering when batching across textures.
+	// Use reverse depth so higher z-index values are closer to the camera.
 	depthStencilState.depthWriteEnabled = wgpu::OptionalBool::True;
-	depthStencilState.depthCompare = wgpu::CompareFunction::LessEqual;
+	depthStencilState.depthCompare = wgpu::CompareFunction::GreaterEqual;
 	depthStencilState.stencilFront.compare = wgpu::CompareFunction::Always;
 	depthStencilState.stencilFront.failOp = wgpu::StencilOperation::Keep;
 	depthStencilState.stencilFront.depthFailOp = wgpu::StencilOperation::Keep;
@@ -816,7 +815,7 @@ void ax::Window::run_wgpu_render_pass(double delta)
 					.view = m_depthTextureView,
 					.depthLoadOp = wgpu::LoadOp::Clear,
 					.depthStoreOp = wgpu::StoreOp::Store,
-					.depthClearValue = 1.0f,
+					.depthClearValue = 0.0f,
 					.depthReadOnly = false,
 					.stencilLoadOp = wgpu::LoadOp::Undefined,
 					.stencilStoreOp = wgpu::StoreOp::Undefined,
