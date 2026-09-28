@@ -1,3 +1,5 @@
+-- -cxr --in "$(SolutionDir)tower_mancer" --out "E:\TowerMancer"
+
 local scene_manager = ax.import("scene_manager")
 
 scene_manager:init({
