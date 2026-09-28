@@ -1,12 +1,16 @@
 {
-    "name": "AxCompiler",
-    "headless": true,
-    "entry_point": "compiler",
-    "highlight": "#A256FF",
-    "scripts": {
-        "compiler": "scripts/compiler.lua"
-    },
     "custom_resources": [
         "templates/output_template.luat"
-    ]
+    ],
+    "entry_point": "compiler",
+    "headless": true,
+    "highlight": "#A256FF",
+    "name": "AxCompiler",
+    "required_permissions":[
+        "io",
+        "os"
+    ],
+    "scripts": {
+        "compiler": "scripts/compiler.lua"
+    }
 }

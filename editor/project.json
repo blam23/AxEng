@@ -3,6 +3,10 @@
    "highlight":"#A256FF",
    "icon":"icon",
    "name":"AxEdit",
+   "required_permissions":[
+      "io",
+      "os"
+   ],
    "scripts":{
       "asset_inspector":"scripts/asset_inspector.lua",
       "build_info":"scripts/build_info.lua",
@@ -17,6 +21,5 @@
       "icon":"assets/icon.png"
    },
    "types":[
-
    ]
 }

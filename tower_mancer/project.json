@@ -3,6 +3,8 @@
    "highlight":"#A256FF",
    "icon":"icon",
    "name":"Tower Mancer",
+   "required_permissions":[
+   ],
    "scripts":{
       "class":"scripts/class.lua",
       "draw_helpers":"scripts/draw_helpers.lua",

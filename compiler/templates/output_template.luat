@@ -26,3 +26,7 @@ app.textures = {
 app.custom_types = {
 %%TYPES%%
 }
+
+app.permissions = {
+%%PERMISSIONS%%
+}

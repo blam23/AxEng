@@ -62,6 +62,12 @@ int main(int argc, char* argv[])
 		.flag()
 		.help("Compiles to / loads from a ZIP file instead of directory");
 
+	bool recompileCompiler{ false };
+	program.add_argument("-q", "--recompile")
+		.store_into(recompileCompiler)
+		.flag()
+		.help("Recompiles the compiler before compiling the given application");
+
 	const std::vector<std::string> in_args{ argv, argv + argc };
 	std::vector<std::string> out_args{};
 
@@ -121,6 +127,14 @@ int main(int argc, char* argv[])
 	//
 
 	bool doneSomething{ false };
+
+	if (recompileCompiler)
+	{
+		doneSomething = true;
+		const auto err{ ax::comp::recompile_compiler() };
+		if (err != ax::Error::Success)
+			return RET(err);
+	}
 
 	if (clean)
 	{

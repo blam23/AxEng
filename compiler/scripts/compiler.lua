@@ -154,6 +154,17 @@ local function gen_types_text(project)
     return ax.rstrip(ret)
 end
 
+local function gen_permissions_text(project)
+    local ret = ""
+    if project.required_permissions == nil then
+        return ret
+    end
+    for i, perm in pairs(project.required_permissions) do
+        ret = ret .. "    \"" .. perm .. "\",\n"
+    end
+    return ax.rstrip(ret)
+end
+
 local function create_manifest(project, dir, strip_debug_output)
     local tfile = io.open("../compiler/templates/output_template.luat", "r")
     if tfile == nil then
@@ -174,6 +185,7 @@ local function create_manifest(project, dir, strip_debug_output)
         SCRIPTS = gen_script_text(),
         TEXTURES = gen_textures_text(project),
         TYPES = gen_types_text(project),
+        PERMISSIONS = gen_permissions_text(project),
     }
     local output = ax.template_replace(template, data)
 

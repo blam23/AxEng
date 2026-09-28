@@ -11,8 +11,19 @@ static ax::Error setup_directory(std::string_view inDir, std::string_view outDir
 {
 	ax::LogTimer tmr{ "setup output directory" };
 
-	std::filesystem::path in{ inDir };
-	std::filesystem::path out{ outDir };
+	std::filesystem::path in{ std::filesystem::canonical(inDir) };
+
+	std::error_code err;
+	if (!std::filesystem::create_directory(outDir, err))
+	{
+		if (err.value() > 0)
+		{
+			spdlog::error("Failed to create directory '{}': {}", outDir, err.message());
+			return ax::Error::IO;
+		}
+	}
+
+	std::filesystem::path out{ std::filesystem::canonical(outDir) };
 
 	for (const auto& dir : std::filesystem::recursive_directory_iterator(in))
 	{
@@ -21,7 +32,6 @@ static ax::Error setup_directory(std::string_view inDir, std::string_view outDir
 			const auto& substr{ dir.path().string().substr(in.string().length() + 1) };
 			const auto& newDir{ out / substr };
 
-			std::error_code err;
 			if (!std::filesystem::create_directory(newDir, err))
 			{
 				spdlog::error("Failed to create directory '{}': {}", newDir.string(), err.message());
@@ -53,14 +63,6 @@ ax::Error ax::comp::clean(std::string_view outDir)
 		}
 
 		spdlog::info("<Build> Cleaned old output directory.");
-	}
-
-	std::filesystem::create_directory(outDir, ioErr);
-	if (ioErr)
-	{
-		spdlog::error("Failed to create output directory: {}", ioErr.message());
-		ret = ax::Error::IO;
-		return ret;
 	}
 
 	spdlog::info("<Build> Created output directory.");
@@ -122,6 +124,50 @@ ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir, boo
 
 	if (zipItUp)
 		ret = zip(outDir);
+
+	return ret;
+}
+
+ax::Error ax::comp::recompile_compiler()
+{
+	LogTimer tmr{ "recompilation" };
+	ax::Error ret{ ax::Error::Success };
+
+	const std::filesystem::path inDir{ "../compiler" };
+	const std::filesystem::path outDir{ "../AxCompiler2" };
+	const std::filesystem::path finalDir{ "../AxCompiler" };
+	const std::filesystem::path oldDir{ "../AxCompiler_old" };
+
+	clean(oldDir.string());
+	clean(outDir.string());
+
+	spdlog::info("<Build> Building compiler from '{}' to '{}'.", inDir.string(), outDir.string());
+
+	AX_RETURN_ERROR_IF_FAIL(ret, compile(inDir.string(), outDir.string(), false));
+
+	if (ret == ax::Error::Success)
+	{
+		spdlog::info("<Build> Renaming old compiler to: '{}'", oldDir.string());
+		std::error_code ioErr;
+		
+		std::filesystem::rename(finalDir, oldDir, ioErr);
+		if (ioErr)
+		{
+			spdlog::error("Failed to rename old compiler directory: '{}'", ioErr.message());
+			ret = ax::Error::IO;
+			return ret;
+		}
+
+		spdlog::info("<Build> New compiler built successfully, renaming to: '{}'", finalDir.string());
+
+		std::filesystem::rename(outDir, finalDir, ioErr);
+		if (ioErr)
+		{
+			spdlog::error("Failed to rename new compiler directory: '{}'", ioErr.message());
+			ret = ax::Error::IO;
+			return ret;
+		}
+	}
 
 	return ret;
 }

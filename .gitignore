@@ -1,6 +1,7 @@
 # Custom Stuff
 *imgui.ini
 AxCompiler2*
+AxCompiler_Old*
 *.spv
 vcpkg_installed*
 
