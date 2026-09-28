@@ -1,4 +1,5 @@
 local math_helpers = ax.import("math_helpers")
+local scene = ax.import("scene")
 
 local game = scene:new(true)
 
@@ -61,12 +62,14 @@ function game:setup_player()
     player.shadow_sprite.tint.x = 0.0
     player.shadow_sprite.tint.y = 0.0
     player.shadow_sprite.tint.z = 0.0
-    player.shadow_sprite.tint.w = 0.7
+    player.shadow_sprite.tint.w = 0.4
+    player.shadow_sprite.z = 1
 
     player.sprite = app.sprites.allocate()
     app.sprites.setup(player.sprite, texture, player.x, player.y, player_sprite_area[1], player_sprite_area[2], player_sprite_area[3], player_sprite_area[4])
     player.sprite.scale.x = 5.0
     player.sprite.scale.y = 5.0
+    player.sprite.z = 2
 end
 
 function game:setup_enemies(count)

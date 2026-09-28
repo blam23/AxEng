@@ -1,20 +1,34 @@
 local draw_helpers = ax.import("draw_helpers")
+local scene_manager = ax.import("scene_manager")
+local scene = ax.import("scene")
 
-local paused = {}
+local paused = scene:new(false)
 paused.back_color = {r = 0.0, g = 0.8, b = 0.8, a = 1}
 
-function paused:stop()
-end
-
-function paused:start()
-end
-
 local pressed = false
+local pause_texture = app.res.get_texture("paused")
 
 function paused:tick(delta)
-end
+    self.back_color = {r = 0.0, g = 0.8, b = 0.8, a = 1}
 
-local pause_texture = app.res.get_texture("paused")
+    local mx, my = mouse.get_position()
+    
+    if mx > 140 and mx < 430 and my > 640 and my < 720 then
+        self.back_color = {r = 0.8, g = 0.0, b = 0.0, a = 1}
+        mouse.set_cursor(app.window.handle, mouse.cursors.pointing)
+
+        if not pressed and mouse.is_pressed(mouse.buttons.left) then
+            scene_manager:unpause()
+            pressed = true
+        end
+    else
+        mouse.set_cursor(app.window.handle, mouse.cursors.arrow)
+    end
+
+    if not mouse.is_pressed(mouse.buttons.left) then
+        pressed = false
+    end
+end
 
 function paused:render(delta, pass)
     local x = 0

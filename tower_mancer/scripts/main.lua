@@ -1,4 +1,3 @@
-local draw_helpers = ax.import("draw_helpers")
 local scene_manager = ax.import("scene_manager")
 
 scene_manager:init({

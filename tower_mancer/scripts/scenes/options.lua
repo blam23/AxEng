@@ -1,5 +1,6 @@
 local draw_helpers = ax.import("draw_helpers")
 local scene_manager = ax.import("scene_manager")
+local scene = ax.import("scene")
 
 local options = scene:new(false)
 options.back_color = {r = 0.0, g = 0.8, b = 0.8, a = 1}

@@ -8,14 +8,19 @@ function manager:new()
         current_scene = nil,
         scenes = {},
         paused = false,
+        pause_scene = nil
     }, manager_mt)
 end
 
-local pause_scene = ax.import("pause")
 local paused = false
 
 function manager:init(scenes)
+    self.pause_scene = ax.import("pause")
     self.scenes = scenes
+end
+
+function manager:unpause()
+    self.paused = false
 end
 
 function manager:toggle_pause()
@@ -26,7 +31,7 @@ end
 
 function manager:tick(delta)
     if self.paused then
-        pause_scene.tick(delta)
+        self.pause_scene:tick(delta)
     else
         if self.current_scene then
             self.current_scene:tick(delta)
@@ -36,7 +41,7 @@ end
 
 function manager:render(delta, pass)
     if self.paused then
-        pause_scene:render(delta, pass)
+        self.pause_scene:render(delta, pass)
     else
         if self.current_scene then
             self.current_scene:render(delta, pass)
