@@ -40,12 +40,10 @@ function manager:tick(delta)
 end
 
 function manager:render(delta, pass)
+    self.current_scene:render(delta, pass)
+
     if self.paused then
         self.pause_scene:render(delta, pass)
-    else
-        if self.current_scene then
-            self.current_scene:render(delta, pass)
-        end
     end
 end
 

@@ -53,7 +53,10 @@ function helpers.string(x, y, text, rotation, color, scale, bold, z_index)
 end
 
 function helpers.shadowed_string(x,y, text, color, scale, bold, z_index)
-    helpers.string(x + (scale.x), y + (scale.y), text, 0, {r = 0, g = 0, b = 0, a = 0.7}, scale, bold, z_index)
+    if z_index == nil then
+        z_index = 0
+    end
+    helpers.string(x + (scale.x), y + (scale.y), text, 0, {r = 0, g = 0, b = 0, a = 0.7}, scale, bold, z_index - 1)
     helpers.string(x, y, text, 0, color, scale, bold, z_index)
 end
 

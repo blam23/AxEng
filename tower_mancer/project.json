@@ -19,6 +19,7 @@
    },
    "textures":{
       "font":"assets/pixel-font.png",
+      "grass":"assets/grass.png",
       "icon":"assets/icon.png",
       "paused":"assets/paused.png",
       "tower":"assets/tower-sheet.png"
