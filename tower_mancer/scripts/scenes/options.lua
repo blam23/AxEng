@@ -1,27 +1,28 @@
 local draw_helpers = ax.import("draw_helpers")
+local scene_manager = ax.import("scene_manager")
 
-local options = {}
+local options = scene:new(false)
 options.back_color = {r = 0.0, g = 0.8, b = 0.8, a = 1}
 
-options.stop = function()
+function options:stop()
 end
 
-options.start = function()
+function options:start()
 end
 
 local pressed = false
 
-options.tick = function(delta)
-    options.back_color = {r = 0.0, g = 0.8, b = 0.8, a = 1}
+function options:tick(delta)
+    self.back_color = {r = 0.0, g = 0.8, b = 0.8, a = 1}
 
     local mx, my = mouse.get_position()
     
     if mx > 140 and mx < 430 and my > 640 and my < 720 then
-        options.back_color = {r = 0.8, g = 0.0, b = 0.0, a = 1}
+        self.back_color = {r = 0.8, g = 0.0, b = 0.0, a = 1}
         mouse.set_cursor(app.window.handle, mouse.cursors.pointing)
 
         if not pressed and mouse.is_pressed(mouse.buttons.left) then
-            change_scene("menu")
+            scene_manager:change_scene("menu")
             pressed = true
         end
     else
@@ -33,9 +34,9 @@ options.tick = function(delta)
     end
 end
 
-options.render = function(delta, pass)
+function options:render(delta, pass)
     draw_helpers.shadowed_string(50, 50, "Options", {r = 0.5, g = 0.0, b = 0.7, a = 1}, {x = 5, y = 5}, true)
-    draw_helpers.shadowed_string(150, 650, "Back", options.back_color, {x = 3, y = 3}, true)
+    draw_helpers.shadowed_string(150, 650, "Back", self.back_color, {x = 3, y = 3}, true)
 end
 
 return options

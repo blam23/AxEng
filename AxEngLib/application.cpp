@@ -232,12 +232,31 @@ void ax::Application::add_application_bindings(sol::state& state)
 					else
 						spdlog::error("Invalid texture, cannot render");
 				},
+				[this](const sol::table& texture, float x, float y, float z)
+				{
+					if (texture["valid"])
+						m_window->render_texture(texture["ptr"].get<Texture*>(), { x, y }, z);
+					else
+						spdlog::error("Invalid texture, cannot render");
+				},
 				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah)
 				{
 					if (texture["valid"])
 					{
 						const auto t{ texture["ptr"].get<ax::Texture*>() };
 						m_window->render_texture(t, { x, y }, { ax, ay, aw, ah });
+					}
+					else
+					{
+						spdlog::error("Invalid texture, cannot render");
+					}
+				},
+				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah, float z)
+				{
+					if (texture["valid"])
+					{
+						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						m_window->render_texture(t, { x, y }, { ax, ay, aw, ah }, z);
 					}
 					else
 					{

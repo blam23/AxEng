@@ -1,0 +1,58 @@
+local class = ax.import("class")
+
+local manager = {}
+local manager_mt = class(manager)
+
+function manager:new()
+    return setmetatable({
+        current_scene = nil,
+        scenes = {},
+        paused = false,
+    }, manager_mt)
+end
+
+local pause_scene = ax.import("pause")
+local paused = false
+
+function manager:init(scenes)
+    self.scenes = scenes
+end
+
+function manager:toggle_pause()
+    if self.current_scene.pausable then
+        self.paused = not self.paused
+    end
+end
+
+function manager:tick(delta)
+    if self.paused then
+        pause_scene.tick(delta)
+    else
+        if self.current_scene then
+            self.current_scene:tick(delta)
+        end
+    end
+end
+
+function manager:render(delta, pass)
+    if self.paused then
+        pause_scene:render(delta, pass)
+    else
+        if self.current_scene then
+            self.current_scene:render(delta, pass)
+        end
+    end
+end
+
+function manager:change_scene(scene_name)
+    if self.scenes[scene_name] then
+        if self.current_scene then
+            self.current_scene:stop()
+        end
+        self.current_scene = self.scenes[scene_name]
+        self.current_scene:start()
+    end
+end
+
+
+return manager

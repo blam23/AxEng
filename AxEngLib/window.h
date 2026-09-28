@@ -4,8 +4,9 @@
 #include <windows.h>
 
 // STD
-#include <string_view>
 #include <deque>
+#include <future>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -154,7 +155,7 @@ namespace ax
 		// Rendering
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
-		void run_wgpu_render_pass(double delta);
+		void run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture);
 		void ensure_uniform_capacity(uint32_t required);
 
 		// Logic

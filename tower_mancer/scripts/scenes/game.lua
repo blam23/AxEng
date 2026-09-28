@@ -1,6 +1,6 @@
 local math_helpers = ax.import("math_helpers")
 
-local game = {}
+local game = scene:new(true)
 
 local player = {
     x = 10,
@@ -16,16 +16,16 @@ local texture = app.res.get_texture("tower")
 local player_sprite_area = { 49, 32, 13, 15 }
 local enemy_sprite_area = { 68, 33, 8, 15 }
 
-game.stop = function()
+function game:stop()
 end
 
-game.start = function()
-    game.setup_player()
-    game.setup_enemies(200)
+function game:start()
+    game:setup_player()
+    game:setup_enemies(200)
 end
 
-game.tick = function(delta)
-    game.tick_enemies(delta)
+function game:tick(delta)
+    game:tick_enemies(delta)
 
     player.vx = 0
     player.vy = 0
@@ -48,12 +48,12 @@ game.tick = function(delta)
     player.y = player.y + player.vy * delta * player.speed
 end
 
-game.render = function(delta, pass)
+function game:render(delta, pass)
     app.sprites.update_position(player.sprite, player.x, player.y, player.r)
     app.sprites.update_position(player.shadow_sprite, player.x + 5, player.y + 5, player.r)
 end
 
-game.setup_player = function()
+function game:setup_player()
     player.shadow_sprite = app.sprites.allocate()
     app.sprites.setup(player.shadow_sprite, texture, player.x + 5, player.y + 5, player_sprite_area[1], player_sprite_area[2], player_sprite_area[3], player_sprite_area[4])
     player.shadow_sprite.scale.x = 5.0
@@ -69,7 +69,7 @@ game.setup_player = function()
     player.sprite.scale.y = 5.0
 end
 
-game.setup_enemies = function(count)
+function game:setup_enemies(count)
     for i = 1, count do
         local enemy = {}
         enemy.x = math.random(-400, 1920 + 100)
@@ -92,7 +92,7 @@ game.setup_enemies = function(count)
     end
 end
 
-game.tick_enemies = function(delta)
+function game:tick_enemies(delta)
     for i = 1, #enemies do
         local enemy = enemies[i]
         local ex = enemy.x

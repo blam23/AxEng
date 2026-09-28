@@ -6,7 +6,10 @@
       "game":"scripts/scenes/game.lua",
       "menu":"scripts/scenes/menu.lua",
       "options":"scripts/scenes/options.lua",
-      "pause":"scripts/scenes/pause.lua"
+      "pause":"scripts/scenes/pause.lua",
+      "class":"scripts/class.lua",
+      "scene":"scripts/scene.lua",
+      "scene_manager":"scripts/scene_manager.lua"
    },
    "entry_point":"main",
    "highlight":"#A256FF",

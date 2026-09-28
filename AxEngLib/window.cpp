@@ -704,6 +704,22 @@ void ax::Window::run_loop()
 		updateDelta = glfwGetTime() - updatePrev;
 		updatePrev = glfwGetTime();
 
+		auto surfaceFuture = 
+			std::async(std::launch::async, 
+				[this]()
+				{
+					// Get current render surface
+					wgpu::SurfaceTexture surfaceTexture;
+					m_surface.GetCurrentTexture(&surfaceTexture);
+					if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal)
+					{
+						spdlog::error("Failed to get new frame surface");
+						return wgpu::SurfaceTexture{};
+					}
+					return surfaceTexture;
+				}
+			);
+
 		PROFILER_TOP_LEVEL(frame);
 		PROFILER_TOP_LEVEL_SEGMENT_SCOPED(frame);
 		{
@@ -713,7 +729,7 @@ void ax::Window::run_loop()
 
 		{
 			PROFILER_SEGMENT_SCOPED(frame, render);
-			run_wgpu_render_pass(updateDelta);
+			run_wgpu_render_pass(updateDelta, std::move(surfaceFuture));
 		}
 
 		for (auto& func : m_deferred)
@@ -724,7 +740,7 @@ void ax::Window::run_loop()
 	ax::input::KeyEventHandler::cleanup_events(m_window);
 }
 
-void ax::Window::run_wgpu_render_pass(double delta)
+void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture)
 {
 	{
 		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, pre_render);
@@ -787,14 +803,7 @@ void ax::Window::run_wgpu_render_pass(double delta)
 			{
 				PROFILER_SUBSEGMENT_CHANGE_FROM_TO(surface_setup, create_texture, get_surface_texture);
 
-				// Get current render surface
-				wgpu::SurfaceTexture surfaceTexture;
-				m_surface.GetCurrentTexture(&surfaceTexture);
-				if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal)
-				{
-					spdlog::error("Failed to get new frame surface");
-					return;
-				}
+				const auto surfaceTexture = surfaceFuture.get();
 
 				PROFILER_SUBSEGMENT_CHANGE_FROM_TO(surface_setup, get_surface_texture, begin_pass);
 

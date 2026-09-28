@@ -3,7 +3,10 @@ local font_texture = app.res.get_texture("font")
 local helpers = {}
 
 
-function helpers.string(x, y, text, rotation, color, scale, bold)
+function helpers.string(x, y, text, rotation, color, scale, bold, z_index)
+    if z_index == nil then
+        z_index = 0
+    end
     local y_offset = 0
     local x_offset = 0
     for i = 1, #text do
@@ -40,7 +43,7 @@ function helpers.string(x, y, text, rotation, color, scale, bold)
             app.window.render(
                 font_texture, x + x_offset, y + (18 * y_offset * scale.y),
                 stride * col + 1, 16 * row + 1, stride - 1, height - 1,
-                math.sin(time * 3.0 + i) * 0.1, 0,
+                math.sin(time * 3.0 + i) * 0.1, z_index,
                 color.r, color.g, color.b, color.a,
                 scale.x, scale.y
             )
@@ -49,9 +52,9 @@ function helpers.string(x, y, text, rotation, color, scale, bold)
     end
 end
 
-function helpers.shadowed_string(x,y, text, color, scale, bold)
-    helpers.string(x + (scale.x), y + (scale.y), text, 0, {r = 0, g = 0, b = 0, a = 0.7}, scale, bold)
-    helpers.string(x, y, text, 0, color, scale, bold)
+function helpers.shadowed_string(x,y, text, color, scale, bold, z_index)
+    helpers.string(x + (scale.x), y + (scale.y), text, 0, {r = 0, g = 0, b = 0, a = 0.7}, scale, bold, z_index)
+    helpers.string(x, y, text, 0, color, scale, bold, z_index)
 end
 
 return helpers
