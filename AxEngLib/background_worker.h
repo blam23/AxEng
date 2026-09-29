@@ -51,7 +51,7 @@ namespace ax
 	public:
 		DISABLE_COPY_AND_MOVE(BackgroundWorker);
 		
-		BackgroundWorker(flag_set<lua::Permission> permissions);
+		BackgroundWorker(bool useLua, flag_set<lua::Permission> permissions);
 		~BackgroundWorker();
 
 		void start(const std::vector<std::string>& args);
@@ -73,6 +73,7 @@ namespace ax
 
 		// Only to be used on the background thread
 		lua::Manager m_lua;
+		bool m_useLua{ false };
 
 		friend struct BackgroundTaskResult;
 	};

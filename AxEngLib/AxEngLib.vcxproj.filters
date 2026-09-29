@@ -159,6 +159,9 @@
     <ClCompile Include="background_worker.cpp">
       <Filter>core</Filter>
     </ClCompile>
+    <ClCompile Include="shared.cpp">
+      <Filter>core\lua</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -298,6 +301,9 @@
     </ClInclude>
     <ClInclude Include="background_worker.h">
       <Filter>core\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="shared.h">
+      <Filter>core\lua\headers</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

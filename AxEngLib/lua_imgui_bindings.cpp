@@ -293,6 +293,30 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 			);
 		};
 
+	ui_table["add_editor_marker"] =
+		[](std::size_t id, std::size_t line, std::string_view err_msg)
+		{
+			s_textEditors[id].AddMarker(line, ImU32(0x00000000), ImU32(0x220000FF), err_msg, err_msg);
+		};
+
+	ui_table["clear_editor_markers"] =
+		[](std::size_t id)
+		{
+			s_textEditors[id].ClearMarkers();
+		};
+
+	ui_table["add_editor_squiggle"] =
+		[](std::size_t id, std::size_t line, std::size_t index, std::size_t length, std::string_view err_msg)
+		{
+			s_textEditors[id].AddSquiggle({line, index}, { line, index + length }, 0, ImU32(0xFF0000FF), err_msg);
+		};
+
+	ui_table["clear_editor_squiggles"] =
+		[](std::size_t id)
+		{
+			s_textEditors[id].ClearSquiggles();
+		};
+
 	ui_table["delete_editor"] =
 		[](std::size_t id)
 		{

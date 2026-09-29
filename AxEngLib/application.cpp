@@ -49,13 +49,36 @@ void ax::Application::add_application_bindings(sol::state& state)
 {
 	auto app{ state.create_table() };
 
-	app["set_main_thread"] =
-		[this](const std::string& key, sol::object object)
+	app["get_or_create_shared"] =
+		[this](const std::string& name) -> ax::lua::SharedObject*
 		{
-			call_deferred([this, key, object]()
+			std::lock_guard lock{ m_shared_mutex };
+			if (auto it = m_shared.find(name); it != m_shared.end())
 			{
-				m_scripts.state({})[key] = object;
-			});
+				it->second.increment_ref_count();
+				return &it->second;
+			}
+			auto it{ m_shared.try_emplace(name).first };
+			it->second.increment_ref_count();
+			return &it->second;
+		};
+
+	app["release_shared"] =
+		[this](ax::lua::SharedObject* so)
+		{
+			std::lock_guard lock{ m_shared_mutex };
+			const auto count{ so->decrement_ref_count() };
+			if (count == 0)
+			{
+				for (auto it{ m_shared.begin() }; it != m_shared.end(); ++it)
+				{
+					if (&it->second == so)
+					{
+						m_shared.erase(it);
+						break;
+					}
+				}
+			}
 		};
 
 	{
@@ -605,6 +628,13 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 			}
 		};
 
+	m_scripts.state({}).new_usertype<lua::SharedObject>
+		(
+			"shared",
+			"set", &lua::SharedObject::set,
+			"get", [this](lua::SharedObject& ref, const std::string& key) { return ref.get(m_scripts.state({}), key); }
+		);
+
 	if (m_allowedPermissions[ax::lua::Permission::Threads])
 		add_thread_bindings(m_scripts.state({}), args);
 
@@ -628,6 +658,11 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 
 void ax::Application::cleanup()
 {
+	{
+		std::lock_guard lock{ m_shared_mutex };
+		m_shared.clear();
+	}
+
 	m_scripts.cleanup({});
 
 	if (m_window)
@@ -656,6 +691,6 @@ ax::Application::Application(flag_set<lua::Permission> permissions, ResourceLoad
 	, m_scripts{ Badge<Application>{}, permissions, m_loader }
 	, m_textures{ Badge<Application>{}, m_loader }
 	, m_allowedPermissions{ permissions }
-	, m_backgroundWorker{ permissions }
+	, m_backgroundWorker{ true, permissions }
 {
 }

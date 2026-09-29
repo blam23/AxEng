@@ -3,6 +3,8 @@
 // stdlib
 #include <memory>
 #include <queue>
+#include <map>
+#include <mutex>
 
 // AxEng
 #include "background_worker.h"
@@ -12,6 +14,7 @@
 #include "lua_engine.h"
 #include "resource_loader.h"
 #include "script.h"
+#include "shared.h"
 #include "texture.h"
 #include "window.h"
 
@@ -81,5 +84,7 @@ namespace ax
 
 		void initialise_background_worker(const std::vector<std::string>& args);
 		BackgroundWorker m_backgroundWorker;
+		std::mutex m_shared_mutex{};
+		std::map<std::string, ax::lua::SharedObject> m_shared{};
 	};
 }

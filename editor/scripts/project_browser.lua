@@ -38,6 +38,8 @@ local function get_color(name)
     return color
 end
 
+local shared_check_all_scripts = app.get_or_create_shared("check_all_scripts")
+
 local function list_box(name, tbl, selected, icon)
     local cr, cg, cb, ca = table.unpack(get_color(name))
     ui.set_next_item_width(-1)
@@ -50,7 +52,7 @@ local function list_box(name, tbl, selected, icon)
         i = i + 1
 
         if name == "scripts" then
-            local res = _G["check_all_scripts_result__" .. k]
+            local res = shared_check_all_scripts:get(k)
             if res == true then
                 success = true
             elseif res == false then
@@ -106,6 +108,5 @@ browser.init = function(project)
 
     bg.run_script("check_all_scripts")
 end
-
 
 return browser

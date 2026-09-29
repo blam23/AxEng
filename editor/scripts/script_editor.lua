@@ -7,6 +7,8 @@ local editor = {
     is_active = false
 }
 
+local shared_check_all_scripts = app.get_or_create_shared("check_all_scripts")
+
 local old_active = false
 editor.display = function()
     ui.begin_window("\xef\x8c\x83  Lua Editor") -- Pencil Icon
@@ -22,6 +24,13 @@ editor.display = function()
                 end
                 if ui.begin_tab_item(script_name, flags) then
                     editor.current_editor = i
+                    ui.clear_editor_markers(editor.editors[i].handle)
+                    if shared_check_all_scripts:get(script_name) == false then
+                        local err = shared_check_all_scripts:get(script_name .. "_err")
+                        local start_idx, end_idx = string.find(err, ":(%d+):")
+                        local line = tonumber(err:sub(start_idx+1, end_idx-1)) or 1
+                        ui.add_editor_marker(editor.editors[i].handle, line-1, err)
+                    end
                     ui.push_font("mono", 24.0)
                     ui.render_editor(editor.editors[i].handle, 35)
                     ui.pop_font()

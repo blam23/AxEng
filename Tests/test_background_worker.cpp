@@ -15,7 +15,7 @@ namespace
 
 TEST(BackgroundWorkerTests, ExecutesTaskAndCallsSuccessCallback)
 {
-	BackgroundWorker worker{ {} };
+	BackgroundWorker worker{ false, {} };
 	std::promise<ResultPtr> callbackPromise;
 	auto callbackFuture = callbackPromise.get_future();
 	std::atomic<int> taskRuns{ 0 };
@@ -42,7 +42,7 @@ TEST(BackgroundWorkerTests, ExecutesTaskAndCallsSuccessCallback)
 
 TEST(BackgroundWorkerTests, CallsFailureCallbackWithTaskError)
 {
-	BackgroundWorker worker{ {} };
+	BackgroundWorker worker{ false, {} };
 	std::promise<ResultPtr> callbackPromise;
 	auto callbackFuture = callbackPromise.get_future();
 
@@ -63,7 +63,7 @@ TEST(BackgroundWorkerTests, CallsFailureCallbackWithTaskError)
 
 TEST(BackgroundWorkerTests, ProcessesMultipleQueuedTasks)
 {
-	BackgroundWorker worker{ {} };
+	BackgroundWorker worker{ false, {} };
 	std::promise<ResultPtr> firstCallbackPromise;
 	std::promise<ResultPtr> secondCallbackPromise;
 	auto firstCallbackFuture = firstCallbackPromise.get_future();
