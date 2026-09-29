@@ -231,6 +231,7 @@ namespace ax
 		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };
 		uint32_t m_uniformsCapacity{ 1024 };
 
+		std::mutex m_deferredMutex{};
 		std::vector<std::function<void()>> m_deferred{};
 	};
 }

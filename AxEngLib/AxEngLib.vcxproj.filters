@@ -156,6 +156,9 @@
     <ClCompile Include="lua_mouse_bindings.cpp">
       <Filter>core\lua\bindings</Filter>
     </ClCompile>
+    <ClCompile Include="background_worker.cpp">
+      <Filter>core</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="event.h">
@@ -292,6 +295,9 @@
     </ClInclude>
     <ClInclude Include="lua_mouse_bindings.h">
       <Filter>core\lua\bindings\headers</Filter>
+    </ClInclude>
+    <ClInclude Include="background_worker.h">
+      <Filter>core\headers</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

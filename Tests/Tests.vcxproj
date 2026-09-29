@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -148,6 +148,7 @@
     <ClCompile Include="log_capture.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="test_custom_type.cpp" />
+    <ClCompile Include="test_background_worker.cpp" />
     <ClCompile Include="test_event.cpp" />
     <ClCompile Include="test_lua_manager.cpp" />
     <ClCompile Include="test_resource_loader.cpp" />

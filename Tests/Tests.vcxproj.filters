@@ -27,6 +27,9 @@
     <ClCompile Include="test_custom_type.cpp">
       <Filter>Source Files\core</Filter>
     </ClCompile>
+    <ClCompile Include="test_background_worker.cpp">
+      <Filter>Source Files\core</Filter>
+    </ClCompile>
     <ClCompile Include="test_resource_loader.cpp">
       <Filter>Source Files\core</Filter>
     </ClCompile>

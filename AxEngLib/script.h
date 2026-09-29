@@ -20,6 +20,7 @@ namespace ax::lua
 
 		sol::function_result run(sol::environment& env);
 		sol::function_result run_no_cache(sol::environment& env);
+		sol::function_result run_different_state(sol::state& state, sol::environment& env);
 		auto& code() const { return m_strCode; };
 
 	private:

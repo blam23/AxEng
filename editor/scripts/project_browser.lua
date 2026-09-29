@@ -45,10 +45,32 @@ local function list_box(name, tbl, selected, icon)
     ui.text_color(cr, cg, cb, ca, name:sub(1,1):upper() .. name:sub(2))
     local i = 0
     for k,v in pairs(browser.project[name]) do
+        local fail = false
+        local success = false
         i = i + 1
+
+        if name == "scripts" then
+            local res = _G["check_all_scripts_result__" .. k]
+            if res == true then
+                success = true
+            elseif res == false then
+                fail = true
+            end
+        end
+
         ui.text_color(cr, cg, cb, ca, icon)
         ui.same_line()
+
         local highlighted, changed = ui.selectable(k .. " (" .. v.. ")", selected == i)
+
+        if fail then
+            ui.same_line()
+            ui.text_color(0.8, 0, 0, 1.0, "\xef\x81\xaa") -- circle exclaim
+        elseif success then
+            ui.same_line()
+            ui.text_color(0, 0.8, 0, 1.0, "\xef\x81\x98") -- circle check
+        end
+
         if changed and highlighted then
             browser.selected_script = 0
             browser.selected_texture = 0
@@ -66,6 +88,13 @@ end
 
 browser.display = function()
     ui.begin_window("\xef\xa0\x82 Asset Browser") -- Folder Tree Icon
+        if (ui.button("Add Script  \xef\x84\xa1")) then
+            print("New Asset Request!")
+        end
+        ui.same_line()
+        if (ui.button("Add Texture  \xef\x80\xbe")) then
+            print("New Asset Request!")
+        end
         browser.selected_script, browser.script_active = list_box("scripts", scripts, browser.selected_script, "\xef\x84\xa1")
         browser.selected_texture, browser.texture_active = list_box("textures", textures, browser.selected_texture, "\xef\x80\xbe")
     ui.end_window()
@@ -74,6 +103,8 @@ end
 browser.init = function(project)
     browser.project = project
     browser.reload()
+
+    bg.run_script("check_all_scripts")
 end
 
 

@@ -45,6 +45,11 @@ ax.import = function(script_name)
         return error_code.InvalidScript
     end
     
+    if app == nil then
+        log.error("App environment is not initialized.")
+        return error_code.InvalidScript
+    end
+
     if app.imported == nil then
         app.imported = {}
     end

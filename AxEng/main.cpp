@@ -80,6 +80,12 @@ int main(int argc, char* argv[])
 		.flag()
 		.help("Allows the application to perform OS operations");
 
+	bool allowThreads{ false };
+	program.add_argument("--allow-threads")
+		.store_into(allowThreads)
+		.flag()
+		.help("Allows the application to perform Threads operations");
+
 	const std::vector<std::string> in_args{ argv, argv + argc };
 	std::vector<std::string> out_args{};
 	flag_set<ax::lua::Permission> permissions{};
@@ -118,6 +124,9 @@ int main(int argc, char* argv[])
 
 	if (allowOS)
 		permissions |= ax::lua::Permission::OS;
+
+	if (allowThreads)
+		permissions |= ax::lua::Permission::Threads;
 
 	if (timers)
 		ax::enable_log_timers();

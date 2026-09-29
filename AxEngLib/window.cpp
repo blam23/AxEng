@@ -676,6 +676,7 @@ void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region, 
 
 void ax::Window::call_deferred(std::function<void()> func)
 {
+	std::lock_guard lock{ m_deferredMutex };
 	m_deferred.push_back(std::move(func));
 }
 
@@ -855,9 +856,13 @@ void ax::Window::run_loop()
 			run_wgpu_render_pass(updateDelta, std::move(surfaceFuture));
 		}
 
-		for (auto& func : m_deferred)
-			func();
-		m_deferred.clear();
+		{
+			PROFILER_SEGMENT_SCOPED(frame, deferred);
+			std::lock_guard lock{ m_deferredMutex };
+			for (auto& func : m_deferred)
+				func();
+			m_deferred.clear();
+		}
 	}
 
 	ax::input::KeyEventHandler::cleanup_events(m_window);

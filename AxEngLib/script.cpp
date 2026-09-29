@@ -42,6 +42,19 @@ sol::function_result ax::lua::Script::run_no_cache(sol::environment& env)
 	return {};
 }
 
+sol::function_result ax::lua::Script::run_different_state(sol::state& state, sol::environment& env)
+{
+	sol::function res{ state.load(m_strCode, m_name) };
+
+	if (res.valid())
+	{
+		sol::set_environment(env, res);
+		return res();
+	}
+
+	return {};
+}
+
 std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::load_impl(const std::string& name, const Script::Descriptor& description)
 {
 	auto res

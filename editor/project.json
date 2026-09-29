@@ -5,11 +5,13 @@
    "name":"AxEdit",
    "required_permissions":[
       "io",
-      "os"
+      "os",
+      "threads"
    ],
    "scripts":{
       "asset_inspector":"scripts/asset_inspector.lua",
       "build_info":"scripts/build_info.lua",
+      "check_all_scripts":"scripts/check_all_scripts.lua",
       "main":"scripts/main.lua",
       "project_browser":"scripts/project_browser.lua",
       "save_project":"scripts/save_project.lua",

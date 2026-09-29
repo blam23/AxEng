@@ -97,8 +97,10 @@ local function s_key_event(pressed, mods)
 
     if pressed and mods == keyboard.modifier.ctrl then
         try_save_current()
+        bg.run_script("check_all_scripts")
     elseif pressed and mods == keyboard.modifier.shift | keyboard.modifier.ctrl then
         try_save_all()
+        bg.run_script("check_all_scripts")
     end
 end
 

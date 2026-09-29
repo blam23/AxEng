@@ -58,6 +58,18 @@ comp.check_script = function(script_file)
     return true, chunk
 end
 
+comp.check_string = function(script_string)
+    local chunk, err_msg = load(script_string, "*")
+
+    -- make sure it loaded
+    if chunk == nil then
+        return false, err_msg
+    end
+
+    return true, chunk
+end
+
+
 comp.get_project_directory_from_args = function()
     local in_pair_state = false
     local ret = ""

@@ -24,8 +24,8 @@ bool ax::Application::init_window()
 {
 	LogTimer _timer{ "wgpu initial setup" };
 
-	const auto& app{ m_env["app"] };
-	const auto& window{ app["window"] };
+	const auto& manifest{ m_env["manifest"] };
+	const auto& window{ manifest["window"] };
 	m_window = std::make_unique<Window>(WindowDefinition
 	{
 		.width = window["width"],
@@ -47,7 +47,16 @@ bool ax::Application::init_window()
 
 void ax::Application::add_application_bindings(sol::state& state)
 {
-	const auto& app{ m_env["app"] };
+	auto app{ state.create_table() };
+
+	app["set_main_thread"] =
+		[this](const std::string& key, sol::object object)
+		{
+			call_deferred([this, key, object]()
+			{
+				m_scripts.state({})[key] = object;
+			});
+		};
 
 	{
 		auto on_update_table{ state.create_table() };
@@ -141,43 +150,18 @@ void ax::Application::add_application_bindings(sol::state& state)
 		app["res"] = resource_lookup_texture;
 	}
 
-	app["run_in_this_environment"] = 
-		[this](const sol::table& script) -> sol::object
-		{
-			if (script["valid"])
-			{
-				auto ptr{ script["ptr"].get<ax::lua::Script*>() };
-				if (ptr == nullptr)
-				{
-					spdlog::error("Invalid script object, cannot run");
-					return nullptr;
-				}
-				auto res{ ptr->run_no_cache(m_env) };
-				if (!res.valid())
-				{
-					const sol::error msg = res;
-					spdlog::error("Failed to run script: {}", msg.what());
-				}
-				return res;
-			}
-			else
-			{
-				spdlog::error("Invalid script, cannot run");
-				return nullptr;
-			}
-		};
-
 	if (m_create_window)
 	{
-		const auto& window{ app["window"] };
+		auto window_table{ state.create_table() };
+		window_table["handle"] = (void*)m_window->glfw_handle();
 
-		window["prevent_close"] =
+		window_table["prevent_close"] =
 			[this]()
 			{
 				m_window->prevent_close();
 			};
 
-		window["set_clear_color"] =
+		window_table["set_clear_color"] =
 			[this](float r, float g, float b, float a)
 			{
 				m_window->set_clear_color({ r, g, b, a });
@@ -194,7 +178,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 			{
 				m_window->get_ui_event_handler().unsubscribe(id);
 			};
-		window["on_ui"] = on_ui_table;
+		window_table["on_ui"] = on_ui_table;
 
 		auto on_render_table{ state.create_table() };
 		on_render_table["subscribe"] =
@@ -207,7 +191,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 			{
 				m_window->get_render_event_handler().unsubscribe(id);
 			};
-		window["on_render"] = on_render_table;
+		window_table["on_render"] = on_render_table;
 
 		auto on_close_table{ state.create_table() };
 		on_close_table["subscribe"] =
@@ -220,9 +204,9 @@ void ax::Application::add_application_bindings(sol::state& state)
 			{
 				m_window->get_ui_event_handler().unsubscribe(id);
 			};
-		window["on_close"] = on_close_table;
+		window_table["on_close"] = on_close_table;
 
-		window["render"] =
+		window_table["render"] =
 			sol::overload
 			(
 				[this](const sol::table& texture, float x, float y)
@@ -277,6 +261,8 @@ void ax::Application::add_application_bindings(sol::state& state)
 					}
 				}
 			);
+
+		app["window"] = window_table;
 
 		{
 			auto sprite_table{ state.create_table() };
@@ -462,6 +448,37 @@ void ax::Application::add_application_bindings(sol::state& state)
 				[](SpriteDefinition& sprite, const glm::vec4& tint) { sprite.gpuData.tint = tint; }
 			)
 		);
+
+	state["app"] = app;
+}
+
+void ax::Application::add_thread_bindings(sol::state& state, const std::vector<std::string>& args)
+{
+	initialise_background_worker(args);
+
+	auto background_table{ state.create_table() };
+
+	background_table["run_script"] =
+		[this](const std::string& script_name)
+		{
+			auto script{ m_scripts.get(script_name) };
+			if (script == nullptr)
+			{
+				spdlog::error("Script '{}' not found", script_name);
+				return;
+			}
+			auto task{ m_backgroundWorker.create_script_task(script) };
+			m_backgroundWorker.enqueue(task);
+		};
+
+	state["bg"] = background_table;
+}
+
+void ax::Application::initialise_background_worker(const std::vector<std::string>& args)
+{
+	m_backgroundWorker.lua().setup();
+	add_application_bindings(m_backgroundWorker.lua().state());
+	m_backgroundWorker.start(args);
 }
 
 void ax::Application::add_manifest_bindings(sol::state&)
@@ -476,20 +493,20 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 	ax::Resource::setup_loader(m_loader);
 	m_scripts.setup({});
 
-	ax::lua::Script* manifest{ m_scripts.load("!manifest", "manifest.luac") };
+	ax::lua::Script* manifest_script{ m_scripts.load("!manifest", "manifest.luac") };
 	m_env = m_scripts.create_env();
 
 	m_env["args"] = args;
 
 	add_manifest_bindings(m_scripts.state({}));
 
-	if (!manifest) 
+	if (!manifest_script)
 	{
 		spdlog::error("Failed to load manifest");
 		return false;
 	}
 
-	const auto& res{ manifest->run(m_env) };
+	const auto& res{ manifest_script->run(m_env) };
 
 	if (!res.valid())
 	{
@@ -507,10 +524,10 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 		return false;
 	}
 
-	const auto& app{ m_env["app"] };
-	m_name = app["name"];
+	auto manifest{ m_env["manifest"] };
+	m_name = manifest["name"];
 
-	const sol::table& permissions{ app["permissions"].get<sol::table>() };
+	const sol::table& permissions{ manifest["permissions"].get<sol::table>() };
 	for (const auto& entry : permissions)
 	{
 		const auto perm{ entry.second.as<std::string>() };
@@ -522,36 +539,35 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 		}
 	}
 	
-	const auto& headless_res{ app["headless"] };
+	const auto& headless_res{ manifest["headless"] };
 	if (headless_res.valid())
 		m_create_window = !headless_res.get<bool>();
 
-	const auto& window{ app["window"] };
+	const auto& window_manifest{ manifest["window"] };
 	if (m_create_window)
 	{
 		init_window();
-		window["handle"] = (void*)m_window->glfw_handle();
 
-		const sol::table& textures{ app["textures"].get<sol::table>() };
+		const sol::table& textures{ manifest["textures"].get<sol::table>() };
 		for (const auto& entry : textures)
 			m_textures.load(entry.first.as<std::string>(), entry.second.as<std::string>());
 	}
 
 	if (m_create_window)
 	{
-		const auto& icon{ m_textures.get(window["icon"])->create_glfw_image() };
+		const auto& icon{ m_textures.get(window_manifest["icon"])->create_glfw_image() };
 		glfwSetWindowIcon(m_window->glfw_handle(), 1, &icon);
 	}
 
-	const sol::table& scripts{ app["scripts"].get<sol::table>() };
+	const sol::table& scripts{ manifest["scripts"].get<sol::table>() };
 	for (const auto& entry : scripts)
 		m_scripts.load(entry.first.as<std::string>(), entry.second.as<std::string>());
 
-	//const sol::table& types{ app["types"].get<sol::table>() };
+	//const sol::table& types{ manifest["types"].get<sol::table>() };
 	//for (const auto& entry : types)
 	//	m_typeGen.register_type(entry.first.as<std::string>(), entry.second.as<ax::type::TypeDef>());
 
-	std::string entryPointScript = app["entry_point"];
+	std::string entryPointScript = manifest["entry_point"];
 	m_entryPoint = m_scripts.get(entryPointScript);
 
 	if (!m_entryPoint)
@@ -561,6 +577,36 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 	}
 
 	add_application_bindings(m_scripts.state({}));
+
+	sol::table app{ m_scripts.state({})["app"].get<sol::table>() };
+	app["run_in_this_environment"] =
+		[this](const sol::table& script) -> sol::object
+		{
+			if (script["valid"])
+			{
+				auto ptr{ script["ptr"].get<ax::lua::Script*>() };
+				if (ptr == nullptr)
+				{
+					spdlog::error("Invalid script object, cannot run");
+					return nullptr;
+				}
+				auto res{ ptr->run_no_cache(m_env) };
+				if (!res.valid())
+				{
+					const sol::error msg = res;
+					spdlog::error("Failed to run script: {}", msg.what());
+				}
+				return res;
+			}
+			else
+			{
+				spdlog::error("Invalid script, cannot run");
+				return nullptr;
+			}
+		};
+
+	if (m_allowedPermissions[ax::lua::Permission::Threads])
+		add_thread_bindings(m_scripts.state({}), args);
 
 	spdlog::info("<Lua> Running entry point script: '{}'", entryPointScript);
 	const auto ep_res = m_entryPoint->run(m_env);
@@ -592,6 +638,8 @@ void ax::Application::cleanup()
 
 ax::Application::~Application()
 {
+	m_backgroundWorker.stop();
+
 	if (m_loaded)
 		cleanup();
 
@@ -608,5 +656,6 @@ ax::Application::Application(flag_set<lua::Permission> permissions, ResourceLoad
 	, m_scripts{ Badge<Application>{}, permissions, m_loader }
 	, m_textures{ Badge<Application>{}, m_loader }
 	, m_allowedPermissions{ permissions }
+	, m_backgroundWorker{ permissions }
 {
 }

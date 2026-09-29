@@ -1,7 +1,7 @@
 -- Generated manifest
 -- template v0.1
 
-app = {
+manifest = {
     name = "%%NAME%%",
     entry_point = "%%ENTRY_POINT%%",
     headless = %%HEADLESS%%,
@@ -15,18 +15,18 @@ app = {
     %END%
 }
 
-app.scripts = {
+manifest.scripts = {
 %%SCRIPTS%%
 }
 
-app.textures = {
+manifest.textures = {
 %%TEXTURES%%
 }
 
-app.custom_types = {
+manifest.custom_types = {
 %%TYPES%%
 }
 
-app.permissions = {
+manifest.permissions = {
 %%PERMISSIONS%%
 }

@@ -5,14 +5,15 @@
 #include <queue>
 
 // AxEng
-#include "helpers.h"
-#include "texture.h"
-#include "lua_engine.h"
-#include "script.h"
-#include "window.h"
-#include "resource_loader.h"
-#include "log_timer.h"
+#include "background_worker.h"
 #include "custom_type.h"
+#include "helpers.h"
+#include "log_timer.h"
+#include "lua_engine.h"
+#include "resource_loader.h"
+#include "script.h"
+#include "texture.h"
+#include "window.h"
 
 // GFX
 #include <webgpu/webgpu_cpp.h>
@@ -62,6 +63,7 @@ namespace ax
 		bool init_window();
 		void add_manifest_bindings(sol::state&);
 		void add_application_bindings(sol::state&);
+		void add_thread_bindings(sol::state&, const std::vector<std::string>& args);
 		std::unique_ptr<Window> m_window;
 
 		ResourceLoader m_loader;
@@ -76,5 +78,8 @@ namespace ax
 
 		bool m_loaded{ false };
 		flag_set<lua::Permission> m_allowedPermissions;
+
+		void initialise_background_worker(const std::vector<std::string>& args);
+		BackgroundWorker m_backgroundWorker;
 	};
 }

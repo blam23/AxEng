@@ -42,7 +42,7 @@ local function preview_script(script_name)
                 script_cache = file:read("*all")
                 file:close()
 
-                local res, err = load(script_cache, "*")
+                local res, err = comp.check_string(script_cache)
                 if res then
                     script_valid = true
                     ui.set_editor_text(inspector.display_editor, script_cache)
@@ -63,10 +63,6 @@ local function preview_script(script_name)
             ui.text_color(0.7, 0, 0, 1.0, "\xef\x81\xaa")
             ui.text_color(0.8, 0.3, 0.2, 1.0, script_error_msg)
         end
-        ui.separator_text("Preview")
-        ui.push_font("mono", 20.0)
-        ui.render_editor(inspector.display_editor)
-        ui.pop_font()
     else
         ui.text_color(0.7, 0, 0, 1.0, "\xef\x81\xaa Invalid script!")
     end
@@ -141,7 +137,13 @@ inspector.init = function(project)
     inspector.project = project
     inspector.display_editor = ui.create_editor()
     ui.set_editor_read_only(inspector.display_editor, true)
+
 end
+
+-- local scripts_compiled = ax.import("check_all_scripts")
+-- if not scripts_compiled then
+--     log.error("Failed to compile all scripts.")
+-- end
 
 inspector.teardown = function()
     ui.delete_editor(inspector.display_editor)

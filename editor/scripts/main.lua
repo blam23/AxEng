@@ -1,5 +1,9 @@
 -- AxEditor
--- -cxrv --in "$(SolutionDir)editor" --out "E:\AxEdit" --project $(SolutionDir)demo" 
+
+--[[
+Example how to run:
+-cxrqv --in "$(SolutionDir)editor" --out "E:\AxEdit" --allow-threads --allow-io --allow-os --project $(SolutionDir)tower_mancer"
+]]
 
 local comp = ax.import("@compiler_core")
 local save = ax.import("save_project")
