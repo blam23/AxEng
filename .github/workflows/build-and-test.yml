@@ -30,51 +30,28 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
-      - name: Integrate vcpkg with MSBuild
+      # CMake picks the vcpkg toolchain file up automatically (see root
+      # CMakeLists.txt), and the "windows" preset uses the "Visual Studio 17
+      # 2022" generator, so CMake locates cl.exe/MSBuild itself - no manual
+      # PlatformToolset override or vcvarsall activation needed here, unlike
+      # the old hand-written .vcxproj files (which pinned an unavailable
+      # preview toolset).
+      - name: Configure (CMake + vcpkg manifest restore)
         shell: pwsh
-        run: |
-          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" integrate install
+        run: cmake --preset windows
 
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
-
-      - name: Build solution
+      - name: Build (Release)
         shell: pwsh
-        run: |
-          # The repository's project files target PlatformToolset v145 (a preview VS
-          # toolset not available on hosted runners), so override it on the command
-          # line to use the toolset that ships with the runner's Visual Studio install.
-          #
-          # The project files were never migrated to vcpkg manifest mode by Visual
-          # Studio, so `vcpkg integrate install` alone does not pick up vcpkg.json.
-          # VcpkgEnableManifest=true forces manifest restore for this build.
-          msbuild AxEng.slnx `
-            /p:Configuration=Release `
-            /p:Platform=x64 `
-            /p:PlatformToolset=v143 `
-            /p:VcpkgEnableManifest=true `
-            /m `
-            /nologo `
-            /verbosity:minimal
+        run: cmake --build --preset windows-release
 
-      - name: Run Google Tests
+      - name: Run Google Tests (ctest)
         shell: pwsh
-        run: |
-          $testExe = Get-ChildItem -Path . -Recurse -Filter "Tests.exe" | Select-Object -First 1
-          if (-not $testExe) {
-            throw "Could not find built Tests.exe"
-          }
-
-          Write-Host "Running tests from $($testExe.FullName)"
-          & $testExe.FullName --gtest_output=xml:test_results.xml
-          if ($LASTEXITCODE -ne 0) {
-            throw "Google Tests failed with exit code $LASTEXITCODE"
-          }
+        run: ctest --preset windows-release
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: test_results.xml
+          path: build/Testing/Temporary/LastTest.log
           if-no-files-found: ignore
