@@ -32,7 +32,7 @@ namespace ax::lua
 	class ScriptManager : public AssetManager<Script, ScriptManager>
 	{
 	public:
-		ScriptManager(Badge<Application>, ResourceLoader& loader);
+		ScriptManager(Badge<Application>, flag_set<Permission> permissions, ResourceLoader& loader);
 		sol::environment create_env();
 
 		ax::Error setup(Badge<Application>);

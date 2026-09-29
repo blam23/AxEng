@@ -120,7 +120,7 @@ ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir, boo
 	AX_RETURN_ERROR_IF_FAIL(ret, setup_directory(inDir, outDir));
 
 	const std::vector<std::string> args{ "--in", std::string(inDir), "--out", std::string(outDir) };
-	AX_RETURN_ERROR_IF_FAIL(ret, ax::run_from_directory(args, "../AxCompiler"));
+	AX_RETURN_ERROR_IF_FAIL(ret, ax::run_from_directory({ lua::Permission::IO | lua::Permission::OS }, args, "../AxCompiler"));
 
 	if (zipItUp)
 		ret = zip(outDir);

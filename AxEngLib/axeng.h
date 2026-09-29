@@ -17,6 +17,6 @@ namespace ax
 	void teardown();
 
 	ax::Error run(const std::vector<std::string>& args, Application&&);
-	ax::Error run_from_directory(const std::vector<std::string>& args, std::string_view rootDirectory);
-	ax::Error run_from_zip(const std::vector<std::string>& args, std::string_view zipFile);
+	ax::Error run_from_directory(flag_set<lua::Permission> permissions, const std::vector<std::string>& args, std::string_view rootDirectory);
+	ax::Error run_from_zip(flag_set<lua::Permission> permissions, const std::vector<std::string>& args, std::string_view zipFile);
 }

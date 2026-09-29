@@ -22,6 +22,8 @@ namespace ax::lua
 		_
 	};
 
+	Permission get_perm_from_string(const std::string& perm);
+
 	class Manager
 	{
 	public:

@@ -25,9 +25,9 @@ namespace ax
 	public:
 		DISABLE_COPY_AND_MOVE(Application);
 
-		static Application from_directory(std::string_view root);
-		static Application from_embedded(EmbeddedResourceLayout&& layout);
-		static Application from_zip(std::string_view zipFile);
+		static Application from_directory(flag_set<lua::Permission> permissions, std::string_view root);
+		static Application from_embedded(flag_set<lua::Permission> permissions, EmbeddedResourceLayout&& layout);
+		static Application from_zip(flag_set<lua::Permission> permissions, std::string_view zipFile);
 
 		~Application();
 
@@ -55,7 +55,7 @@ namespace ax
 		void call_deferred(std::function<void()>);
 
 	private:
-		Application(ResourceLoader&& loader);
+		Application(flag_set<lua::Permission> permissions, ResourceLoader&& loader);
 
 		const std::vector<std::string> m_args;
 
@@ -75,5 +75,6 @@ namespace ax
 		lua::Script* m_entryPoint{};
 
 		bool m_loaded{ false };
+		flag_set<lua::Permission> m_allowedPermissions;
 	};
 }

@@ -102,3 +102,18 @@ bool ax::lua::Manager::has_permission(ax::lua::Permission flag) const
 {
 	return m_permissionFlags[flag];
 }
+
+ax::lua::Permission ax::lua::get_perm_from_string(const std::string& perm)
+{
+	if (perm == "io")
+		return Permission::IO;
+	else if (perm == "os")
+		return Permission::OS;
+	else if (perm == "file_notify")
+		return Permission::FileNotify;
+	else if (perm == "threads")
+		return Permission::Threads;
+
+	spdlog::error("Unknown permission string: '{}'", perm);
+	return Permission::_;
+}

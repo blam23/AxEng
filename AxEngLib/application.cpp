@@ -5,19 +5,19 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include "glm/gtx/string_cast.hpp"
 
-ax::Application ax::Application::from_directory(std::string_view root)
+ax::Application ax::Application::from_directory(flag_set<lua::Permission> permissions, std::string_view root)
 {
-	return { DirectoryResourceLoader{ root } };
+	return { permissions, DirectoryResourceLoader{ root } };
 }
 
-ax::Application ax::Application::from_embedded(EmbeddedResourceLayout&& layout)
+ax::Application ax::Application::from_embedded(flag_set<lua::Permission> permissions, EmbeddedResourceLayout&& layout)
 {
-	return { std::move(layout) };
+	return { permissions, std::move(layout) };
 }
 
-ax::Application ax::Application::from_zip(std::string_view zipFile)
+ax::Application ax::Application::from_zip(flag_set<lua::Permission> permissions, std::string_view zipFile)
 {
-	return { ZipResourceLoader{ zipFile } };
+	return { permissions, ZipResourceLoader{ zipFile } };
 }
 
 bool ax::Application::init_window()
@@ -509,6 +509,18 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 
 	const auto& app{ m_env["app"] };
 	m_name = app["name"];
+
+	const sol::table& permissions{ app["permissions"].get<sol::table>() };
+	for (const auto& entry : permissions)
+	{
+		const auto perm{ entry.second.as<std::string>() };
+		const auto perm_enum{ ax::lua::get_perm_from_string(perm) };
+		if (!m_allowedPermissions[perm_enum])
+		{
+			spdlog::error("Manifest requests permission '{}' which is not allowed", perm);
+			return false;
+		}
+	}
 	
 	const auto& headless_res{ app["headless"] };
 	if (headless_res.valid())
@@ -591,9 +603,10 @@ void ax::Application::call_deferred(std::function<void()> func)
 	m_window->call_deferred(std::move(func));
 }
 
-ax::Application::Application(ResourceLoader&& loader)
+ax::Application::Application(flag_set<lua::Permission> permissions, ResourceLoader&& loader)
 	: m_loader{ std::move(loader) }
-	, m_scripts{ {}, m_loader }
+	, m_scripts{ Badge<Application>{}, permissions, m_loader }
 	, m_textures{ Badge<Application>{}, m_loader }
+	, m_allowedPermissions{ permissions }
 {
 }

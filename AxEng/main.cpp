@@ -68,8 +68,21 @@ int main(int argc, char* argv[])
 		.flag()
 		.help("Recompiles the compiler before compiling the given application");
 
+	bool allowIO{ false };
+	program.add_argument("--allow-io")
+		.store_into(allowIO)
+		.flag()
+		.help("Allows the application to perform IO operations");
+
+	bool allowOS{ false };
+	program.add_argument("--allow-os")
+		.store_into(allowOS)
+		.flag()
+		.help("Allows the application to perform OS operations");
+
 	const std::vector<std::string> in_args{ argv, argv + argc };
 	std::vector<std::string> out_args{};
+	flag_set<ax::lua::Permission> permissions{};
 
 	try
 	{
@@ -99,6 +112,12 @@ int main(int argc, char* argv[])
 	//
 	// Validate Args
 	//
+
+	if (allowIO)
+		permissions |= ax::lua::Permission::IO;
+
+	if (allowOS)
+		permissions |= ax::lua::Permission::OS;
 
 	if (timers)
 		ax::enable_log_timers();
@@ -130,6 +149,13 @@ int main(int argc, char* argv[])
 
 	if (recompileCompiler)
 	{
+		if (!allowIO || !allowOS)
+		{
+			spdlog::error("Compiling requires both IO and OS permissions.");
+			spdlog::error("{}", program.help().str());
+			return RET(ax::Error::InvalidConfiguration);
+		}
+
 		doneSomething = true;
 		const auto err{ ax::comp::recompile_compiler() };
 		if (err != ax::Error::Success)
@@ -138,6 +164,13 @@ int main(int argc, char* argv[])
 
 	if (clean)
 	{
+		if (!allowIO || !allowOS)
+		{
+			spdlog::error("Cleaning the output directory requires both IO and OS permissions.");
+			spdlog::error("{}", program.help().str());
+			return RET(ax::Error::InvalidConfiguration);
+		}
+
 		doneSomething = true;
 
 		const auto err{ ax::comp::clean(outDirectory) };
@@ -147,6 +180,13 @@ int main(int argc, char* argv[])
 
 	if (compile)
 	{
+		if (!allowIO || !allowOS)
+		{
+			spdlog::error("Compiling requires both IO and OS permissions.");
+			spdlog::error("{}", program.help().str());
+			return RET(ax::Error::InvalidConfiguration);
+		}
+
 		doneSomething = true;
 
 		const auto err{ ax::comp::compile(inDirectory, outDirectory, useZipFiles) };
@@ -160,13 +200,13 @@ int main(int argc, char* argv[])
 
 		if (useZipFiles)
 		{
-			const auto err{ ax::run_from_zip(out_args, compile ? outDirectory + ".zip" : inDirectory)};
+			const auto err{ ax::run_from_zip(permissions, out_args, compile ? outDirectory + ".zip" : inDirectory)};
 			if (err != ax::Error::Success)
 				return RET(err);
 		}
 		else
 		{
-			const auto err{ ax::run_from_directory(out_args, compile ? outDirectory : inDirectory) };
+			const auto err{ ax::run_from_directory(permissions, out_args, compile ? outDirectory : inDirectory) };
 			if (err != ax::Error::Success)
 				return RET(err);
 		}

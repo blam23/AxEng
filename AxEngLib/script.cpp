@@ -57,8 +57,8 @@ std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::load_impl(const std::st
 		return nullptr;
 }
 
-ax::lua::ScriptManager::ScriptManager(Badge<Application> badge, ResourceLoader& loader)
-	: m_lua{ Permission::IO | Permission::OS }
+ax::lua::ScriptManager::ScriptManager(Badge<Application> badge, flag_set<Permission> permissions, ResourceLoader& loader)
+	: m_lua{ permissions }
 	, ax::AssetManager<Script, ScriptManager>{ badge, loader }
 {
 }
