@@ -4,6 +4,8 @@
   "dependencies": [
     "gtest",
     "glfw3",
+    "glm",
+    "minizip-ng",
     "spdlog",
     "sol2",
     "lua",

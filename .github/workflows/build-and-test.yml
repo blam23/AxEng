@@ -44,10 +44,15 @@ jobs:
           # The repository's project files target PlatformToolset v145 (a preview VS
           # toolset not available on hosted runners), so override it on the command
           # line to use the toolset that ships with the runner's Visual Studio install.
+          #
+          # The project files were never migrated to vcpkg manifest mode by Visual
+          # Studio, so `vcpkg integrate install` alone does not pick up vcpkg.json.
+          # VcpkgEnableManifest=true forces manifest restore for this build.
           msbuild AxEng.slnx `
             /p:Configuration=Release `
             /p:Platform=x64 `
             /p:PlatformToolset=v143 `
+            /p:VcpkgEnableManifest=true `
             /m `
             /nologo `
             /verbosity:minimal
