@@ -1,0 +1,75 @@
+name: Build and Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    env:
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # vcpkg is pre-installed on GitHub-hosted Windows runners (VCPKG_INSTALLATION_ROOT).
+      # This exposes GitHub Actions cache credentials so vcpkg can cache built binaries
+      # (e.g. Dawn/WebGPU) across runs via the x-gha binary cache source above.
+      - name: Export GitHub Actions cache variables for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Integrate vcpkg with MSBuild
+        shell: pwsh
+        run: |
+          & "$env:VCPKG_INSTALLATION_ROOT\vcpkg.exe" integrate install
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build solution
+        shell: pwsh
+        run: |
+          # The repository's project files target PlatformToolset v145 (a preview VS
+          # toolset not available on hosted runners), so override it on the command
+          # line to use the toolset that ships with the runner's Visual Studio install.
+          msbuild AxEng.slnx `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:PlatformToolset=v143 `
+            /m `
+            /nologo `
+            /verbosity:minimal
+
+      - name: Run Google Tests
+        shell: pwsh
+        run: |
+          $testExe = Get-ChildItem -Path . -Recurse -Filter "Tests.exe" | Select-Object -First 1
+          if (-not $testExe) {
+            throw "Could not find built Tests.exe"
+          }
+
+          Write-Host "Running tests from $($testExe.FullName)"
+          & $testExe.FullName --gtest_output=xml:test_results.xml
+          if ($LASTEXITCODE -ne 0) {
+            throw "Google Tests failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test_results.xml
+          if-no-files-found: ignore
