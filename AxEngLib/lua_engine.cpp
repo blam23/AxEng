@@ -14,6 +14,24 @@ ax::lua::Manager::~Manager()
 		bindings::cleanup_state(m_state);
 }
 
+inline void lua_panic(sol::optional<std::string> maybe_msg)
+{
+	if (maybe_msg)
+		spdlog::error("Lua panic: {}", *maybe_msg);
+	else
+		spdlog::error("Lua panic: unknown error");
+}
+
+int lua_exception_handler(lua_State* L, sol::optional<const std::exception&> maybe_exception, sol::string_view description)
+{
+	if (maybe_exception)
+		spdlog::error("Lua exception: {} ({})", description, maybe_exception->what());
+	else
+		spdlog::error("Lua exception: {}", description);
+
+	return sol::stack::push(L, description);
+}
+
 
 ax::Error ax::lua::Manager::setup()
 {
@@ -30,6 +48,9 @@ ax::Error ax::lua::Manager::setup()
 		spdlog::error("Failed to load @init script: ResourceLoadError::{}", (int)initLoad.error());
 		return ax::Error::IO;
 	}
+
+	m_state.set_panic(sol::c_call<decltype(&lua_panic), &lua_panic>);
+	m_state.set_exception_handler(&lua_exception_handler);
 
 	// Always open these libraries - open the rest depending on permissions later.
 	m_state.open_libraries

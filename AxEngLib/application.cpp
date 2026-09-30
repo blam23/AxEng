@@ -84,9 +84,19 @@ void ax::Application::add_application_bindings(sol::state& state)
 	{
 		auto on_update_table{ state.create_table() };
 		on_update_table["subscribe"] =
-			[this](std::function<void(double delta)> f) -> size_t
+			[this](sol::protected_function f) -> size_t
 			{
-				return m_window->get_update_event_handler().subscribe([f](const ax::WindowUpdateEvent& e) { f(e.delta); });
+				return m_window->get_update_event_handler().subscribe
+				(
+					[f](const ax::WindowUpdateEvent& e)
+					{
+						const auto res{ f(e.delta) };
+						if (!res.valid())
+						{
+							const sol::error err = res;
+							spdlog::error("Failed to run on_update callback: {}", err.what());
+						}
+					});
 			};
 		on_update_table["unsubscribe"] =
 			[this](size_t id)
@@ -192,9 +202,17 @@ void ax::Application::add_application_bindings(sol::state& state)
 
 		auto on_ui_table{ state.create_table() };
 		on_ui_table["subscribe"] =
-			[this](std::function<void(double delta)> f) -> size_t
+			[this](sol::protected_function f) -> size_t
 			{
-				return m_window->get_ui_event_handler().subscribe([f](const ax::WindowUIEvent& e) { f(e.delta); });
+				return m_window->get_ui_event_handler().subscribe([f](const ax::WindowUIEvent& e)
+					{
+						const auto res{ f(e.delta) };
+						if (!res.valid())
+						{
+							const sol::error err = res;
+							spdlog::error("Failed to run on_ui callback: {}", err.what());
+						}
+					});
 			};
 		on_ui_table["unsubscribe"] =
 			[this](size_t id)
@@ -205,9 +223,17 @@ void ax::Application::add_application_bindings(sol::state& state)
 
 		auto on_render_table{ state.create_table() };
 		on_render_table["subscribe"] =
-			[this](std::function<void(double delta, const wgpu::RenderPassEncoder& pass)> f) -> size_t
+			[this](sol::protected_function f) -> size_t
 			{
-				return m_window->get_render_event_handler().subscribe([f](const ax::WindowRenderEvent& e) { f(e.delta, e.pass); });
+				return m_window->get_render_event_handler().subscribe([f](const ax::WindowRenderEvent& e)
+					{
+						const auto res{ f(e.delta, e.pass) };
+						if (!res.valid())
+						{
+							const sol::error err = res;
+							spdlog::error("Failed to run on_render callback: {}", err.what());
+						}
+					});
 			};
 		on_render_table["unsubscribe"] =
 			[this](size_t id)
@@ -218,22 +244,37 @@ void ax::Application::add_application_bindings(sol::state& state)
 
 		auto on_close_table{ state.create_table() };
 		on_close_table["subscribe"] =
-			[this](std::function<void()> f) -> size_t
+			[this](sol::protected_function f) -> size_t
 			{
-				return m_window->get_request_close_event_handler().subscribe([f](const ax::WindowRequestCloseEvent&) { f(); });
+				return m_window->get_request_close_event_handler().subscribe([f](const ax::WindowRequestCloseEvent&) {
+					const auto res{ f() };
+					if (!res.valid())
+					{
+						const sol::error err = res;
+						spdlog::error("Failed to run on_close callback: {}", err.what());
+					}
+				});
 			};
 		on_close_table["unsubscribe"] =
 			[this](size_t id)
 			{
-				m_window->get_ui_event_handler().unsubscribe(id);
+				m_window->get_request_close_event_handler().unsubscribe(id);
 			};
 		window_table["on_close"] = on_close_table;
 
 		auto on_resize_table{ state.create_table() };
 		on_resize_table["subscribe"] =
-			[this](std::function<void(uint32_t width, uint32_t height)> f) -> size_t
+			[this](sol::protected_function f) -> size_t
 			{
-				return m_window->get_resize_event_handler().subscribe([f](const ax::WindowResizeEvent& e) { f(e.width, e.height); });
+				return m_window->get_resize_event_handler().subscribe([f](const ax::WindowResizeEvent& e)
+					{
+						const auto res{ f(e.width, e.height) };
+						if (!res.valid())
+						{
+							const sol::error err = res;
+							spdlog::error("Failed to run on_resize callback: {}", err.what());
+						}
+					});
 			};
 		on_resize_table["unsubscribe"] =
 			[this](size_t id)

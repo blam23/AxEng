@@ -18,13 +18,13 @@ namespace ax::lua
 	public:
 		Script(Badge<ScriptManager>, ax::lua::Manager& m_lua, const std::string& name, const std::string& code);
 
-		sol::function_result run(sol::environment& env);
-		sol::function_result run_no_cache(sol::environment& env);
-		sol::function_result run_different_state(sol::state& state, sol::environment& env);
+		sol::protected_function_result run(sol::environment& env);
+		sol::protected_function_result run_no_cache(sol::environment& env);
+		sol::protected_function_result run_different_state(sol::state& state, sol::environment& env);
 		auto& code() const { return m_strCode; };
 
 	private:
-		sol::function m_code;
+		sol::protected_function m_code;
 		sol::load_result m_res;
 		std::string m_strCode;
 		ax::lua::Manager& m_lua;

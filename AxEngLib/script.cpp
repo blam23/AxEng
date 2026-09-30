@@ -13,7 +13,7 @@ ax::lua::Script::Script(Badge<ScriptManager>, ax::lua::Manager& lua, const std::
 
 	if (res.valid())
 	{
-		m_code = res.get<sol::function>();
+		m_code = res.get<sol::protected_function>();
 		m_loaded = true;
 	}
 	else
@@ -23,15 +23,15 @@ ax::lua::Script::Script(Badge<ScriptManager>, ax::lua::Manager& lua, const std::
 	}
 }
 
-sol::function_result ax::lua::Script::run(sol::environment& env)
+sol::protected_function_result ax::lua::Script::run(sol::environment& env)
 {
 	sol::set_environment(env, m_code);
 	return m_code();
 }
 
-sol::function_result ax::lua::Script::run_no_cache(sol::environment& env)
+sol::protected_function_result ax::lua::Script::run_no_cache(sol::environment& env)
 {
-	sol::function res{ m_lua.load(m_strCode, m_name) };
+	sol::protected_function res{ m_lua.load(m_strCode, m_name) };
 
 	if (res.valid())
 	{
@@ -42,9 +42,9 @@ sol::function_result ax::lua::Script::run_no_cache(sol::environment& env)
 	return {};
 }
 
-sol::function_result ax::lua::Script::run_different_state(sol::state& state, sol::environment& env)
+sol::protected_function_result ax::lua::Script::run_different_state(sol::state& state, sol::environment& env)
 {
-	sol::function res{ state.load(m_strCode, m_name) };
+	sol::protected_function res{ state.load(m_strCode, m_name) };
 
 	if (res.valid())
 	{
