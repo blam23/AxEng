@@ -9,6 +9,7 @@
    "scripts":{
       "class":"scripts/class.lua",
       "draw_helpers":"scripts/draw_helpers.lua",
+      "enemy":"scripts/scenes/enemy.lua",
       "game":"scripts/scenes/game.lua",
       "main":"scripts/main.lua",
       "math_helpers":"scripts/math_helpers.lua",
