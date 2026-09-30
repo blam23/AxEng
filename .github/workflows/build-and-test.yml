@@ -30,12 +30,23 @@ jobs:
             core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
             core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
 
+      # CMake's "Visual Studio 17 2022" generator can unreliably fail to
+      # locate an installed VS instance on hosted runners (observed in CI:
+      # vcpkg itself builds fine via MSVC, but CMake's own VS-generator
+      # instance lookup still errored with "could not find any instance of
+      # Visual Studio"). Using the Ninja Multi-Config generator instead
+      # sidesteps that lookup entirely - it just needs cl.exe/link.exe on
+      # PATH, which msvc-dev-cmd sets up below.
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       # CMake picks the vcpkg toolchain file up automatically (see root
-      # CMakeLists.txt), and the "windows" preset uses the "Visual Studio 17
-      # 2022" generator, so CMake locates cl.exe/MSBuild itself - no manual
-      # PlatformToolset override or vcvarsall activation needed here, unlike
-      # the old hand-written .vcxproj files (which pinned an unavailable
-      # preview toolset).
+      # CMakeLists.txt), so vcpkg.json is restored with no extra flags -
+      # unlike the old hand-written .vcxproj files (which needed a
+      # VcpkgEnableManifest override and a PlatformToolset pin for an
+      # unavailable preview toolset).
       - name: Configure (CMake + vcpkg manifest restore)
         shell: pwsh
         run: cmake --preset windows

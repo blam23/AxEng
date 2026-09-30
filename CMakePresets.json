@@ -9,11 +9,7 @@
     {
       "name": "windows",
       "displayName": "Windows x64 (multi-config)",
-      "generator": "Visual Studio 17 2022",
-      "architecture": {
-        "value": "x64",
-        "strategy": "set"
-      },
+      "generator": "Ninja Multi-Config",
       "binaryDir": "${sourceDir}/build",
       "toolchainFile": "$env{VCPKG_INSTALLATION_ROOT}/scripts/buildsystems/vcpkg.cmake",
       "cacheVariables": {
