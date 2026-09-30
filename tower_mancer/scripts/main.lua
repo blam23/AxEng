@@ -1,4 +1,4 @@
--- -cxr --in "$(SolutionDir)tower_mancer" --out "E:\TowerMancer"
+-- -cxr --allow-io --allow-os --in "$(SolutionDir)tower_mancer" --out "E:\TowerMancer"
 
 local scene_manager = ax.import("scene_manager")
 
@@ -25,6 +25,10 @@ end)
 
 app.window.on_render.subscribe(function(delta, pass)
     scene_manager:render(delta, pass)
+end)
+
+app.window.on_resize.subscribe(function(width, height)
+    scene_manager:resize(width, height)
 end)
 
 app.window.set_clear_color(0.05, 0.05, 0.08, 1.0)

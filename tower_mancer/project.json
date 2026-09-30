@@ -4,6 +4,7 @@
    "icon":"icon",
    "name":"Tower Mancer",
    "required_permissions":[
+
    ],
    "scripts":{
       "class":"scripts/class.lua",

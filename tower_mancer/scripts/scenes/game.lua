@@ -1,6 +1,5 @@
 local math_helpers = ax.import("math_helpers")
 local scene = ax.import("scene")
-
 local game = scene:new(true)
 
 local enemies = {}

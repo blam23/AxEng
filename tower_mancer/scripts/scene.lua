@@ -13,6 +13,9 @@ end
 function scene:stop()
 end
 
+function scene:resize(width, height)
+end
+
 function scene:tick(delta)
 end
 

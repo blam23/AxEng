@@ -36,6 +36,7 @@ namespace ax
 		uint32_t height{ 1080 };
 		std::string title{ "AxEng" };
 		bool vsync{ true };
+		bool resizable{ true };
 	};
 
 	struct WindowUpdateEvent
@@ -66,6 +67,11 @@ namespace ax
 		double delta;
 	};
 
+	struct WindowResizeEvent
+	{
+		uint32_t width;
+		uint32_t height;
+	};
 
 	class Window
 	{
@@ -119,10 +125,19 @@ namespace ax
 			return m_requestCloseEventHandler;
 		}
 
+		using ResizeEventHandler = EventHandler<WindowResizeEvent>;
+		ResizeEventHandler& get_resize_event_handler()
+		{
+			return m_resizeEventHandler;
+		}
+
 		wgpu::Device& device() noexcept { return m_device; }
 		const wgpu::Device& device() const noexcept { return m_device; }
 		wgpu::Queue& queue() noexcept { return m_queue; }
 		const wgpu::Queue& queue() const noexcept { return m_queue; }
+
+		std::uint32_t width() const noexcept { return m_width; }
+		std::uint32_t height() const noexcept { return m_height; }
 
 		bool vsync() const noexcept { return m_vsync; }
 		// Must call create_surfaces() after changing vsync
@@ -176,6 +191,7 @@ namespace ax
 		RenderEventHandler m_renderEventHandler;
 		UIEventHandler m_uiEventHandler;
 		RequestCloseEventHandler m_requestCloseEventHandler;
+		ResizeEventHandler m_resizeEventHandler;
 
 		// GLFW
 		GLFWwindow* m_window{ nullptr };

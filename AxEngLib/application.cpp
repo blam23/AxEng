@@ -229,6 +229,29 @@ void ax::Application::add_application_bindings(sol::state& state)
 			};
 		window_table["on_close"] = on_close_table;
 
+		auto on_resize_table{ state.create_table() };
+		on_resize_table["subscribe"] =
+			[this](std::function<void(uint32_t width, uint32_t height)> f) -> size_t
+			{
+				return m_window->get_resize_event_handler().subscribe([f](const ax::WindowResizeEvent& e) { f(e.width, e.height); });
+			};
+		on_resize_table["unsubscribe"] =
+			[this](size_t id)
+			{
+				m_window->get_resize_event_handler().unsubscribe(id);
+			};
+		window_table["on_resize"] = on_resize_table;
+
+		m_window->get_resize_event_handler().subscribe([this](const ax::WindowResizeEvent& e)
+			{
+				const auto& window_table{ m_scripts.state({})["app"]["window"] };
+				window_table["width"] = e.width;
+				window_table["height"] = e.height;
+			});
+
+		window_table["width"] = m_window->width();
+		window_table["height"] = m_window->height();
+
 		window_table["render"] =
 			sol::overload
 			(

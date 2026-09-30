@@ -39,8 +39,19 @@ function manager:tick(delta)
     end
 end
 
+function manager:resize(width, height)
+    if self.current_scene then
+        self.current_scene:resize(width, height)
+    end
+    if self.pause_scene then
+        self.pause_scene:resize(width, height)
+    end
+end
+
 function manager:render(delta, pass)
-    self.current_scene:render(delta, pass)
+    if self.current_scene then
+        self.current_scene:render(delta, pass)
+    end
 
     if self.paused then
         self.pause_scene:render(delta, pass)

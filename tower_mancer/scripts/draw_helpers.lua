@@ -2,7 +2,6 @@ local font_texture = app.res.get_texture("font")
 
 local helpers = {}
 
-
 function helpers.string(x, y, text, rotation, color, scale, bold, z_index)
     if z_index == nil then
         z_index = 0

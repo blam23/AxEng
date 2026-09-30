@@ -26,11 +26,14 @@ static void glfw_error_callback(int error, const char* description)
 }
 
 ax::Window::Window(const WindowDefinition& def)
-	: m_width{ def.width },
-	m_height{ def.height },
-	m_vsync{ def.vsync }
+	: m_width{ def.width }
+	, m_height{ def.height }
+	, m_vsync{ def.vsync }
 {
 	LogTimer _timer{ "create window" };
+
+	glfwWindowHint(GLFW_RESIZABLE, def.resizable ? GLFW_TRUE : GLFW_FALSE);
+
 	m_window = glfwCreateWindow(m_width, m_height, def.title.data(), NULL, NULL);
 
 	std::lock_guard lock{ s_windows_mutex };
@@ -63,9 +66,16 @@ void ax::Window::resize_event_handler(GLFWwindow* window, int width, int height)
 	auto it = s_windows.find(window);
 	if (it != s_windows.end())
 	{
+		if (it->second == nullptr)
+		{
+			spdlog::error("Window list contains null window?");
+			return;
+		}
+
 		it->second->m_width = width;
 		it->second->m_height = height;
 		it->second->create_surfaces();
+		it->second->m_resizeEventHandler.fire({ static_cast<uint32_t>(width), static_cast<uint32_t>(height) });
 	}
 }
 
@@ -83,7 +93,6 @@ bool ax::setup_glfw()
 
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
 	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	//glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 	
 	return true;
 }
