@@ -1,5 +1,9 @@
 #include "shared.h"
+
+#include "application.h"
+
 #include "glm/glm.hpp"
+
 
 sol::object copy_object(const sol::object& in, sol::state& state)
 {
@@ -43,8 +47,50 @@ sol::object copy_object(const sol::object& in, sol::state& state)
 		default:
 			return {};
 	}
+}
 
-	return sol::nil;
+void ax::lua::SharedObject::on_signal(Application* app, const std::string& key, sol::protected_function func)
+{
+	std::lock_guard lock{ m_sharedStateMutex };
+
+	auto it = m_signals.try_emplace(key).first;
+
+	if (app == nullptr) // can run on this thread, call func directly
+	{
+		it->second.subscribe
+		(
+			[func](int)
+			{
+				sol::protected_function_result result{ func() };
+				if (!result.valid())
+				{
+					const sol::error err = result;
+					spdlog::error("Error in signal callback: {}", err.what());
+				}
+			}
+		);
+	}
+	else // can't run on this thread, schedule func call
+	{
+		it->second.subscribe
+		(
+			[func, app](int)
+			{
+				app->call_deferred
+				(
+					[func]
+					{
+						sol::protected_function_result result{ func() };
+						if (!result.valid())
+						{
+							const sol::error err = result;
+							spdlog::error("Error in signal callback: {}", err.what());
+						}
+					}
+				);
+			}
+		);
+	}
 }
 
 sol::object ax::lua::SharedObject::copy_object_to_shared(const sol::object& in)

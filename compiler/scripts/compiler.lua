@@ -1,7 +1,7 @@
 -- AxEng Lua Compiler
 
 -- cmd line to compile this:
--- -cxv --in "$(SolutionDir)compiler" --out "$(SolutionDir)AxCompiler2"
+-- -cxv --allow-io --allow-os --in "$(SolutionDir)compiler" --out "$(SolutionDir)AxCompiler2"
 
 local comp = ax.import("@compiler_core")
 

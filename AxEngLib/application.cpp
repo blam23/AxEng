@@ -536,6 +536,24 @@ void ax::Application::add_application_bindings(sol::state& state)
 			)
 		);
 
+	using EH = ax::EventHandler<sol::object>;
+
+	state.new_usertype<EH>
+		(
+			"lua_event",
+			"subscribe", &EH::subscribe,
+			"unsubscribe", &EH::unsubscribe,
+			"fire", &EH::fire
+		);
+
+	app["current_executable_path"] =
+		[]() -> std::string
+		{
+			char path[MAX_PATH];
+			::GetModuleFileNameA(nullptr, path, MAX_PATH);
+			return std::string(path);
+		};
+
 	state["app"] = app;
 }
 
@@ -690,6 +708,25 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 				spdlog::error("Invalid script, cannot run");
 				return nullptr;
 			}
+		};
+
+	app["thread"] = "main";
+	app["on_main_thread"] =
+		[]() -> bool
+		{
+			return true;
+		};
+
+	app["signal"] =
+		[this](lua::SharedObject& obj, const std::string& signal_name)
+		{
+			obj.signal(signal_name);
+		};
+
+	app["on_signal"] =
+		[this](lua::SharedObject& obj, const std::string& signal_name, sol::protected_function func)
+		{
+			obj.on_signal(this, signal_name, func);
 		};
 
 	m_scripts.state({}).new_usertype<lua::SharedObject>

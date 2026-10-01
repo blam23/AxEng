@@ -11,6 +11,7 @@ local project_browser = ax.import("project_browser")
 local asset_inspector = ax.import("asset_inspector")
 local build_info = ax.import("build_info")
 local editor = ax.import("script_editor")
+local try_run = ax.import("try_run")
 
 local unsaved_config = false
 local unsaved_scripts = false
@@ -69,12 +70,33 @@ function asset_edited(data)
     project_browser.reload()
 end
 
-lua_event.subscribe(asset_inspector.on_asset_edited, asset_edited)
+function background_app_done(data)
+    local name = data["name"]
+    local success = data["success"]
+    local err = data["err"]
+    local stdout = data["stdout"]
+    print(stdout)
+
+    if name == "compiler" then
+        if success then
+            ui.insert_toast(ui.toast_type.Success, 3000, "Compilation completed.")
+        else
+            log.error("Compilation failed: " .. tostring(err))
+            if stdout then
+                log.error("Compilation output: " .. stdout)
+            end
+            ui.insert_toast(ui.toast_type.Error, 3000, "Compilation failed!")
+        end
+    end
+end
+
+asset_inspector.on_asset_edited:subscribe(asset_edited)
+try_run.done:subscribe(background_app_done)
 
 local last_save = 0
 local last_save_err = false
 function main_menu(delta)
-    ui.begin_main_menu_bar("Save Window")
+    ui.begin_main_menu_bar("MainMenu")
         ui.text(project.name)
         if ui.button("\xef\x83\x87 Save Config") then -- Floppy Disk Icon
             last_save = 3.0
@@ -99,6 +121,29 @@ function main_menu(delta)
         elseif is_unsaved() then
             ui.same_line()
             ui.text_color(0.7, 0.7, 0, 1, "* Unsaved") -- circle check
+        end
+        local running, running_app_name = try_run.is_running()
+        if running and running_app_name == "app" then
+            ui.draw_rect(1, 1, app.window.width-2, app.window.height-2, 0, 4.0, 0.9, 0.3, 0.1, 1.0)
+        end
+        if ui.button("\xef\x80\x93 Compile") then
+            if not running then
+                try_run.background("compiler", {
+                    "-cxv",
+                    "--allow-io", "--allow-os",
+                    "--in", comp.get_project_directory_from_args(),
+                    "--out", comp.get_compile_directory_from_args()
+                })
+            end
+        end
+        local button_text = (running and running_app_name == "app") and "\xef\x83\xa7 Running" or "\xef\x81\x8b Run"
+        if ui.button(button_text) then
+            if not running then
+                try_run.background("app",{
+                    "-rv",
+                    "--in", comp.get_compile_directory_from_args(),
+                })
+            end
         end
     ui.end_main_menu_bar()
 end

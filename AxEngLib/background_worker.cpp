@@ -60,6 +60,25 @@ void ax::BackgroundWorker::start(const std::vector<std::string>& args)
 					}
 				};
 
+			app["thread"] = "background";
+			app["on_main_thread"] =
+				[]() -> bool
+				{
+					return false;
+				};
+
+			app["signal"] =
+				[this](lua::SharedObject& obj, const std::string& signal_name)
+				{
+					obj.signal(signal_name);
+				};
+
+			app["on_signal"] =
+				[this](lua::SharedObject& obj, const std::string& signal_name, sol::protected_function func)
+				{
+					obj.on_signal(nullptr, signal_name, func);
+				};
+
 			const auto stdLibText{ Resource::embedded_load_as_text<lua::Script>("@std") };
 			const auto res{ m_lua.state().do_string(*stdLibText, "@std") };
 			if (!res.valid())

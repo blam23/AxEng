@@ -1,7 +1,9 @@
 #pragma once
 
-#include "lua_engine.h"
+#include "event.h"
+#include "forward.h"
 #include "helpers.h"
+#include "lua_engine.h"
 
 #include <map>
 #include <string>
@@ -17,7 +19,10 @@ namespace ax::lua
 
 		void set(const std::string& key, sol::object value)
 		{
-			m_data[key] = copy_object_to_shared(value);
+			if (value == sol::nil)
+				m_data.erase(key);
+			else
+				m_data[key] = copy_object_to_shared(value);
 		}
 
 		sol::object get(sol::state& copy_to, const std::string& key)
@@ -39,6 +44,16 @@ namespace ax::lua
 			return 0;
 		}
 
+		void signal(const std::string& key)
+		{
+			std::lock_guard lock{ m_sharedStateMutex };
+
+			if (auto it = m_signals.find(key); it != m_signals.end())
+				it->second.fire(0);
+		}
+
+		void on_signal(Application* app, const std::string& key, sol::protected_function func);
+
 	private:
 		sol::state m_sharedState{};
 		std::mutex m_sharedStateMutex{};
@@ -48,5 +63,7 @@ namespace ax::lua
 
 		sol::object copy_object_to_shared(const sol::object& in);
 		sol::object copy_object_from_shared(sol::state& copy_to, const sol::object& in);
+
+		std::map <std::string, EventHandler<int>>m_signals{};
 	};
 }

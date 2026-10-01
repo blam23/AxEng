@@ -78,7 +78,7 @@ local function list_box(name, tbl, selected, icon)
             browser.selected_texture = 0
 
             selected = i
-            lua_event.fire(browser.on_selected, { name, tbl[selected] })
+            browser.on_selected:fire({ name, tbl[selected] })
         end
     end
     if need_end then

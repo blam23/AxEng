@@ -382,6 +382,28 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 			ImGui::Spacing();
 		};
 
+	ui_table["draw_rect"] =
+		sol::overload
+		(
+			[](float x, float y, float width, float height, float r, float g, float b, float a)
+			{
+				ImDrawList* draw_list = ImGui::GetForegroundDrawList();
+				draw_list->AddRect(ImVec2(x, y), ImVec2(x + width, y + height), IM_COL32(r * 255.f, g * 255.f, b * 255.f, a * 255.f));
+			},
+			[](float x, float y, float width, float height, float rounding, float thickness, float r, float g, float b, float a)
+			{
+				ImDrawList* draw_list = ImGui::GetForegroundDrawList();
+				draw_list->AddRect(ImVec2(x, y), ImVec2(x + width, y + height), IM_COL32(r * 255.f, g * 255.f, b * 255.f, a * 255.f), rounding, 0, thickness);
+			}
+		);
+
+	ui_table["draw_rect_filled"] =
+		[](float x, float y, float width, float height, float r, float g, float b, float a)
+		{
+			ImDrawList* draw_list = ImGui::GetForegroundDrawList();
+			draw_list->AddRectFilled(ImVec2(x, y), ImVec2(x + width, y + height), IM_COL32(r * 255.f, g * 255.f, b * 255.f, a * 255.f));
+		};
+
 	state["ui"] = ui_table;
 }
 

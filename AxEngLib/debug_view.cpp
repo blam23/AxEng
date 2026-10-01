@@ -242,12 +242,35 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 
 			ImGui::Begin(ICON_FA_CODE_BRANCH " Lua Debug");
 			{
-				const auto& state{ app.scripts().debug_get_state({}) };
+				auto& state{ app.scripts().debug_get_state({}) };
 				const auto& env{ app.debug_get_env({}) };
 				const sol::table& global_table{ state["_G"].get<sol::table>() };
 				static std::string picked_key{ "" };
 				static bool is_global{ false };
-				static std::string label{ "Pick a script to inspect" };
+				static std::string label{ "Pick a variable to inspect" };
+
+				static char lua_exec[1024]{ 0 };
+				ImGui::InputText("##lua_exec_label", lua_exec, sizeof(lua_exec));
+				ImGui::SameLine();
+				if (ImGui::Button("Execute"))
+				{
+					sol::load_result res{ state.load(lua_exec) };
+					if (!res.valid())
+					{
+						const sol::error err = res;
+						spdlog::error("Failed to load Lua code: {}", err.what());
+					}
+
+					const auto func{ res.get<sol::protected_function>() };
+					sol::set_environment(env, func);
+					const auto func_res{ func() };
+
+					if (!func_res.valid())
+					{
+						const sol::error err = func_res;
+						spdlog::error("Failed to execute Lua code: {}", err.what());
+					}
+				}
 
 				ImGui::PushItemWidth(-1);
 				if (ImGui::BeginListBox("##lua_vars"))

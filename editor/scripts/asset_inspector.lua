@@ -15,7 +15,7 @@ local function asset_changed(asset)
     path_input = inspector.current_asset[2][2]
 end
 
-lua_event.subscribe(project_browser.on_selected, asset_changed)
+project_browser.on_selected:subscribe(asset_changed)
 
 local old_script_name = ""
 local script_cache = ""

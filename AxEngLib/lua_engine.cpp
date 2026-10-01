@@ -3,6 +3,37 @@
 #include "log_timer.h"
 #include "script.h"
 
+#ifdef _WIN32
+namespace
+{
+	int lua_popen_close(lua_State* L)
+	{
+		auto* stream{ static_cast<luaL_Stream*>(luaL_checkudata(L, 1, LUA_FILEHANDLE)) };
+		const int status{ _pclose(stream->f) };
+		stream->f = nullptr;
+		return luaL_execresult(L, status);
+	}
+
+	int lua_io_popen(lua_State* L)
+	{
+		const char* command{ luaL_checkstring(L, 1) };
+		const char* mode{ luaL_optstring(L, 2, "r") };
+		auto* stream{ static_cast<luaL_Stream*>(lua_newuserdatauv(L, sizeof(luaL_Stream), 0)) };
+		stream->f = _popen(command, mode);
+		stream->closef = &lua_popen_close;
+		luaL_setmetatable(L, LUA_FILEHANDLE);
+
+		if (stream->f == nullptr)
+		{
+			stream->closef = nullptr;
+			return luaL_fileresult(L, 0, command);
+		}
+
+		return 1;
+	}
+}
+#endif
+
 ax::lua::Manager::Manager(flag_set<Permission> requestedPermissions)
 	: m_permissionFlags{ requestedPermissions }
 {
@@ -49,8 +80,8 @@ ax::Error ax::lua::Manager::setup()
 		return ax::Error::IO;
 	}
 
-	m_state.set_panic(sol::c_call<decltype(&lua_panic), &lua_panic>);
-	m_state.set_exception_handler(&lua_exception_handler);
+	//m_state.set_panic(sol::c_call<decltype(&lua_panic), &lua_panic>);
+	//m_state.set_exception_handler(&lua_exception_handler);
 
 	// Always open these libraries - open the rest depending on permissions later.
 	m_state.open_libraries
@@ -86,6 +117,11 @@ ax::Error ax::lua::Manager::setup()
 	LIB_IF_PERMITTED_OR_ERROR_TABLE(OS, os);
 
 #undef LIB_IF_PERMITTED_OR_ERROR_TABLE
+
+#ifdef _WIN32
+	if (has_permission(Permission::IO) && has_permission(Permission::OS))
+		m_state["io"]["popen"] = &lua_io_popen;
+#endif
 
 	bindings::bind_to_state(m_state);
 

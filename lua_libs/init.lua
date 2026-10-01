@@ -8,7 +8,7 @@ local _ax_version = 1
 local __print = print
 print = function(...)
     local arg={...}
-    local res = "<Lua> "
+    local res = "<Lua> <" .. app.thread:sub(1,1) .. "> "
     for i,v in ipairs(arg) do
         if v == nil then
             v = "nil"

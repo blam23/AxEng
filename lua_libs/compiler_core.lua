@@ -69,7 +69,6 @@ comp.check_string = function(script_string)
     return true, chunk
 end
 
-
 comp.get_project_directory_from_args = function()
     local in_pair_state = false
     local ret = ""
@@ -80,6 +79,24 @@ comp.get_project_directory_from_args = function()
             in_pair_state = false
         else
             if args[i] == "--project" then
+                in_pair_state = true
+            end
+        end
+    end
+
+    return ret
+end
+
+comp.get_compile_directory_from_args = function()
+    local in_pair_state = false
+    local ret = ""
+
+    for i in pairs(args) do
+        if in_pair_state then
+            ret = ax.rstrip(args[i])
+            in_pair_state = false
+        else
+            if args[i] == "--compile_to" then
                 in_pair_state = true
             end
         end

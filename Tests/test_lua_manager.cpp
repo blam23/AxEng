@@ -67,6 +67,29 @@ TEST(LuaManagerTests, IOAllowed_OSNot_OnlyOSLogs)
 	m.cleanup();
 }
 
+TEST(LuaManagerTests, IOAllowed_PopenReadsOutput)
+{
+	register_minimal_init();
+
+	flag_set<Permission> perms;
+	perms |= Permission::IO;
+	perms |= Permission::OS;
+
+	Manager m(perms);
+	ASSERT_EQ(ax::Error::Success, m.setup());
+
+	const auto result{ m.state().do_string(
+		"local handle = io.popen('cmd /c echo AxEngPopenTest', 'r'); "
+		"assert(handle); "
+		"local output = handle:read('*a'); "
+		"assert(handle:close()); "
+		"assert(output:find('AxEngPopenTest', 1, true));",
+		"@test_io_popen") };
+	ASSERT_TRUE(result.valid());
+
+	m.cleanup();
+}
+
 TEST(LuaManagerTests, OSAllowed_IOAllowed_NoLogs)
 {
 	register_minimal_init();
