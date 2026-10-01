@@ -1,19 +1,25 @@
 -- requires io permissions
 
 local try_run = {
-    done = lua_event.new()
+    done = lua_event.new(),
+    launched = lua_event.new()
 }
 
 local shared = app.get_or_create_shared("run_in_background_args")
 local running = false
+local launched = false
 local current_name = ""
 local last_success = false
 local last_error = ""
 
 if (app.on_main_thread()) then
+    app.on_signal(shared, "launched", function()
+        launched = true
+        local pid = shared:get("pid")
+        try_run.launched:fire({pid = pid})
+    end)
     app.on_signal(shared, "done", function()
         running = false
-        print("Background run finished for: " .. current_name)
         last_success = shared:get("success")
         last_error = shared:get("err")
         stdout = shared:get("stdout")
@@ -21,7 +27,8 @@ if (app.on_main_thread()) then
     end)
 end
 
-function try_run.inline(args)
+function try_run.inline(args, shared)
+
     local cmd = app.current_executable_path()
     for _, arg in ipairs(args) do
         if string.find(arg, " ") then
@@ -29,7 +36,11 @@ function try_run.inline(args)
         end
         cmd = cmd .. " " .. arg
     end
-    local handle = io.popen(cmd, "r")
+    local handle, pid = io.popen(cmd, "r")
+    if shared ~= nil then
+        app.signal(shared, "launched")
+        shared:set("pid", pid)
+    end
     local stdout = handle:read("*a")
     local rc = {handle:close()}
 

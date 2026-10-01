@@ -1,8 +1,11 @@
 -- AxEditor
 
 --[[
+
 Example how to run:
--cxrqv --in "$(SolutionDir)editor" --out "E:\AxEdit" --allow-threads --allow-io --allow-os --project $(SolutionDir)tower_mancer"
+
+-cxrqv --in "$(SolutionDir)editor" --out "E:\AxEdit" --allow-threads --allow-io --allow-os --project "$(SolutionDir)tower_mancer" --compile_to "E:\TowerMancer"
+
 ]]
 
 local comp = ax.import("@compiler_core")
@@ -70,6 +73,8 @@ function asset_edited(data)
     project_browser.reload()
 end
 
+asset_inspector.on_asset_edited:subscribe(asset_edited)
+
 function background_app_done(data)
     local name = data["name"]
     local success = data["success"]
@@ -90,11 +95,20 @@ function background_app_done(data)
     end
 end
 
-asset_inspector.on_asset_edited:subscribe(asset_edited)
 try_run.done:subscribe(background_app_done)
+
+local launched_app = {
+    pid = -1
+}
+function background_app_launched(data)
+    launched_app.pid = data.pid
+end
+
+try_run.launched:subscribe(background_app_launched)
 
 local last_save = 0
 local last_save_err = false
+local embedded = false
 function main_menu(delta)
     ui.begin_main_menu_bar("MainMenu")
         ui.text(project.name)
@@ -124,7 +138,16 @@ function main_menu(delta)
         end
         local running, running_app_name = try_run.is_running()
         if running and running_app_name == "app" then
-            ui.draw_rect(1, 1, app.window.width-2, app.window.height-2, 0, 4.0, 0.9, 0.3, 0.1, 1.0)
+            -- #A256FF
+            ui.draw_rect(1, 1, app.window.width-2, app.window.height-2, 0, 4.0, 0.63, 0.34, 1.0, 1.0)
+
+            if not embedded and launched_app.pid > 0 then
+                if app.window.try_embed_child(launched_app.pid) then
+                    embedded = true
+                end
+            end
+        else
+            embedded = false
         end
         if ui.button("\xef\x80\x93 Compile") then
             if not running then
@@ -132,17 +155,23 @@ function main_menu(delta)
                     "-cxv",
                     "--allow-io", "--allow-os",
                     "--in", comp.get_project_directory_from_args(),
-                    "--out", comp.get_compile_directory_from_args()
+                    "--out", comp.get_compile_directory_from_args(),
+
                 })
             end
         end
-        local button_text = (running and running_app_name == "app") and "\xef\x83\xa7 Running" or "\xef\x81\x8b Run"
+        local button_text = (running and running_app_name == "app") and "\xef\x81\x8d Stop" or "\xef\x81\x8b Run"
         if ui.button(button_text) then
             if not running then
                 try_run.background("app",{
                     "-rv",
+                    "--allow-io", "--allow-os", "--allow-threads",
                     "--in", comp.get_compile_directory_from_args(),
+                    "--project", comp.get_project_directory_from_args(),
+                    "--compile_to", comp.get_compile_directory_from_args()
                 })
+            else
+                app.window.try_kill_child(launched_app.pid)
             end
         end
     ui.end_main_menu_bar()
@@ -170,6 +199,29 @@ function close_confirm_modal()
     end
 end
 
+local app_focused = false
+function update_embedded_window()
+    if (ui.begin_window("\xef\x82\x91 Application")) then
+        local x, y = ui.get_content_position()
+        local w, h = ui.get_region_available()
+        app.window.set_embedded_child_position(launched_app.pid, x, y, w, h)
+        if ui.is_window_focused() and not app_focused then
+            app_focused = true
+            app.window.redirect_input_to_child(launched_app.pid)
+        elseif not ui.is_window_focused() and app_focused then
+            app_focused = false
+            app.window.reset_input_redirection()
+        end
+    else
+        if app_focused then
+            app_focused = false
+            app.window.reset_input_redirection()
+        end
+        app.window.set_embedded_child_position(launched_app.pid, 0, 0, 0, 0)
+    end
+    ui.end_window()
+end
+
 function main_ui(delta)
     ui.dock_space_over_viewport()
     main_menu(delta)
@@ -177,11 +229,18 @@ function main_ui(delta)
     asset_inspector.display()
     build_info.display()
     editor.display()
+    if (embedded) then
+        update_embedded_window()
+    end
     close_confirm_modal()
 end
 
 function tried_to_close()
-    if is_unsaved() then
+    local running, _ = try_run.is_running()
+    if running then
+        app.window.prevent_close()
+        ui.insert_toast(ui.toast_type.Error, 3000, "The application is still running!")
+    elseif is_unsaved() then
         app.window.prevent_close()
         ui.insert_toast(ui.toast_type.Error, 3000, "Make sure to save before exiting!")
 

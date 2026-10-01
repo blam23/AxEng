@@ -79,13 +79,23 @@ TEST(LuaManagerTests, IOAllowed_PopenReadsOutput)
 	ASSERT_EQ(ax::Error::Success, m.setup());
 
 	const auto result{ m.state().do_string(
-		"local handle = io.popen('cmd /c echo AxEngPopenTest', 'r'); "
-		"assert(handle); "
+		"local handle, pid = io.popen('echo AxEngPopenTest & ping -n 3 127.0.0.1 > nul', 'r'); "
+		"assert(handle, 'popen failed'); "
+		"assert(type(pid) == 'number' and pid > 0, 'invalid PID'); "
+		"local pidHandle = io.popen('tasklist /FI \"PID eq ' .. pid .. '\" /FO CSV /NH', 'r'); "
+		"assert(pidHandle, 'tasklist popen failed'); "
+		"local processInfo = pidHandle:read('*a'); "
+		"assert(pidHandle:close(), 'tasklist close failed: ' .. processInfo); "
+		"assert(processInfo:lower():find('\"ping.exe\"', 1, true), 'PID did not identify ping.exe: ' .. processInfo); "
 		"local output = handle:read('*a'); "
 		"assert(handle:close()); "
 		"assert(output:find('AxEngPopenTest', 1, true));",
 		"@test_io_popen") };
-	ASSERT_TRUE(result.valid());
+	if (!result.valid())
+	{
+		sol::error error = result;
+		FAIL() << error.what();
+	}
 
 	m.cleanup();
 }

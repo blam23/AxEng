@@ -12,6 +12,7 @@
 
 // GLFW
 #include "glfw3webgpu.h"
+#define GLFW_EXPOSE_NATIVE_WIN32
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
@@ -166,6 +167,13 @@ namespace ax
 
 		void call_deferred(std::function<void()> func);
 
+		bool try_embed_child(DWORD processID);
+		void try_kill_child(DWORD processID);
+		void set_embedded_child_position(DWORD processID, int x, int y, int width, int height);
+		void focus_child(DWORD processID);
+		void redirect_input_to_child(DWORD processID);
+		void reset_input_redirection();
+
 	private:
 		// Rendering
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
@@ -197,6 +205,7 @@ namespace ax
 		GLFWwindow* m_window{ nullptr };
 		void register_window_events();
 		static void window_close_handler(GLFWwindow* window);
+		static LRESULT CALLBACK raw_windows_event(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 		// WGPU
 		wgpu::Adapter m_adapter;
@@ -249,5 +258,7 @@ namespace ax
 
 		std::mutex m_deferredMutex{};
 		std::vector<std::function<void()>> m_deferred{};
+
+		std::map<DWORD, HWND> m_childWindows{};
 	};
 }
