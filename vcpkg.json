@@ -1,0 +1,20 @@
+{
+  "name": "axeng",
+  "version": "0.1.0",
+  "dependencies": [
+    "gtest",
+    "glfw3",
+    "glm",
+    "minizip-ng",
+    "spdlog",
+    "sol2",
+    "lua",
+    {
+      "name": "imgui",
+      "features": [
+        "glfw-binding",
+        "webgpu-binding"
+      ]
+    }
+  ]
+}

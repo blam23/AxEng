@@ -1,0 +1,68 @@
+name: Build and Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+
+    env:
+      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # vcpkg is pre-installed on GitHub-hosted Windows runners (VCPKG_INSTALLATION_ROOT).
+      # This exposes GitHub Actions cache credentials so vcpkg can cache built binaries
+      # (e.g. Dawn/WebGPU) across runs via the x-gha binary cache source above.
+      - name: Export GitHub Actions cache variables for vcpkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      # CMake's "Visual Studio 17 2022" generator can unreliably fail to
+      # locate an installed VS instance on hosted runners (observed in CI:
+      # vcpkg itself builds fine via MSVC, but CMake's own VS-generator
+      # instance lookup still errored with "could not find any instance of
+      # Visual Studio"). Using the Ninja Multi-Config generator instead
+      # sidesteps that lookup entirely - it just needs cl.exe/link.exe on
+      # PATH, which msvc-dev-cmd sets up below.
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      # CMake picks the vcpkg toolchain file up automatically (see root
+      # CMakeLists.txt), so vcpkg.json is restored with no extra flags -
+      # unlike the old hand-written .vcxproj files (which needed a
+      # VcpkgEnableManifest override and a PlatformToolset pin for an
+      # unavailable preview toolset).
+      - name: Configure (CMake + vcpkg manifest restore)
+        shell: pwsh
+        run: cmake --preset windows
+
+      - name: Build (Release)
+        shell: pwsh
+        run: cmake --build --preset windows-release
+
+      - name: Run Google Tests (ctest)
+        shell: pwsh
+        run: ctest --preset windows-release
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
