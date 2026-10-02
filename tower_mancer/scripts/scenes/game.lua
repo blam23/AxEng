@@ -20,7 +20,7 @@ function game:start()
     mouse.set_cursor(app.window.handle, mouse.cursors.arrow)
     game:setup_grass()
     tower:setup(app.window.width/2, app.window.height/2)
-    enemies:setup(1000)
+    enemies:setup(10000)
 end
 
 local camera = app.window.camera
@@ -43,17 +43,17 @@ function game:tick(delta)
     end
 
     if keyboard.is_pressed(ax.key_map.q) then
-        zoom = zoom + (3.0 * delta)
+        zoom = zoom * 1.01
         camera.zoom = zoom
     end
     if keyboard.is_pressed(ax.key_map.e) then
-        zoom = zoom - (3.0 * delta)
+        zoom = zoom / 1.01
         camera.zoom = zoom
     end
 end
 
 function game:render(delta, pass)
-    draw_helpers.ui_shadowed_string(5, 5, "Alpha", 0, {r = 0.5, g = 1.0, b = 0.7, a = 0.4}, {x = 2, y = 2}, true, 3000)
+    draw_helpers.ui_string(5, 5, "000001a", 0, {r = 0.5, g = 1.0, b = 0.7, a = 0.4}, {x = 2, y = 2}, true, 3000)
 end
 
 function game:setup_grass()
@@ -67,7 +67,7 @@ function game:setup_grass()
                 sprite = app.sprites.allocate()
             })
             app.sprites.setup(grass_tiles[#grass_tiles].sprite, grass_texture, x, y, 0, 0, 64, 64)
-            grass_tiles[#grass_tiles].sprite.z = -2
+            grass_tiles[#grass_tiles].sprite.z = -2000
             grass_tiles[#grass_tiles].sprite.scale.x = 2
             grass_tiles[#grass_tiles].sprite.scale.y = 2
             y = y + 128

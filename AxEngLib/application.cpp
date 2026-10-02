@@ -84,7 +84,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 	{
 		auto on_update_table{ state.create_table() };
 		on_update_table["subscribe"] =
-			[this](sol::protected_function f) -> size_t
+			[this](sol::function f) -> size_t
 			{
 				return m_window->get_update_event_handler().subscribe
 				(
@@ -519,20 +519,26 @@ void ax::Application::add_application_bindings(sol::state& state)
 				);
 
 			sprite_table["update_position"] =
-				sol::overload
-				(
-					[this](SpriteDefinition* sprite, float x, float y)
+				[this](SpriteDefinition* sprite, float x, float y, float z, float r)
+				{
+					sprite->gpuData.pos.x = x;
+					sprite->gpuData.pos.y = y;
+					sprite->gpuData.z = z;
+					sprite->gpuData.rotation = r;
+				};
+
+			sprite_table["update_positions"] =
+				[](const sol::table& updates)
+				{
+					for (std::size_t i = 1; i <= updates.size(); ++i)
 					{
-						sprite->gpuData.pos.x = x;
-						sprite->gpuData.pos.y = y;
-					},
-					[this](SpriteDefinition* sprite, float x, float y, float r)
-					{
-						sprite->gpuData.pos.x = x;
-						sprite->gpuData.pos.y = y;
-						sprite->gpuData.rotation = r;
+						const sol::table update{ updates.get<sol::table>(i) };
+						SpriteDefinition* sprite{ update.get<SpriteDefinition*>("sprite") };
+						sprite->gpuData.pos.x = update.get<float>("x");
+						sprite->gpuData.pos.y = update.get<float>("y");
+						sprite->gpuData.rotation = update.get<float>("r");
 					}
-				);
+				};
 
 			app["sprites"] = sprite_table;
 		}
