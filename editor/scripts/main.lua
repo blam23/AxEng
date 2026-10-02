@@ -239,7 +239,7 @@ function tried_to_close()
     local running, _ = try_run.is_running()
     if running then
         app.window.prevent_close()
-        ui.insert_toast(ui.toast_type.Error, 3000, "The application is still running!")
+        ui.insert_toast(ui.toast_type.Error, 3000, "A background task is still running!")
     elseif is_unsaved() then
         app.window.prevent_close()
         ui.insert_toast(ui.toast_type.Error, 3000, "Make sure to save before exiting!")
