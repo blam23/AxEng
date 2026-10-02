@@ -22,7 +22,7 @@ namespace
 
 	DWORD find_popen_child(DWORD shellPid, HANDLE shellProcess)
 	{
-		const ULONGLONG deadline{ GetTickCount64() + 500 };
+		const ULONGLONG deadline{ GetTickCount64() + 1000 };
 		do
 		{
 			const HANDLE snapshot{ CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
@@ -57,7 +57,8 @@ namespace
 			Sleep(5);
 		} while (GetTickCount64() < deadline);
 
-		return shellPid;
+		// Failure, return 0 as the child PID to indicate that we couldn't find it.
+		return 0;
 	}
 
 	int lua_popen_close(lua_State* L)

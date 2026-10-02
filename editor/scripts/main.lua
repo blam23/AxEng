@@ -98,7 +98,7 @@ end
 try_run.done:subscribe(background_app_done)
 
 local launched_app = {
-    pid = -1
+    pid = 0
 }
 function background_app_launched(data)
     launched_app.pid = data.pid
