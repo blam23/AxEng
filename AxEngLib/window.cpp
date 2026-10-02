@@ -798,11 +798,16 @@ void ax::Window::redirect_input_to_child(DWORD processID)
 
 			HWND hWnd = ::glfwGetWin32Window(m_window);
 
+			ImGui_ImplGlfw_RestoreCallbacks(m_window);
+
 			if (s_originalWndProc.find(hWnd) == s_originalWndProc.end())
 				s_originalWndProc[hWnd] = (WNDPROC)::GetWindowLongPtr(hWnd, GWLP_WNDPROC);
 
 			s_redirectHandles[hWnd] = childHandle;
 			::SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)ax::Window::raw_windows_event);
+
+			register_window_events();
+			ImGui_ImplGlfw_InstallCallbacks(m_window);
 		}
 	}
 }
@@ -830,13 +835,15 @@ void ax::Window::reset_input_redirection()
 {
 	std::lock_guard lock{ s_redirectMutex };
 
+	ImGui_ImplGlfw_RestoreCallbacks(m_window);
+
 	const auto hwnd{ ::glfwGetWin32Window(m_window) };
 	s_redirectHandles.erase(hwnd);
 	::SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)s_originalWndProc[hwnd]);
 	s_originalWndProc.erase(hwnd);
 
-	//register_window_events();
-	//ImGui_ImplGlfw_InstallCallbacks(m_window);
+	register_window_events();
+	ImGui_ImplGlfw_InstallCallbacks(m_window);
 }
 
 void ax::Window::ensure_uniform_capacity(uint32_t required)
