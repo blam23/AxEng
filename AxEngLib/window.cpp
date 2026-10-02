@@ -835,12 +835,15 @@ void ax::Window::reset_input_redirection()
 {
 	std::lock_guard lock{ s_redirectMutex };
 
-	ImGui_ImplGlfw_RestoreCallbacks(m_window);
-
 	const auto hwnd{ ::glfwGetWin32Window(m_window) };
+	const auto originalWndProc{ s_originalWndProc.find(hwnd) };
+	if (originalWndProc == s_originalWndProc.end())
+		return;
+
+	ImGui_ImplGlfw_RestoreCallbacks(m_window);
 	s_redirectHandles.erase(hwnd);
-	::SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)s_originalWndProc[hwnd]);
-	s_originalWndProc.erase(hwnd);
+	::SetWindowLongPtr(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(originalWndProc->second));
+	s_originalWndProc.erase(originalWndProc);
 
 	register_window_events();
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
