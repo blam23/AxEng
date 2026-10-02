@@ -24,6 +24,7 @@
 #include "helpers.h"
 #include "event.h"
 #include "debug_view.h"
+#include "camera.h"
 #include "texture.h"
 
 namespace ax
@@ -139,6 +140,10 @@ namespace ax
 
 		std::uint32_t width() const noexcept { return m_width; }
 		std::uint32_t height() const noexcept { return m_height; }
+		Camera& camera() noexcept { return m_camera; }
+		const Camera& camera() const noexcept { return m_camera; }
+		glm::vec2 global_to_viewport(const glm::vec2& position) const;
+		glm::vec2 viewport_to_global(const glm::vec2& position) const;
 
 		bool vsync() const noexcept { return m_vsync; }
 		// Must call create_surfaces() after changing vsync
@@ -160,10 +165,15 @@ namespace ax
 		void render_texture(Texture* tex, glm::vec2 position);
 		void render_texture(Texture* tex, glm::vec2 position, rectf region);
 		void render_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale);
+		void render_ui_texture(Texture* tex, glm::vec2 position);
+		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region);
+		void render_ui_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale);
 
 		// Optional overloads that accept a z-index for depth ordering
 		void render_texture(Texture* tex, glm::vec2 position, float z);
 		void render_texture(Texture* tex, glm::vec2 position, rectf region, float z);
+		void render_ui_texture(Texture* tex, glm::vec2 position, float z);
+		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z);
 
 		void call_deferred(std::function<void()> func);
 
@@ -192,6 +202,7 @@ namespace ax
 		uint32_t m_height;
 		bool m_vsync;
 		bool m_can_close{ true };
+		Camera m_camera;
 
 		// Events
 		UpdateEventHandler m_updateEventHandler;

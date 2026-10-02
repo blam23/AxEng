@@ -36,8 +36,8 @@ function options:tick(delta)
 end
 
 function options:render(delta, pass)
-    draw_helpers.shadowed_string(50, 50, "Options", {r = 0.5, g = 0.0, b = 0.7, a = 1}, {x = 5, y = 5}, true)
-    draw_helpers.shadowed_string(150, 650, "Back", self.back_color, {x = 3, y = 3}, true)
+    draw_helpers.ui_shadowed_string(50, 50, "Options", 0, {r = 0.5, g = 0.0, b = 0.7, a = 1}, {x = 5, y = 5}, true)
+    draw_helpers.ui_shadowed_string(150, 650, "Back", 0, self.back_color, {x = 3, y = 3}, true)
 end
 
 return options

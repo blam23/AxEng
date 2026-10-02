@@ -13,6 +13,10 @@ ax.get_table_size = function(tbl)
     return c
 end
 
+ax.viewport_mouse_position = function()
+    return app.window.global_to_viewport(mouse.get_position())
+end
+
 ax.print_table = function(tbl, lvl)
     if lvl == nil then lvl = 0 end
     local indent_str = string.rep("   ", lvl)
@@ -136,10 +140,20 @@ end
 -- todo: generate this
 ax.key_map = {
     esc = 256,
-    w = 87,
-    a = 65,
-    s = 83,
-    d = 68,
+    space = 32,
+    enter = 257,
+    right = 262,
+    left = 263,
+    down = 264,
+    up = 265,
 }
+
+for i = 48, 57 do
+    ax.key_map[string.char(i)] = i
+end
+
+for i = 65, 90 do
+    ax.key_map[string.char(i):lower()] = i
+end
 
 return ax

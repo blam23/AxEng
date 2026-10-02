@@ -38,9 +38,9 @@ function menu:tick(delta)
 end
 
 function menu:render(delta, pass)
-    draw_helpers.shadowed_string(50, 50, "TOWER MANCER", {r = 0.5, g = 0.0, b = 0.7, a = 1}, {x = 5, y = 5}, true)
-    draw_helpers.shadowed_string(150, 250, "Play", menu.play_color, {x = 3, y = 3}, true)
-    draw_helpers.shadowed_string(150, 350, "Options", menu.options_color, {x = 3, y = 3}, true)
+    draw_helpers.ui_shadowed_string(50, 50, "TOWERMANCER", 0, {r = 0.5, g = 0.0, b = 0.7, a = 1}, {x = 5, y = 5}, true)
+    draw_helpers.ui_shadowed_string(150, 250, "Play", 0, menu.play_color, {x = 3, y = 3}, true)
+    draw_helpers.ui_shadowed_string(150, 350, "Options", 0, menu.options_color, {x = 3, y = 3}, true)
 end
 
 return menu

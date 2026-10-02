@@ -1,14 +1,14 @@
+local draw_helpers = ax.import("draw_helpers")
 local math_helpers = ax.import("math_helpers")
 local scene = ax.import("scene")
 local game = scene:new(true)
 
 local enemies = ax.import("enemy")
-local tower = {}
+local tower = ax.import("tower")
 
 local texture = app.res.get_texture("tower")
 local grass_texture = app.res.get_texture("grass")
 
-local tower_sprite_area = { 0, 0, 48, 48 }
 local shadow_sprite_area = { 176, 208, 16, 16 }
 
 local grass_tiles = {}
@@ -19,13 +19,41 @@ end
 function game:start()
     mouse.set_cursor(app.window.handle, mouse.cursors.arrow)
     game:setup_grass()
-    game:setup_tower()
-    
-    enemies:setup(200)
+    tower:setup(app.window.width/2, app.window.height/2)
+    enemies:setup(1000)
 end
 
+local camera = app.window.camera
+local zoom = 1.0
 function game:tick(delta)
+    tower:tick(delta)
     enemies:tick(delta)
+
+    if keyboard.is_pressed(ax.key_map.w) then
+        camera:translate(vec2:new(0, -200 * delta))
+    end
+    if keyboard.is_pressed(ax.key_map.s) then
+        camera:translate(vec2:new(0, 200 * delta))
+    end
+    if keyboard.is_pressed(ax.key_map.a) then
+        camera:translate(vec2:new(-200 * delta, 0))
+    end
+    if keyboard.is_pressed(ax.key_map.d) then
+        camera:translate(vec2:new(200 * delta, 0))
+    end
+
+    if keyboard.is_pressed(ax.key_map.q) then
+        zoom = zoom + (3.0 * delta)
+        camera.zoom = zoom
+    end
+    if keyboard.is_pressed(ax.key_map.e) then
+        zoom = zoom - (3.0 * delta)
+        camera.zoom = zoom
+    end
+end
+
+function game:render(delta, pass)
+    draw_helpers.ui_shadowed_string(5, 5, "Alpha", 0, {r = 0.5, g = 1.0, b = 0.7, a = 0.4}, {x = 2, y = 2}, true, 3000)
 end
 
 function game:setup_grass()
@@ -46,14 +74,6 @@ function game:setup_grass()
         end
         x = x + 128
     end
-end
-
-function game:setup_tower()
-    tower.sprite = app.sprites.allocate()
-    tower.sprite.scale.x = 2
-    tower.sprite.scale.y = 2
-    tower.sprite.z = (1080 / 2) + (tower_sprite_area[4] * tower.sprite.scale.y)
-    app.sprites.setup(tower.sprite, texture, (1920 / 2) - 48, (1080 / 2) - 48, tower_sprite_area[1], tower_sprite_area[2], tower_sprite_area[3], tower_sprite_area[4])
 end
 
 return game

@@ -31,6 +31,10 @@ app.window.on_resize.subscribe(function(width, height)
     scene_manager:resize(width, height)
 end)
 
+app.window.on_ui.subscribe(function(delta)
+    scene_manager:ui(delta)
+end)
+
 app.window.set_clear_color(0.05, 0.05, 0.08, 1.0)
 
 return error_code.Success

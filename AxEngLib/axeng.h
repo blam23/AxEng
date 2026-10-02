@@ -7,6 +7,7 @@
 #include "lua_engine.h"
 #include "bind_all.h"
 #include "script.h"
+#include "camera.h"
 #include "window.h"
 #include "error.h"
 #include "keyboard.h"

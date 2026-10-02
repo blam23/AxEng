@@ -232,6 +232,22 @@ void ax::Application::add_application_bindings(sol::state& state)
 				};
 		}
 
+		window_table["camera"] = &m_window->camera();
+
+		window_table["global_to_viewport"] =
+			[this](float x, float y) -> std::pair<float, float>
+			{
+				const auto pos{ m_window->global_to_viewport({ x, y }) };
+				return { pos.x, pos.y };
+			};
+
+		window_table["viewport_to_global"] =
+			[this](float x, float y) -> std::pair<float, float>
+			{
+				const auto pos{ m_window->viewport_to_global({ x, y }) };
+				return { pos.x, pos.y };
+			};
+
 		window_table["prevent_close"] =
 			[this]()
 			{
@@ -393,6 +409,62 @@ void ax::Application::add_application_bindings(sol::state& state)
 				}
 			);
 
+		window_table["render_ui"] =
+			sol::overload
+			(
+				[this](const sol::table& texture, float x, float y)
+				{
+					if (texture["valid"])
+						m_window->render_ui_texture(texture["ptr"].get<Texture*>(), { x, y });
+					else
+						spdlog::error("Invalid texture, cannot render");
+				},
+				[this](const sol::table& texture, float x, float y, float z)
+				{
+					if (texture["valid"])
+						m_window->render_ui_texture(texture["ptr"].get<Texture*>(), { x, y }, z);
+					else
+						spdlog::error("Invalid texture, cannot render");
+				},
+				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah)
+				{
+					if (texture["valid"])
+					{
+						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						m_window->render_ui_texture(t, { x, y }, { ax, ay, aw, ah });
+					}
+					else
+					{
+						spdlog::error("Invalid texture, cannot render");
+					}
+				},
+				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah, float z)
+				{
+					if (texture["valid"])
+					{
+						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						m_window->render_ui_texture(t, { x, y }, { ax, ay, aw, ah }, z);
+					}
+					else
+					{
+						spdlog::error("Invalid texture, cannot render");
+					}
+				},
+				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah,
+					float r, float z, float cr, float cg, float cb, float ca, float sx, float sy)
+				{
+					if (texture["valid"])
+					{
+						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						m_window->render_ui_texture(t, { x, y }, r, { ax, ay, aw, ah }, z, { cr, cg, cb, ca }, { sx, sy });
+					}
+					else
+					{
+						spdlog::error("Invalid texture, cannot render");
+					}
+				}
+			);
+
 		app["window"] = window_table;
 
 		{
@@ -466,129 +538,153 @@ void ax::Application::add_application_bindings(sol::state& state)
 		}
 	}
 
-	auto vec_mult_overloads = sol::overload(
-		[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return a * b; },
-		[](const glm::vec2& a, float b) -> glm::vec2 { return a * b; },
-		[](float a, const glm::vec2& b) -> glm::vec2 { return a * b; }
-	);
+	auto vec_mult_overloads = 
+		sol::overload
+		(
+			[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return a * b; },
+			[](const glm::vec2& a, float b) -> glm::vec2 { return a * b; },
+			[](float a, const glm::vec2& b) -> glm::vec2 { return a * b; }
+		);
 
-	auto vec_add_overloads = sol::overload(
-		[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return a + b; },
-		[](const glm::vec2& a, float b) -> glm::vec2 { return a + b; },
-		[](float a, const glm::vec2& b) -> glm::vec2 { return a + b; }
-	);
+	auto vec_add_overloads = 
+		sol::overload
+		(
+			[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return a + b; },
+			[](const glm::vec2& a, float b) -> glm::vec2 { return a + b; },
+			[](float a, const glm::vec2& b) -> glm::vec2 { return a + b; }
+		);
 
-	auto vec_sub_overloads = sol::overload(
-		[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return a - b; },
-		[](const glm::vec2& a, float b) -> glm::vec2 { return a - b; },
-		[](float a, const glm::vec2& b) -> glm::vec2 { return a - b; }
-	);
+	auto vec_sub_overloads =
+		sol::overload
+		(
+			[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return a - b; },
+			[](const glm::vec2& a, float b) -> glm::vec2 { return a - b; },
+			[](float a, const glm::vec2& b) -> glm::vec2 { return a - b; }
+		);
 
-	auto vec_div_overloads = sol::overload(
-		[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return a / b; },
-		[](const glm::vec2& a, float b) -> glm::vec2 { return a / b; },
-		[](float a, const glm::vec2& b) -> glm::vec2 { return a / b; }
-	);
+	auto vec_div_overloads = 
+		sol::overload
+		(
+			[](const glm::vec2& a, const glm::vec2& b) -> glm::vec2 { return a / b; },
+			[](const glm::vec2& a, float b) -> glm::vec2 { return a / b; },
+			[](float a, const glm::vec2& b) -> glm::vec2 { return a / b; }
+		);
 
 	state.new_usertype<glm::vec2>
-		(
-			"vec2",
+	(
+		"vec2",
 
-			"new", sol::constructors<void(float, float)>(),
-			"x", & glm::vec2::x,
-			"y", & glm::vec2::y,
-			"normalize", [](const glm::vec2& in) { return glm::normalize(in); },
-			"length", [](const glm::vec2& in) { return glm::length(in); },
-			sol::meta_function::multiplication, vec_mult_overloads,
-			sol::meta_function::addition, vec_add_overloads,
-			sol::meta_function::subtraction, vec_sub_overloads,
-			sol::meta_function::division, vec_div_overloads,
-			sol::meta_function::to_string, [](const glm::vec2& in) { return glm::to_string(in); }
+		"new", sol::constructors<void(float, float)>(),
+		"x", & glm::vec2::x,
+		"y", & glm::vec2::y,
+		"normalize", [](const glm::vec2& in) { return glm::normalize(in); },
+		"length", [](const glm::vec2& in) { return glm::length(in); },
+		sol::meta_function::multiplication, vec_mult_overloads,
+		sol::meta_function::addition, vec_add_overloads,
+		sol::meta_function::subtraction, vec_sub_overloads,
+		sol::meta_function::division, vec_div_overloads,
+		sol::meta_function::to_string, [](const glm::vec2& in) { return glm::to_string(in); }
+	);
+
+	auto vec4_mult_overloads = 
+		sol::overload
+		(
+			[](const glm::vec4& a, const glm::vec4& b) -> glm::vec4 { return a * b; },
+			[](const glm::vec4& a, float b) -> glm::vec4 { return a * b; },
+			[](float a, const glm::vec4& b) -> glm::vec4 { return a * b; }
 		);
 
-	auto vec4_mult_overloads = sol::overload(
-		[](const glm::vec4& a, const glm::vec4& b) -> glm::vec4 { return a * b; },
-		[](const glm::vec4& a, float b) -> glm::vec4 { return a * b; },
-		[](float a, const glm::vec4& b) -> glm::vec4 { return a * b; }
-	);
+	auto vec4_add_overloads = 
+		sol::overload
+		(
+			[](const glm::vec4& a, const glm::vec4& b) -> glm::vec4 { return a + b; },
+			[](const glm::vec4& a, float b) -> glm::vec4 { return a + b; },
+			[](float a, const glm::vec4& b) -> glm::vec4 { return a + b; }
+		);
 
-	auto vec4_add_overloads = sol::overload(
-		[](const glm::vec4& a, const glm::vec4& b) -> glm::vec4 { return a + b; },
-		[](const glm::vec4& a, float b) -> glm::vec4 { return a + b; },
-		[](float a, const glm::vec4& b) -> glm::vec4 { return a + b; }
-	);
+	auto vec4_sub_overloads = 
+		sol::overload
+		(
+			[](const glm::vec4& a, const glm::vec4& b) -> glm::vec4 { return a - b; },
+			[](const glm::vec4& a, float b) -> glm::vec4 { return a - b; },
+			[](float a, const glm::vec4& b) -> glm::vec4 { return a - b; }
+		);
 
-	auto vec4_sub_overloads = sol::overload(
-		[](const glm::vec4& a, const glm::vec4& b) -> glm::vec4 { return a - b; },
-		[](const glm::vec4& a, float b) -> glm::vec4 { return a - b; },
-		[](float a, const glm::vec4& b) -> glm::vec4 { return a - b; }
-	);
-
-	auto vec4_div_overloads = sol::overload(
-		[](const glm::vec4& a, const glm::vec4& b) -> glm::vec4 { return a / b; },
-		[](const glm::vec4& a, float b) -> glm::vec4 { return a / b; },
-		[](float a, const glm::vec4& b) -> glm::vec4 { return a / b; }
-	);
+	auto vec4_div_overloads = 
+		sol::overload
+		(
+			[](const glm::vec4& a, const glm::vec4& b) -> glm::vec4 { return a / b; },
+			[](const glm::vec4& a, float b) -> glm::vec4 { return a / b; },
+			[](float a, const glm::vec4& b) -> glm::vec4 { return a / b; }
+		);
 
 	state.new_usertype<glm::vec4>
-		(
-			"vec4",
+	(
+		"vec4",
 
-			"new", sol::constructors<void(float, float, float, float)>(),
-			"x", & glm::vec4::x,
-			"y", & glm::vec4::y,
-			"z", & glm::vec4::z,
-			"w", & glm::vec4::w,
-			"normalize", [](const glm::vec4& in) { return glm::normalize(in); },
-			sol::meta_function::multiplication, vec4_mult_overloads,
-			sol::meta_function::addition, vec4_add_overloads,
-			sol::meta_function::subtraction, vec4_sub_overloads,
-			sol::meta_function::division, vec4_div_overloads,
-			sol::meta_function::to_string, [](const glm::vec4& in) { return glm::to_string(in); }
-		);
+		"new", sol::constructors<void(float, float, float, float)>(),
+		"x", & glm::vec4::x,
+		"y", & glm::vec4::y,
+		"z", & glm::vec4::z,
+		"w", & glm::vec4::w,
+		"normalize", [](const glm::vec4& in) { return glm::normalize(in); },
+		sol::meta_function::multiplication, vec4_mult_overloads,
+		sol::meta_function::addition, vec4_add_overloads,
+		sol::meta_function::subtraction, vec4_sub_overloads,
+		sol::meta_function::division, vec4_div_overloads,
+		sol::meta_function::to_string, [](const glm::vec4& in) { return glm::to_string(in); }
+	);
 
 	state.new_usertype<SpriteDefinition>
-		(
-			"sprite",
-			"pos", sol::property(
-				[](SpriteDefinition& sprite) -> glm::vec2& { return sprite.gpuData.pos; },
-				[](SpriteDefinition& sprite, const glm::vec2& pos) { sprite.gpuData.pos = pos; }
-			),
-			"region", sol::property(
-				[](SpriteDefinition& sprite) -> rectf& { return sprite.gpuData.region; },
-				[](SpriteDefinition& sprite, const rectf& region) { sprite.gpuData.region = region; }
-			),
-			"use_region", sol::property(
-				[](const SpriteDefinition& sprite) { return sprite.gpuData.useRegion != 0; },
-				[](SpriteDefinition& sprite, bool useRegion) { sprite.gpuData.useRegion = useRegion ? 1u : 0u; }
-			),
-			"z", sol::property(
-				[](SpriteDefinition& sprite) -> float& { return sprite.gpuData.z; },
-				[](SpriteDefinition& sprite, float z) { sprite.gpuData.z = z; }
-			),
-			"scale", sol::property(
-				[](SpriteDefinition& sprite) -> glm::vec2& { return sprite.gpuData.scale; },
-				[](SpriteDefinition& sprite, const glm::vec2& scale) { sprite.gpuData.scale = scale; }
-			),
-			"rotation", sol::property(
-				[](SpriteDefinition& sprite) -> float& { return sprite.gpuData.rotation; },
-				[](SpriteDefinition& sprite, float rotation) { sprite.gpuData.rotation = rotation; }
-			),
-			"tint", sol::property(
-				[](SpriteDefinition& sprite) -> glm::vec4& { return sprite.gpuData.tint; },
-				[](SpriteDefinition& sprite, const glm::vec4& tint) { sprite.gpuData.tint = tint; }
-			)
-		);
+	(
+		"sprite",
+		"pos", sol::property(
+			[](SpriteDefinition& sprite) -> glm::vec2& { return sprite.gpuData.pos; },
+			[](SpriteDefinition& sprite, const glm::vec2& pos) { sprite.gpuData.pos = pos; }
+		),
+		"region", sol::property(
+			[](SpriteDefinition& sprite) -> rectf& { return sprite.gpuData.region; },
+			[](SpriteDefinition& sprite, const rectf& region) { sprite.gpuData.region = region; }
+		),
+		"use_region", sol::property(
+			[](const SpriteDefinition& sprite) { return sprite.gpuData.useRegion != 0; },
+			[](SpriteDefinition& sprite, bool useRegion) { sprite.gpuData.useRegion = useRegion ? 1u : 0u; }
+		),
+		"z", sol::property(
+			[](SpriteDefinition& sprite) -> float& { return sprite.gpuData.z; },
+			[](SpriteDefinition& sprite, float z) { sprite.gpuData.z = z; }
+		),
+		"scale", sol::property(
+			[](SpriteDefinition& sprite) -> glm::vec2& { return sprite.gpuData.scale; },
+			[](SpriteDefinition& sprite, const glm::vec2& scale) { sprite.gpuData.scale = scale; }
+		),
+		"rotation", sol::property(
+			[](SpriteDefinition& sprite) -> float& { return sprite.gpuData.rotation; },
+			[](SpriteDefinition& sprite, float rotation) { sprite.gpuData.rotation = rotation; }
+		),
+		"tint", sol::property(
+			[](SpriteDefinition& sprite) -> glm::vec4& { return sprite.gpuData.tint; },
+			[](SpriteDefinition& sprite, const glm::vec4& tint) { sprite.gpuData.tint = tint; }
+		)
+	);
 
 	using EH = ax::EventHandler<sol::object>;
 
 	state.new_usertype<EH>
-		(
-			"lua_event",
-			"subscribe", &EH::subscribe,
-			"unsubscribe", &EH::unsubscribe,
-			"fire", &EH::fire
-		);
+	(
+		"lua_event",
+		"subscribe", &EH::subscribe,
+		"unsubscribe", &EH::unsubscribe,
+		"fire", &EH::fire
+	);
+
+	state.new_usertype<Camera>
+	(
+		"camera",
+		"position", sol::property(&Camera::position, &Camera::set_position),
+		"zoom", sol::property(&Camera::zoom, &Camera::set_zoom),
+		"translate", &Camera::translate
+	);
 
 	app["current_executable_path"] =
 		[]() -> std::string

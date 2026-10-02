@@ -30,6 +30,8 @@ ax::Window::Window(const WindowDefinition& def)
 	, m_height{ def.height }
 	, m_vsync{ def.vsync }
 {
+	m_camera.set_position({ 0.0f, 0.0f });
+
 	LogTimer _timer{ "create window" };
 
 	glfwWindowHint(GLFW_RESIZABLE, def.resizable ? GLFW_TRUE : GLFW_FALSE);
@@ -402,7 +404,7 @@ void ax::Window::reload_pipeline()
 
 	// Viewport
 	wgpu::BufferDescriptor vpDesc{};
-	vpDesc.size = 4 * sizeof(float);
+	vpDesc.size = 8 * sizeof(float);
 	vpDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
 	vpDesc.mappedAtCreation = false;
 	vpDesc.label = "ViewportUBO";
@@ -444,7 +446,7 @@ void ax::Window::reload_pipeline()
 	globalEntries[0].binding = 0;
 	globalEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
 	globalEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
-	globalEntries[0].buffer.minBindingSize = static_cast<uint64_t>(4 * sizeof(float));
+	globalEntries[0].buffer.minBindingSize = static_cast<uint64_t>(8 * sizeof(float));
 
 	//
 	// Layout
@@ -683,6 +685,36 @@ void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region, 
 	m_pendingTextures.push_back(sprite);
 }
 
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position)
+{
+	render_texture(tex, position);
+	m_pendingTextures.back().gpuData.screenSpace = 1;
+}
+
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf region)
+{
+	render_texture(tex, position, region);
+	m_pendingTextures.back().gpuData.screenSpace = 1;
+}
+
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale)
+{
+	render_texture(tex, position, r, region, z, color, scale);
+	m_pendingTextures.back().gpuData.screenSpace = 1;
+}
+
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, float z)
+{
+	render_texture(tex, position, z);
+	m_pendingTextures.back().gpuData.screenSpace = 1;
+}
+
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z)
+{
+	render_texture(tex, position, region, z);
+	m_pendingTextures.back().gpuData.screenSpace = 1;
+}
+
 void ax::Window::call_deferred(std::function<void()> func)
 {
 	std::lock_guard lock{ m_deferredMutex };
@@ -864,6 +896,18 @@ void ax::Window::ensure_uniform_capacity(uint32_t required)
 	bufferDesc.label = "SpriteBatch";
 	m_uniforms = m_device.CreateBuffer(&bufferDesc);
 	m_textureBindGroups.clear();
+}
+
+glm::vec2 ax::Window::global_to_viewport(const glm::vec2& position) const
+{
+	const glm::vec2 viewportCenter{ m_width * 0.5f, m_height * 0.5f };
+	return ((position - viewportCenter) / m_camera.zoom()) + m_camera.position();
+}
+
+glm::vec2 ax::Window::viewport_to_global(const glm::vec2& position) const
+{
+	const glm::vec2 viewportCenter{ m_width * 0.5f, m_height * 0.5f };
+	return ((position - m_camera.position()) * m_camera.zoom()) + viewportCenter;
 }
 
 wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view)
@@ -1088,7 +1132,10 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		};
 		wgpu::CommandEncoder encoder = m_device.CreateCommandEncoder(&encoderDesc);
 
-		float vp[4] = { static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f };
+		float vp[8] = {
+			static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f,
+			m_camera.position().x, m_camera.position().y, m_camera.zoom(), 0.f,
+		};
 		m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
 
 		wgpu::RenderPassColorAttachment sceneColorAttachment

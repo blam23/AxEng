@@ -58,6 +58,12 @@ function manager:render(delta, pass)
     end
 end
 
+function manager:ui(delta)
+    if not self.paused and self.current_scene then
+        self.current_scene:ui(delta)
+    end
+end
+
 function manager:change_scene(scene_name)
     if self.scenes[scene_name] then
         if self.current_scene then

@@ -240,6 +240,14 @@ void ax::debug::View::register_debug_view(ax::Application& app)
 			}
 			ImGui::End();
 
+			ImGui::Begin(ICON_FA_GAMEPAD " Game Debug");
+			{
+				const auto& camera{ app.window()->camera() };
+
+				ImGui::Text("Camera Position: (%.2f, %.2f)", camera.position().x, camera.position().y);
+			}
+			ImGui::End();
+
 			ImGui::Begin(ICON_FA_CODE_BRANCH " Lua Debug");
 			{
 				auto& state{ app.scripts().debug_get_state({}) };

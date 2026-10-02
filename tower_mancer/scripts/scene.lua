@@ -22,4 +22,7 @@ end
 function scene:render(delta, pass)
 end
 
+function scene:ui(delta)
+end
+
 return scene

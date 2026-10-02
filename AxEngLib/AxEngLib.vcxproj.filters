@@ -305,6 +305,7 @@
     <ClInclude Include="shared.h">
       <Filter>core\lua\headers</Filter>
     </ClInclude>
+    <ClInclude Include="camera.h" />
   </ItemGroup>
   <ItemGroup>
     <Text Include="..\lua_libs\json.lua">

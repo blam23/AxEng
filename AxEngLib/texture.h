@@ -31,7 +31,7 @@ namespace ax
 		float z{ 0.0f };
 		float rotation{ 0.0f };
 		std::uint32_t useRegion{ 0 };
-		std::uint32_t padding{ 0 };
+		std::uint32_t screenSpace{ 0 };
 
 		static constexpr std::size_t gpuDataSize{ 64 };
 	};
@@ -52,7 +52,7 @@ namespace ax
 	static_assert(offsetof(SpriteGpuData, z) == 48);
 	static_assert(offsetof(SpriteGpuData, rotation) == 52);
 	static_assert(offsetof(SpriteGpuData, useRegion) == 56);
-	static_assert(offsetof(SpriteGpuData, padding) == 60);
+	static_assert(offsetof(SpriteGpuData, screenSpace) == 60);
 	static_assert(sizeof(SpriteGpuData) == SpriteGpuData::gpuDataSize);
 	static_assert(offsetof(SpriteDefinition, gpuData) == 0);
 	static_assert(offsetof(SpriteDefinition, tex) == SpriteGpuData::gpuDataSize);

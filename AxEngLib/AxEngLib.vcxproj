@@ -216,6 +216,7 @@
     <ClInclude Include="backends\imgui_impl_wgpu.h" />
     <ClInclude Include="background_worker.h" />
     <ClInclude Include="bind_all.h" />
+    <ClInclude Include="camera.h" />
     <ClInclude Include="compiler.h" />
     <ClInclude Include="custom_type.h" />
     <ClInclude Include="debug_view.h" />

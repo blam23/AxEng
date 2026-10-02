@@ -1,16 +1,20 @@
-local math_helpers = ax.import("math_helpers")
-local scene = ax.import("scene")
-
+local draw_helpers = ax.import("draw_helpers")
 local texture = app.res.get_texture("tower")
 local enemies = {}
 
 local wizard_sprite_area = { 49, 32, 13, 15 }
 local lizard_sprite_area = { 68, 33, 8, 15 }
 local shadow_sprite_area = { 176, 208, 16, 16 }
+local projectile_sprite_area = { 112, 240, 4, 4}
+
+local first_names = { "Bob", "Alice", "Charlie", "Diana", "Eve", "Frank", "Gustav", "John", "Trogdor" }
+local last_names = { "Smith", "Johnson", "Williams", "Brown", "Jones", "Miller", "Davis", "The Burninator"}
 
 function enemies:setup(count)
     for i = 1, count do
         local enemy = {}
+        enemy.name = first_names[math.random(1, #first_names)] .. " " .. last_names[math.random(1, #last_names)]
+        enemy.name_color = { r = math.random() + 0.5, g = math.random() + 0.5, b = math.random() + 0.5, a = 1.0 }
         enemy.x = math.random(-400, 1920 + 100)
         enemy.y = math.random(-400, 1080 + 100)
         enemy.r = 0
@@ -39,7 +43,13 @@ function enemies:setup(count)
     end
 end
 
+local last_found = {}
 function enemies:tick(delta)
+
+    local mx, my = ax.viewport_mouse_position()
+
+    local found = {}
+
     for i = 1, #enemies do
         local enemy = enemies[i]
         local ex = enemy.x
@@ -56,7 +66,26 @@ function enemies:tick(delta)
         app.sprites.update_position(enemy.sprite, enemy.x, enemy.y, enemy.r)
         app.sprites.update_position(enemy.shadow_sprite, enemy.x + enemy.shadow_off_x, enemy.y + enemy.shadow_off_y)
         enemy.sprite.z = enemy.y + enemy.shadow_off_y
+
+        if mx > enemy.x and mx < enemy.x + 32 and my > enemy.y and my < enemy.y + 32 then
+            found[enemy] = true
+        end
     end
+
+    for enemy, _ in pairs(found) do
+        local ex2, ey2 = app.window.viewport_to_global(enemy.x - (enemy.shadow_off_x * 0.5), enemy.y)
+        ex2 = ex2 - (draw_helpers.string_width(enemy.name, 1.5) * 0.5)
+        draw_helpers.ui_shadowed_string(ex2, ey2 - 20, enemy.name, 0, enemy.name_color, {x = 1.5, y = 1.5}, true, 2000)
+        enemy.sprite.tint = vec4:new(1.0, 0.0, 0.0, 1.0)
+    end
+
+    for enemy, _ in pairs(last_found) do
+        if not found[enemy] then
+            enemy.sprite.tint = vec4:new(1.0, 1.0, 1.0, 1.0)
+        end
+    end
+
+    last_found = found
 end
 
 return enemies

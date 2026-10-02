@@ -36,14 +36,14 @@ function paused:render(delta, pass)
     while x < app.window.width do
         y = 0
         while y < app.window.height do
-            app.window.render(pause_texture, x, y, 1900)
+            app.window.render_ui(pause_texture, x, y, 1900)
             y = y + 128
         end
         x = x + 128
     end
 
-    draw_helpers.shadowed_string(50, 50, "Paused", {r = 0.5, g = 0.0, b = 0.7, a = 1}, {x = 5, y = 5}, true, 2000)
-    draw_helpers.shadowed_string(150, 650, "Back", self.back_color, {x = 3, y = 3}, true, 2000)
+    draw_helpers.ui_shadowed_string(50, 50, "Paused", 0, {r = 0.5, g = 0.0, b = 0.7, a = 1}, {x = 5, y = 5}, true, 2000)
+    draw_helpers.ui_shadowed_string(150, 650, "Back", 0, self.back_color, {x = 3, y = 3}, true, 2000)
 end
 
 return paused

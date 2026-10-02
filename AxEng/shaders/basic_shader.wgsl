@@ -6,13 +6,18 @@ struct Uniforms {
 	z_idx: f32,
 	rotation: f32,
 	use_region: u32,
-	_padding: u32,
+	screen_space: u32,
 };
 
 @group(0) @binding(0) var<storage, read> sprites : array<Uniforms>;
 @group(0) @binding(1) var tex : texture_2d<f32>;
 @group(0) @binding(2) var samp : sampler;
-@group(1) @binding(0) var<uniform> viewport : vec2<f32>; // x=width, y=height
+struct CameraUniforms {
+	viewport: vec4<f32>,
+	camera: vec4<f32>,
+};
+
+@group(1) @binding(0) var<uniform> cameraData : CameraUniforms;
 
 struct VSOut {
 	@builtin(position) pos : vec4<f32>,
@@ -57,8 +62,13 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	let rotatedOffset = vec2<f32>(offset.x * c - offset.y * s, offset.x * s + offset.y * c);
 	let worldPos = center + rotatedOffset;
 	// convert to NDC (-1..1)
-	let ndcX = (worldPos.x / viewport.x) * 2.0 - 1.0;
-	let ndcY = 1.0 - (worldPos.y / viewport.y) * 2.0;
+	let screenPos = select(
+		(worldPos - cameraData.camera.xy) * cameraData.camera.z + cameraData.viewport.xy * 0.5,
+		worldPos,
+		u.screen_space != 0u
+	);
+	let ndcX = (screenPos.x / cameraData.viewport.x) * 2.0 - 1.0;
+	let ndcY = 1.0 - (screenPos.y / cameraData.viewport.y) * 2.0;
 
 	let depth = 0.5 + atan(u.z_idx) / 3.141592653589793;
 	out.pos = vec4<f32>(ndcX, ndcY, depth, 1.0);
