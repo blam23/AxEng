@@ -75,7 +75,7 @@ void ax::Window::resize_event_handler(GLFWwindow* window, int width, int height)
 		it->second->m_width = width == 0 ? 1 : width;
 		it->second->m_height = height == 0 ? 1 : height;
 		it->second->create_surfaces();
-		it->second->m_resizeEventHandler.fire({ static_cast<uint32_t>(width), static_cast<uint32_t>(height) });
+		it->second->m_resizeEventHandler.fire({ static_cast<uint32_t>(it->second->m_width), static_cast<uint32_t>(it->second->m_height) });
 	}
 }
 
