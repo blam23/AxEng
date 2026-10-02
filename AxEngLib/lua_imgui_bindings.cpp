@@ -32,6 +32,12 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 	ui_table["is_window_focused"] =
 		[]() { return ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows); };
 
+	ui_table["get_region_available"] =
+		[]() { return std::pair(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y); };
+
+	ui_table["get_content_position"] =
+		[]() { return std::pair(ImGui::GetWindowContentRegionMin().x + ImGui::GetWindowPos().x, ImGui::GetWindowContentRegionMin().y + ImGui::GetWindowPos().y); };
+
 	ui_table["image"] = 
 		[](const sol::table& img)
 		{

@@ -188,6 +188,50 @@ void ax::Application::add_application_bindings(sol::state& state)
 		auto window_table{ state.create_table() };
 		window_table["handle"] = (void*)m_window->glfw_handle();
 
+		if (m_allowedPermissions[lua::Permission::OS])
+		{
+			window_table["try_embed_child"] =
+				[this](float procIdFloat) -> bool
+				{
+					DWORD processID = static_cast<DWORD>(procIdFloat);
+					return m_window->try_embed_child(processID);
+				};
+
+			window_table["set_embedded_child_position"] =
+				[this](float procIdFloat, float x, float y, float width, float height)
+				{
+					DWORD processID = static_cast<DWORD>(procIdFloat);
+					m_window->set_embedded_child_position(processID, static_cast<int>(x), static_cast<int>(y), static_cast<int>(width), static_cast<int>(height));
+				};
+
+			window_table["try_kill_child"] =
+				[this](float procIdFloat)
+				{
+					DWORD processID = static_cast<DWORD>(procIdFloat);
+					m_window->try_kill_child(processID);
+				};
+
+			window_table["focus_child"] =
+				[this](float procIdFloat)
+				{
+					DWORD processID = static_cast<DWORD>(procIdFloat);
+					return m_window->focus_child(processID);
+				};
+
+			window_table["redirect_input_to_child"] =
+				[this](float procIdFloat)
+				{
+					DWORD processID = static_cast<DWORD>(procIdFloat);
+					m_window->redirect_input_to_child(processID);
+				};
+
+			window_table["reset_input_redirection"] =
+				[this]()
+				{
+					m_window->reset_input_redirection();
+				};
+		}
+
 		window_table["prevent_close"] =
 			[this]()
 			{

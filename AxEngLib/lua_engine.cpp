@@ -4,13 +4,86 @@
 #include "script.h"
 
 #ifdef _WIN32
+#include <Windows.h>
+#include <TlHelp32.h>
+#include <cerrno>
+#include <fcntl.h>
+#include <io.h>
+#include <string>
+
 namespace
 {
+	struct PopenStream
+	{
+		luaL_Stream stream{};
+		HANDLE process{ nullptr };
+		HANDLE job{ nullptr };
+	};
+
+	DWORD find_popen_child(DWORD shellPid, HANDLE shellProcess)
+	{
+		const ULONGLONG deadline{ GetTickCount64() + 1000 };
+		do
+		{
+			const HANDLE snapshot{ CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+			if (snapshot != INVALID_HANDLE_VALUE)
+			{
+				PROCESSENTRY32W entry{};
+				entry.dwSize = sizeof(entry);
+				if (Process32FirstW(snapshot, &entry))
+				{
+					do
+					{
+						const bool isConsoleHost
+						{
+							CompareStringOrdinal(entry.szExeFile, -1, L"conhost.exe", -1, TRUE) == CSTR_EQUAL ||
+							CompareStringOrdinal(entry.szExeFile, -1, L"OpenConsole.exe", -1, TRUE) == CSTR_EQUAL
+						};
+
+						if (entry.th32ParentProcessID == shellPid && !isConsoleHost)
+						{
+							const DWORD childPid{ entry.th32ProcessID };
+							CloseHandle(snapshot);
+							return childPid;
+						}
+					} while (Process32NextW(snapshot, &entry));
+				}
+				CloseHandle(snapshot);
+			}
+
+			if (WaitForSingleObject(shellProcess, 0) == WAIT_OBJECT_0)
+				break;
+
+			Sleep(5);
+		} while (GetTickCount64() < deadline);
+
+		// Failure, return 0 as the child PID to indicate that we couldn't find it.
+		return 0;
+	}
+
 	int lua_popen_close(lua_State* L)
 	{
-		auto* stream{ static_cast<luaL_Stream*>(luaL_checkudata(L, 1, LUA_FILEHANDLE)) };
-		const int status{ _pclose(stream->f) };
+		auto* popenStream{ static_cast<PopenStream*>(luaL_checkudata(L, 1, LUA_FILEHANDLE)) };
+		luaL_Stream* stream{ &popenStream->stream };
+		std::fclose(stream->f);
 		stream->f = nullptr;
+
+		int status{ -1 };
+		if (popenStream->process != nullptr)
+		{
+			DWORD exitCode{};
+			if (WaitForSingleObject(popenStream->process, INFINITE) == WAIT_OBJECT_0 &&
+				GetExitCodeProcess(popenStream->process, &exitCode))
+				status = static_cast<int>(exitCode);
+			CloseHandle(popenStream->process);
+			popenStream->process = nullptr;
+		}
+		if (popenStream->job != nullptr)
+		{
+			CloseHandle(popenStream->job);
+			popenStream->job = nullptr;
+		}
+
 		return luaL_execresult(L, status);
 	}
 
@@ -18,18 +91,115 @@ namespace
 	{
 		const char* command{ luaL_checkstring(L, 1) };
 		const char* mode{ luaL_optstring(L, 2, "r") };
-		auto* stream{ static_cast<luaL_Stream*>(lua_newuserdatauv(L, sizeof(luaL_Stream), 0)) };
-		stream->f = _popen(command, mode);
-		stream->closef = &lua_popen_close;
-		luaL_setmetatable(L, LUA_FILEHANDLE);
+		const bool reading{ mode[0] == 'r' };
+		const bool validMode{ (reading || mode[0] == 'w') &&
+			(mode[1] == '\0' || ((mode[1] == 'b' || mode[1] == 't') && mode[2] == '\0')) };
+		luaL_argcheck(L, validMode, 2, "invalid mode");
 
-		if (stream->f == nullptr)
+		const int commandLength{ MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, command, -1, nullptr, 0) };
+		if (commandLength == 0)
+			return luaL_argerror(L, 1, "command must be valid UTF-8");
+		std::wstring wideCommand(static_cast<size_t>(commandLength), L'\0');
+		MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, command, -1, wideCommand.data(), commandLength);
+		wideCommand.pop_back();
+
+		SECURITY_ATTRIBUTES securityAttributes{ sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE };
+		HANDLE pipeRead{};
+		HANDLE pipeWrite{};
+		if (!CreatePipe(&pipeRead, &pipeWrite, &securityAttributes, 0))
 		{
-			stream->closef = nullptr;
+			errno = EIO;
 			return luaL_fileresult(L, 0, command);
 		}
 
-		return 1;
+		HANDLE parentPipe{ reading ? pipeRead : pipeWrite };
+		HANDLE childPipe{ reading ? pipeWrite : pipeRead };
+		if (!SetHandleInformation(parentPipe, HANDLE_FLAG_INHERIT, 0))
+		{
+			CloseHandle(pipeRead);
+			CloseHandle(pipeWrite);
+			errno = EIO;
+			return luaL_fileresult(L, 0, command);
+		}
+
+		const int openFlags{ (reading ? _O_RDONLY : _O_WRONLY) | (mode[1] == 'b' ? _O_BINARY : _O_TEXT) };
+		const int fd{ _open_osfhandle(reinterpret_cast<intptr_t>(parentPipe), openFlags) };
+		if (fd == -1)
+		{
+			CloseHandle(parentPipe);
+			CloseHandle(childPipe);
+			errno = EIO;
+			return luaL_fileresult(L, 0, command);
+		}
+		FILE* file{ _fdopen(fd, mode) };
+		if (file == nullptr)
+		{
+			_close(fd);
+			CloseHandle(childPipe);
+			errno = EIO;
+			return luaL_fileresult(L, 0, command);
+		}
+
+		wchar_t shell[MAX_PATH]{};
+		const DWORD shellLength{ GetEnvironmentVariableW(L"COMSPEC", shell, static_cast<DWORD>(std::size(shell))) };
+		const std::wstring shellPath{ shellLength > 0 && shellLength < std::size(shell) ? shell : L"cmd.exe" };
+		std::wstring commandLine{ L"\"" + shellPath + L"\" /d /c " + wideCommand };
+
+		STARTUPINFOW startupInfo{};
+		startupInfo.cb = sizeof(startupInfo);
+		startupInfo.dwFlags = STARTF_USESTDHANDLES;
+		startupInfo.hStdInput = reading ? GetStdHandle(STD_INPUT_HANDLE) : childPipe;
+		startupInfo.hStdOutput = reading ? childPipe : GetStdHandle(STD_OUTPUT_HANDLE);
+		startupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+		HANDLE job{ CreateJobObjectW(nullptr, nullptr) };
+		JOBOBJECT_EXTENDED_LIMIT_INFORMATION jobInfo{};
+		jobInfo.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+		if (job == nullptr || !SetInformationJobObject(job, JobObjectExtendedLimitInformation,
+			&jobInfo, sizeof(jobInfo)))
+		{
+			if (job != nullptr)
+				CloseHandle(job);
+			std::fclose(file);
+			CloseHandle(childPipe);
+			errno = EIO;
+			return luaL_fileresult(L, 0, command);
+		}
+
+		PROCESS_INFORMATION processInfo{};
+		if (!CreateProcessW(shellPath.c_str(), commandLine.data(), nullptr, nullptr, TRUE,
+			CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &startupInfo, &processInfo))
+		{
+			CloseHandle(job);
+			std::fclose(file);
+			CloseHandle(childPipe);
+			errno = EIO;
+			return luaL_fileresult(L, 0, command);
+		}
+		if (!AssignProcessToJobObject(job, processInfo.hProcess) || ResumeThread(processInfo.hThread) == static_cast<DWORD>(-1))
+		{
+			TerminateProcess(processInfo.hProcess, 1);
+			WaitForSingleObject(processInfo.hProcess, INFINITE);
+			CloseHandle(processInfo.hThread);
+			CloseHandle(processInfo.hProcess);
+			CloseHandle(job);
+			std::fclose(file);
+			CloseHandle(childPipe);
+			errno = EIO;
+			return luaL_fileresult(L, 0, command);
+		}
+		CloseHandle(childPipe);
+		CloseHandle(processInfo.hThread);
+		const DWORD popenPid{ find_popen_child(processInfo.dwProcessId, processInfo.hProcess) };
+
+		auto* popenStream{ static_cast<PopenStream*>(lua_newuserdatauv(L, sizeof(PopenStream), 0)) };
+		popenStream->stream.f = file;
+		popenStream->stream.closef = &lua_popen_close;
+		popenStream->process = processInfo.hProcess;
+		popenStream->job = job;
+		luaL_setmetatable(L, LUA_FILEHANDLE);
+		lua_pushinteger(L, static_cast<lua_Integer>(popenPid));
+
+		return 2;
 	}
 }
 #endif
@@ -80,8 +250,8 @@ ax::Error ax::lua::Manager::setup()
 		return ax::Error::IO;
 	}
 
-	//m_state.set_panic(sol::c_call<decltype(&lua_panic), &lua_panic>);
-	//m_state.set_exception_handler(&lua_exception_handler);
+	m_state.set_panic(sol::c_call<decltype(&lua_panic), &lua_panic>);
+	m_state.set_exception_handler(&lua_exception_handler);
 
 	// Always open these libraries - open the rest depending on permissions later.
 	m_state.open_libraries

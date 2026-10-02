@@ -12,7 +12,7 @@ shared:set("running", true)
 local success = false
 local err = ""
 local stdout = ""
-success, err, stdout = try_run.inline(shared:get("args"))
+success, err, stdout = try_run.inline(shared:get("args"), shared)
 shared:set("success", success)
 shared:set("err", err)
 shared:set("stdout", stdout)

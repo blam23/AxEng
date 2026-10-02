@@ -72,10 +72,10 @@ void ax::Window::resize_event_handler(GLFWwindow* window, int width, int height)
 			return;
 		}
 
-		it->second->m_width = width;
-		it->second->m_height = height;
+		it->second->m_width = width == 0 ? 1 : width;
+		it->second->m_height = height == 0 ? 1 : height;
 		it->second->create_surfaces();
-		it->second->m_resizeEventHandler.fire({ static_cast<uint32_t>(width), static_cast<uint32_t>(height) });
+		it->second->m_resizeEventHandler.fire({ static_cast<uint32_t>(it->second->m_width), static_cast<uint32_t>(it->second->m_height) });
 	}
 }
 
@@ -687,6 +687,166 @@ void ax::Window::call_deferred(std::function<void()> func)
 {
 	std::lock_guard lock{ m_deferredMutex };
 	m_deferred.push_back(std::move(func));
+}
+
+#include "glfw/glfw3native.h"
+bool ax::Window::try_embed_child(DWORD procid)
+{
+	const auto my_hwnd{ glfwGetWin32Window(m_window) };
+
+	struct EnumWindowContext
+	{
+		DWORD process_id;
+		HWND child_handle;
+	} context{ procid, nullptr };
+
+	::EnumWindows
+	(
+		[](HWND hwnd, LPARAM lParam) -> BOOL
+		{
+			auto* context{ reinterpret_cast<EnumWindowContext*>(lParam) };
+			DWORD windowProcId;
+
+			if (!::IsWindowVisible(hwnd))
+				return TRUE;
+
+			::GetWindowThreadProcessId(hwnd, &windowProcId);
+			if (windowProcId == context->process_id)
+			{
+				context->child_handle = hwnd;
+				return FALSE;
+			}
+
+			return TRUE;
+		},
+		reinterpret_cast<LPARAM>(&context)
+	);
+
+	if (context.child_handle != nullptr)
+	{
+		::SetParent(context.child_handle, my_hwnd);
+		LONG style = ::GetWindowLong(context.child_handle, GWL_STYLE);
+		style &= ~(WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU | WS_EX_DLGMODALFRAME | WS_EX_CLIENTEDGE | WS_EX_STATICEDGE);
+		::SetWindowLong(context.child_handle, GWL_STYLE, style | WS_CHILD);
+		::SetWindowPos(context.child_handle, NULL, 0, 0, 0, 0, SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOOWNERZORDER);
+
+		m_childWindows[context.process_id] = context.child_handle;
+
+		return true;
+	}
+
+	return false;
+}
+
+void ax::Window::try_kill_child(DWORD processID)
+{
+	auto it = m_childWindows.find(processID);
+	if (it != m_childWindows.end())
+	{
+		HWND childHandle = it->second;
+		if (::IsWindow(childHandle))
+		{
+			::SendMessage(childHandle, WM_CLOSE, 0, 0);
+			::SetParent(childHandle, NULL);
+		}
+		m_childWindows.erase(it);
+	}
+}
+
+void ax::Window::set_embedded_child_position(DWORD processID, int x, int y, int width, int height)
+{
+	auto it = m_childWindows.find(processID);
+	if (it != m_childWindows.end())
+	{
+		HWND childHandle = it->second;
+
+		if (!(::IsWindow(childHandle)))
+			m_childWindows.erase(it);
+		else
+			::SetWindowPos(childHandle, NULL, x, y, width, height, SWP_SHOWWINDOW | SWP_NOZORDER | SWP_NOOWNERZORDER);
+	}
+}
+
+void ax::Window::focus_child(DWORD processID)
+{
+	auto it = m_childWindows.find(processID);
+	if (it != m_childWindows.end())
+	{
+		HWND childHandle = it->second;
+		if (!(::IsWindow(childHandle)))
+			m_childWindows.erase(it);
+		else
+			::SetFocus(childHandle);
+	}
+}
+
+static std::mutex s_redirectMutex{};
+static std::map<HWND, WNDPROC> s_originalWndProc{};
+static std::map<HWND, HWND> s_redirectHandles{};
+
+void ax::Window::redirect_input_to_child(DWORD processID)
+{
+	auto it = m_childWindows.find(processID);
+	if (it != m_childWindows.end())
+	{
+		HWND childHandle = it->second;
+		if (!(::IsWindow(childHandle)))
+			m_childWindows.erase(it);
+		else
+		{
+			std::lock_guard lock{ s_redirectMutex };
+
+			HWND hWnd = ::glfwGetWin32Window(m_window);
+
+			ImGui_ImplGlfw_RestoreCallbacks(m_window);
+
+			if (s_originalWndProc.find(hWnd) == s_originalWndProc.end())
+				s_originalWndProc[hWnd] = (WNDPROC)::GetWindowLongPtr(hWnd, GWLP_WNDPROC);
+
+			s_redirectHandles[hWnd] = childHandle;
+			::SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)ax::Window::raw_windows_event);
+
+			register_window_events();
+			ImGui_ImplGlfw_InstallCallbacks(m_window);
+		}
+	}
+}
+
+
+LRESULT ax::Window::raw_windows_event(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+	switch (msg)
+	{
+	case WM_KEYDOWN:
+	case WM_KEYUP:
+	{
+		::SendMessage(s_redirectHandles[hwnd], msg, wParam, lParam);
+		return 0;
+	}
+	default:
+		break;
+	}
+
+	return ::CallWindowProc(s_originalWndProc[hwnd], hwnd, msg, wParam, lParam);
+}
+
+
+void ax::Window::reset_input_redirection()
+{
+	std::lock_guard lock{ s_redirectMutex };
+
+	const auto hwnd{ ::glfwGetWin32Window(m_window) };
+	const auto originalWndProc{ s_originalWndProc.find(hwnd) };
+	if (originalWndProc == s_originalWndProc.end())
+		return;
+
+	ImGui_ImplGlfw_RestoreCallbacks(m_window);
+	s_redirectHandles.erase(hwnd);
+	::SetWindowLongPtr(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(originalWndProc->second));
+	s_originalWndProc.erase(originalWndProc);
+
+	register_window_events();
+	ImGui_ImplGlfw_InstallCallbacks(m_window);
 }
 
 void ax::Window::ensure_uniform_capacity(uint32_t required)
