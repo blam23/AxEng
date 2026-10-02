@@ -38,8 +38,8 @@ function try_run.inline(args, shared)
     end
     local handle, pid = io.popen(cmd, "r")
     if shared ~= nil then
-        app.signal(shared, "launched")
         shared:set("pid", pid)
+        app.signal(shared, "launched")
     end
     local stdout = handle:read("*a")
     local rc = {handle:close()}
