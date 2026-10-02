@@ -6,8 +6,10 @@
 #include "log_capture.h"
 
 #include <atomic>
+#include <condition_variable>
 #include <chrono>
 #include <future>
+#include <mutex>
 
 using namespace ax;
 
@@ -66,6 +68,106 @@ TEST(BackgroundWorkerTests, RunsLuaScriptTaskWhenLuaIsEnabled)
 	EXPECT_EQ(result->get_error(), Error::Success);
 	worker.stop();
 } 
+
+TEST(BackgroundWorkerTests, ScriptTaskStressSharedObjectAcrossLuaThreads)
+{
+	register_worker_lua_resources();
+	static constexpr char workerScriptCode[] =
+		"assert(synchronize())\n"
+		"for i = 1, 10000 do\n"
+		"    shared_set('worker:' .. i, i)\n"
+		"    local value = shared_get('main:' .. i)\n"
+		"    assert(value == nil or value == i)\n"
+		"end";
+	static constexpr char mainScriptCode[] =
+		"assert(synchronize())\n"
+		"for i = 1, 10000 do\n"
+		"    shared_set('main:' .. i, i)\n"
+		"    local value = shared_get('worker:' .. i)\n"
+		"    assert(value == nil or value == i)\n"
+		"end";
+	static constexpr char validationScriptCode[] =
+		"for i = 1, 10000 do\n"
+		"    assert(shared_get('main:' .. i) == i)\n"
+		"    assert(shared_get('worker:' .. i) == i)\n"
+		"end";
+
+	Application app = make_worker_app(workerScriptCode, sizeof(workerScriptCode) - 1);
+	BackgroundWorker worker{ true, {} };
+	ASSERT_EQ(worker.lua().setup(), Error::Success);
+
+	lua::SharedObject shared;
+	auto bindSharedObject = [&shared](sol::state& state)
+	{
+		auto* statePtr = &state;
+		state.set_function("shared_set", [&shared](const std::string& key, sol::object value)
+		{
+			shared.set(key, std::move(value));
+		});
+		state.set_function("shared_get", [&shared, statePtr](const std::string& key)
+		{
+			return shared.get(*statePtr, key);
+		});
+	};
+
+	std::mutex rendezvousMutex;
+	std::condition_variable rendezvousCondition;
+	int rendezvousCount = 0;
+	auto synchronize = [&]()
+	{
+		std::unique_lock lock{ rendezvousMutex };
+		++rendezvousCount;
+		if (rendezvousCount == 2)
+			rendezvousCondition.notify_all();
+		else if (!rendezvousCondition.wait_for(lock, callbackTimeout, [&]() { return rendezvousCount == 2; }))
+			return false;
+		return true;
+	};
+	worker.lua().state().set_function("synchronize", synchronize);
+	bindSharedObject(worker.lua().state());
+
+	sol::state mainState;
+	mainState.open_libraries();
+	mainState.set_function("synchronize", synchronize);
+	bindSharedObject(mainState);
+
+	std::promise<ResultPtr> callbackPromise;
+	auto callbackFuture = callbackPromise.get_future();
+	auto* script = app.scripts().load("shared_object_worker", "worker.lua");
+	ASSERT_NE(script, nullptr);
+	auto* task = worker.create_script_task(script);
+	ASSERT_NE(task, nullptr);
+	auto publishResult = [&](ResultPtr result) { callbackPromise.set_value(std::move(result)); };
+	task->set_success(publishResult);
+	task->set_failure(publishResult);
+
+	worker.start({});
+	worker.enqueue(task);
+	auto mainResult = mainState.do_string(mainScriptCode, "@shared_object_main_stress");
+	if (!mainResult.valid())
+	{
+		worker.stop();
+		const sol::error error = mainResult;
+		FAIL() << error.what();
+	}
+
+	if (callbackFuture.wait_for(callbackTimeout) != std::future_status::ready)
+	{
+		worker.stop();
+		FAIL() << "Background script task did not complete before timeout";
+	}
+	auto result = callbackFuture.get();
+	ASSERT_NE(result, nullptr);
+	EXPECT_EQ(result->get_error(), Error::Success);
+
+	auto validationResult = mainState.do_string(validationScriptCode, "@shared_object_validation");
+	if (!validationResult.valid())
+	{
+		const sol::error error = validationResult;
+		ADD_FAILURE() << error.what();
+	}
+	worker.stop();
+}
 
 TEST(BackgroundWorkerTests, ReportsLuaScriptTaskRuntimeErrors)
 {

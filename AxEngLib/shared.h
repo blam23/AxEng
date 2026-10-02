@@ -19,6 +19,7 @@ namespace ax::lua
 
 		void set(const std::string& key, sol::object value)
 		{
+			std::lock_guard lock{ m_dataMutex };
 			if (value == sol::nil)
 				m_data.erase(key);
 			else
@@ -27,6 +28,7 @@ namespace ax::lua
 
 		sol::object get(sol::state& copy_to, const std::string& key)
 		{
+			std::lock_guard lock{ m_dataMutex };
 			if (auto it = m_data.find(key); it != m_data.end())
 				return copy_object_from_shared(copy_to, it->second);
 			return sol::nil;
@@ -58,6 +60,7 @@ namespace ax::lua
 		sol::state m_sharedState{};
 		std::mutex m_sharedStateMutex{};
 
+		std::mutex m_dataMutex{};
 		std::map<std::string, sol::object> m_data{};
 		std::atomic_uint32_t m_refCount{ 0 };
 
