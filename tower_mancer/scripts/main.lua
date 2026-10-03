@@ -20,7 +20,7 @@ end
 keyboard.subscribe_key(ax.key_map.esc, esc_key_event)
 
 time = 0
-app.on_update.subscribe(function(delta, pass)
+app.on_update.subscribe(function(delta)
     time = time + delta
     scene_manager:tick(delta)
 end)

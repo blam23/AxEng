@@ -1,6 +1,6 @@
 local class = ax.import("class")
 
-scene = {}
+local scene = {}
 local scene_mt = class(scene)
 
 function scene:new(can_be_paused)
