@@ -49,6 +49,23 @@ void ax::Application::add_application_bindings(sol::state& state)
 {
 	auto app{ state.create_table() };
 
+	app["call_deferred"] =
+		[this](sol::protected_function f)
+		{
+			call_deferred
+			(
+				[f]()
+				{
+					const auto res{ f() };
+					if (!res.valid())
+					{
+						const sol::error err = res;
+						spdlog::error("Failed to run deferred callback: {}", err.what());
+					}
+				}
+			);
+		};
+
 	app["get_or_create_shared"] =
 		[this](const std::string& name) -> ax::lua::SharedObject*
 		{
