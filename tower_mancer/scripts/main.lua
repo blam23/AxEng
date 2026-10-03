@@ -1,5 +1,7 @@
 -- -cxr --allow-io --allow-os --in "$(SolutionDir)tower_mancer" --out "E:\TowerMancer"
 
+math.randomseed(0800001066)
+
 local scene_manager = ax.import("scene_manager")
 
 scene_manager:init({

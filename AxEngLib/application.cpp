@@ -532,7 +532,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 				{
 					for (std::size_t i = 1; i <= updates.size(); ++i)
 					{
-						const sol::table update{ updates.get<sol::table>(i) };
+						const sol::table& update{ updates.get<sol::table>(i) };
 						SpriteDefinition* sprite{ update.get<SpriteDefinition*>("sprite") };
 						sprite->gpuData.pos.x = update.get<float>("x");
 						sprite->gpuData.pos.y = update.get<float>("y");

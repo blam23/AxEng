@@ -48,9 +48,6 @@ function enemies:setup(num_enemies)
         --sprite_updates[sprite_idx] = { sprite = enemy.shadow_sprite, x = enemy.x + enemy.shadow_off_x, y = enemy.y + enemy.shadow_off_y, r = 0 }
         table.insert(enemies, enemy)
     end
-
-    --print(#sprite_updates)
-    print(#enemies)
 end
 
 local last_found = {}
