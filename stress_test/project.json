@@ -1,0 +1,20 @@
+{
+   "entry_point":"runner",
+   "highlight":"#A256FF",
+   "icon":"test",
+   "name":"Stress",
+   "required_permissions":[
+
+   ],
+   "scripts":{
+      "base_test":"scripts/base_test.lua",
+      "class":"scripts/lib/class.lua",
+      "runner":"scripts/runner.lua",
+      "test_single_update":"scripts/tests/sprites_single_update.lua",
+      "test_batch_update":"scripts/tests/sprites_batch_update.lua"
+   },
+   "textures":{
+      "test":"assets/test.png"
+   },
+   "vsync":false
+}
