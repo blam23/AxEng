@@ -84,7 +84,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 	{
 		auto on_update_table{ state.create_table() };
 		on_update_table["subscribe"] =
-			[this](sol::function f) -> size_t
+			[this](sol::protected_function f) -> size_t
 			{
 				return m_window->get_update_event_handler().subscribe
 				(
