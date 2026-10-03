@@ -181,7 +181,7 @@ local function create_manifest(project, dir, strip_debug_output)
         HEADLESS = project.headless and tostring(project.headless) or false,
         WINDOW_WIDTH = 1920,
         WINDOW_HEIGHT = 1080,
-        WINDOW_VSYNC = true,
+        WINDOW_VSYNC = project.vsync ~= nil and tostring(project.vsync) or true,
         SCRIPTS = gen_script_text(),
         TEXTURES = gen_textures_text(project),
         TYPES = gen_types_text(project),
