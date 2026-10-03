@@ -1,8 +1,12 @@
 #include "texture.h"
 #include <memory>
 
+#pragma warning(push)
+#pragma warning(disable : 4505) // unused functions due to PNG only flag
+#define STBI_ONLY_PNG
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#pragma warning(pop)
 
 #include "spdlog/spdlog.h"
 
