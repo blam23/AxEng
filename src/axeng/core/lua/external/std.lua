@@ -17,15 +17,21 @@ ax.viewport_mouse_position = function()
     return app.window.global_to_viewport(mouse.get_position())
 end
 
-ax.print_table = function(tbl, lvl)
+ax.print_table = function(tbl, lvl, printed)
+    local printed = printed or {}
     if lvl == nil then lvl = 0 end
     local indent_str = string.rep("   ", lvl)
 
     for k, v in pairs(tbl) do
         if type(v) == "table" then
-            print(indent_str, k, " = {")
-            ax.print_table(v, lvl + 1)
-            print(indent_str, "}")
+            if printed[v] then
+                print(indent_str, k, " = { <already printed> }")
+            else
+                printed[v] = true
+                print(indent_str, k, " = {")
+                ax.print_table(v, lvl + 1, printed)
+                print(indent_str, "}")
+            end
         else
             print(indent_str, k, " = ", tostring(v))
         end
@@ -97,7 +103,6 @@ ax.template_replace = function(str, data)
                 inner_key = inner_key:sub(2)
             end
             local idx_end_start = str:find("%END%", idx_e + 2, true)
-            print("inner key value: ", data[inner_key])
             if tostring(data[inner_key]) == tostring(test_check) then
                 used_key = true
                 ret = ret .. str:sub(pos, idx - 1)
