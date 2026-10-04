@@ -1,4 +1,5 @@
 {
+   "build_texture_atlas":true,
    "entry_point":"main",
    "highlight":"#A256FF",
    "icon":"icon",

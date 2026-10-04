@@ -5,6 +5,7 @@ manifest = {
     name = "%%NAME%%",
     entry_point = "%%ENTRY_POINT%%",
     headless = %%HEADLESS%%,
+    atlas_texture = "%%ATLAS_TEXTURE%%",
     %%?IF ~HEADLESS%%window = {
         width = %%WINDOW_WIDTH%%,
         height = %%WINDOW_HEIGHT%%,
@@ -29,4 +30,8 @@ manifest.custom_types = {
 
 manifest.permissions = {
 %%PERMISSIONS%%
+}
+
+manifest.texture_atlas = {
+%%ATLAS_REGIONS%%
 }

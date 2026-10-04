@@ -82,6 +82,7 @@ namespace ax
 		std::string m_name{};
 		std::string m_directory_name{};
 		lua::Script* m_entryPoint{};
+		Texture* m_atlasTexture{};
 
 		bool m_loaded{ false };
 		flag_set<lua::Permission> m_allowedPermissions;
@@ -90,7 +91,7 @@ namespace ax
 		BackgroundWorker m_backgroundWorker;
 		std::mutex m_shared_mutex{};
 		std::map<std::string, ax::lua::SharedObject> m_shared{};
-
+		
 		UserFileManager m_userFileManager;
 	};
 }

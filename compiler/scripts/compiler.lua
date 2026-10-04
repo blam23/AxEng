@@ -74,23 +74,75 @@ local function check_and_copy_textures(project, in_directory, out_directory)
         return true
     end
 
-    for texture_name, texture_path in pairs(project.textures) do
-        if texture_path:sub(-4) ~= ".png" then
-            log.error("All textures must have '.png' extension, '" .. texture_path .. "' does not.")
-            return false
+    local copy_icon = false
+
+    if project.build_texture_atlas then
+        local icon_texture = nil
+        local textures = {}
+        local atlas_texture_name = "__texture_atlas"
+        local lookup = {}
+        ax.print_table(project.textures)
+        for k, v in pairs(project.textures) do
+            if k ~= project.icon then
+                table.insert(textures, in_directory .. "/" .. v)
+                lookup[in_directory .. "/" .. v] = k
+            else
+                copy_icon = true
+                icon_texture = v
+            end
+        end
+        ax.print_table(textures)
+        app.res.create_mega_texture("compiler_temp_texture_atlas", textures, 2.0)
+        app.res.save_texture("compiler_temp_texture_atlas", out_directory .. "/texture_atlas.png")
+
+        local res = app.res.get_texture_regions("compiler_temp_texture_atlas")
+        project.atlas_regions = {}
+        if res.valid and res.regions then
+            for k, v in pairs(res.regions) do
+                log.debug("Texture atlas region: " .. k)
+                project.atlas_regions[lookup[k]] = v
+            end
         end
 
-        local in_path = in_directory .. "/" .. texture_path
-        local out_path = out_directory .. "/" .. texture_path
+        project.textures = { [atlas_texture_name] = "texture_atlas.png" }
 
+        if icon_texture then
+            project.textures[project.icon] = icon_texture
+        end
+
+        log.debug("Compiled texture atlas.")
+        project.atlas_texture = atlas_texture_name
+    else
+        for texture_name, texture_path in pairs(project.textures) do
+            if texture_path:sub(-4) ~= ".png" then
+                log.error("All textures must have '.png' extension, '" .. texture_path .. "' does not.")
+                return false
+            end
+
+            local in_path = in_directory .. "/" .. texture_path
+            local out_path = out_directory .. "/" .. texture_path
+
+            if not check_and_copy_texture(in_path, out_path) then
+                return false
+            end
+
+            log.debug("Compiled texture: " .. texture_name)
+        end
+
+        project.atlas_mode = false
+    end
+
+    if copy_icon then
+        local in_path = in_directory .. "/" .. project.textures[project.icon]
+        local out_path = out_directory .. "/" .. project.textures[project.icon]
         if not check_and_copy_texture(in_path, out_path) then
             return false
         end
 
-        log.debug("Compiled texture: " .. texture_name)
+        log.debug("Compiled texture: " .. project.icon)
     end
 
-    log.info("Compiled textures.")
+    log.info("Compiled textures")
 
     return true
 end
@@ -165,6 +217,20 @@ local function gen_permissions_text(project)
     return ax.rstrip(ret)
 end
 
+local function gen_atlas_regions_text(project)
+    local ret = ""
+
+    if project.atlas_regions == nil then
+        return ret
+    end
+
+    for k,v in pairs(project.atlas_regions) do
+        ret = ret .. "    " .. k .. " = { " .. v[1] .. ", " .. v[2] .. ", " .. v[3] .. ", " .. v[4] .. " },\n"
+    end
+
+    return ax.rstrip(ret)
+end
+
 local function create_manifest(project, dir, strip_debug_output)
     -- TODO: I need to make this use the project directory directly
     local tfile = io.open("AxCompiler/templates/output_template.luat", "r")
@@ -187,6 +253,8 @@ local function create_manifest(project, dir, strip_debug_output)
         TEXTURES = gen_textures_text(project),
         TYPES = gen_types_text(project),
         PERMISSIONS = gen_permissions_text(project),
+        ATLAS_TEXTURE = project.atlas_texture or "null",
+        ATLAS_REGIONS = gen_atlas_regions_text(project),
     }
     local output = ax.template_replace(template, data)
 

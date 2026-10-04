@@ -1,6 +1,7 @@
 #include "axeng/core/application.h"
 
 #include "axeng/core/lua/external/lua_lib_loader.h"
+#include "axeng/core/lua/bindings/lua_texture_bindings.h"
 
 #define GLM_ENABLE_EXPERIMENTAL
 #include "glm/gtx/string_cast.hpp"
@@ -140,33 +141,68 @@ void ax::Application::add_application_bindings(sol::state& state)
 	}
 
 	{
-		auto resource_lookup_texture{ state.create_table() };
+		auto resource_lookup_table{ state.create_table() };
 
-		resource_lookup_texture["get_texture"] =
-			[this, &state](const std::string& name) -> sol::table
-			{
-				auto text{ m_textures.get(name) };
-
-				auto ret = state.create_table();
-
-				if (text)
+		if (m_atlasTexture == nullptr)
+		{
+			resource_lookup_table["get_texture"] =
+				[this, &state](const std::string& name) -> sol::table
 				{
-					ret["valid"] = true;
-					ret["ptr"] = text;
-					ret["view"] = text->view();
-					ret["ui_view"] = text->imgui_view();
-					ret["width"] = text->width();
-					ret["height"] = text->height();
-				}
-				else
+					auto text{ m_textures.get(name) };
+
+					auto ret = state.create_table();
+
+					if (text)
+					{
+						ret["valid"] = true;
+						ret["ptr"] = text;
+						ret["view"] = text->view();
+						ret["ui_view"] = text->imgui_view();
+						ret["width"] = text->width();
+						ret["height"] = text->height();
+					}
+					else
+					{
+						ret["valid"] = false;
+					}
+
+					return ret;
+				};
+		}
+		else
+		{
+			resource_lookup_table["get_texture"] =
+				[this, &state](const std::string& name) -> sol::table
 				{
-					ret["valid"] = false;
-				}
+					auto text{ m_atlasTexture };
+					auto region{ m_atlasTexture->region(name) };
 
-				return ret;
-			};
+					auto ret = state.create_table();
 
-		resource_lookup_texture["create_texture"] =
+					if (region.has_value())
+					{
+						ret["valid"] = true;
+						ret["ptr"] = text;
+						ret["view"] = text->view();
+						ret["ui_view"] = text->imgui_view();
+						ret["width"] = region->z;
+						ret["height"] = region->w;
+						ret["atlas_region"] = state.create_table();
+						ret["atlas_region"][1] = region->x;
+						ret["atlas_region"][2] = region->y;
+						ret["atlas_region"][3] = region->z;
+						ret["atlas_region"][4] = region->w;
+					}
+					else
+					{
+						ret["valid"] = false;
+					}
+
+					return ret;
+				};
+		}
+
+		resource_lookup_table["create_texture"] =
 			[this, &state](const std::string& name, const std::string& data) -> sol::table
 			{
 				auto text{ m_textures.get(name) };
@@ -193,7 +229,63 @@ void ax::Application::add_application_bindings(sol::state& state)
 				return ret;
 			};
 
-		resource_lookup_texture["get_script"] =
+		resource_lookup_table["get_texture_regions"] =
+			[this, &state](const std::string& name) -> sol::table
+			{
+				auto text{ m_textures.get(name) };
+
+				auto ret = state.create_table();
+
+				if (text)
+				{
+					ret["valid"] = true;
+					ret["regions"] = state.create_table();
+					for (const auto& kvp : text->regions())
+					{
+						auto tbl{ state.create_table() };
+						tbl[1] = kvp.second.x;
+						tbl[2] = kvp.second.y;
+						tbl[3] = kvp.second.z;
+						tbl[4] = kvp.second.w;
+						ret["regions"][kvp.first] = tbl;
+					}
+				}
+				else
+				{
+					ret["valid"] = false;
+				}
+
+				return ret;
+			};
+
+		if (m_allowedPermissions[lua::Permission::IO])
+		{
+			resource_lookup_table["create_mega_texture"] =
+				[this](const std::string& name, const sol::table& textureDescs, float minPadding) -> ax::Error
+				{
+					std::vector<ax::Texture::Descriptor> descs{};
+					for (const auto& kvp : textureDescs)
+					{
+						descs.push_back(kvp.second.as<std::string>());
+					}
+
+					const auto err{ m_textures.create_texture_atlas(name, descs, minPadding) };
+					return err;
+				};
+
+			resource_lookup_table["save_texture"] =
+				[this](const std::string& name, const std::string& path) -> bool
+				{
+					auto text{ m_textures.get(name) };
+					if (text)
+					{
+						return text->save_png(path) == ax::Error::Success;
+					}
+					return false;
+				};
+		}
+
+		resource_lookup_table["get_script"] =
 			[this, &state](const std::string& name) -> sol::table
 			{
 				auto script{ m_scripts.get(name) };
@@ -213,7 +305,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 				return ret;
 			};
 
-		app["res"] = resource_lookup_texture;
+		app["res"] = resource_lookup_table;
 	}
 
 	if (m_create_window)
@@ -386,117 +478,234 @@ void ax::Application::add_application_bindings(sol::state& state)
 		window_table["width"] = m_window->width();
 		window_table["height"] = m_window->height();
 
-		window_table["render"] =
-			sol::overload
-			(
-				[this](const sol::table& texture, float x, float y)
-				{
-					if (texture["valid"])
-						m_window->render_texture(texture["ptr"].get<Texture*>(), { x, y });
-					else
-						spdlog::error("Invalid texture, cannot render");
-				},
-				[this](const sol::table& texture, float x, float y, float z)
-				{
-					if (texture["valid"])
-						m_window->render_texture(texture["ptr"].get<Texture*>(), { x, y }, z);
-					else
-						spdlog::error("Invalid texture, cannot render");
-				},
-				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah)
-				{
-					if (texture["valid"])
+		if (m_atlasTexture == nullptr)
+		{
+			window_table["render"] =
+				sol::overload
+				(
+					[this](const sol::table& texture, float x, float y)
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
-						m_window->render_texture(t, { x, y }, { ax, ay, aw, ah });
-					}
-					else
+						if (texture["valid"])
+							m_window->render_texture(texture["ptr"].get<Texture*>(), { x, y });
+						else
+							spdlog::error("Invalid texture, cannot render");
+					},
+					[this](const sol::table& texture, float x, float y, float z)
 					{
-						spdlog::error("Invalid texture, cannot render");
-					}
-				},
-				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah, float z)
-				{
-					if (texture["valid"])
+						if (texture["valid"])
+							m_window->render_texture(texture["ptr"].get<Texture*>(), { x, y }, z);
+						else
+							spdlog::error("Invalid texture, cannot render");
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah)
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
-						m_window->render_texture(t, { x, y }, { ax, ay, aw, ah }, z);
-					}
-					else
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_texture(t, { x, y }, { ax, ay, aw, ah });
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah, float z)
 					{
-						spdlog::error("Invalid texture, cannot render");
-					}
-				},
-				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah, 
-					   float r, float z, float cr, float cg, float cb, float ca, float sx, float sy)
-				{
-					if (texture["valid"])
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_texture(t, { x, y }, { ax, ay, aw, ah }, z);
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah, 
+						float r, float z, float cr, float cg, float cb, float ca, float sx, float sy)
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
-						m_window->render_texture(t, { x, y }, r, { ax, ay, aw, ah }, z, { cr, cg, cb, ca }, { sx, sy });
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_texture(t, { x, y }, r, { ax, ay, aw, ah }, z, { cr, cg, cb, ca }, { sx, sy });
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
 					}
-					else
-					{
-						spdlog::error("Invalid texture, cannot render");
-					}
-				}
-			);
+				);
 
-		window_table["render_ui"] =
-			sol::overload
-			(
-				[this](const sol::table& texture, float x, float y)
-				{
-					if (texture["valid"])
-						m_window->render_ui_texture(texture["ptr"].get<Texture*>(), { x, y });
-					else
-						spdlog::error("Invalid texture, cannot render");
-				},
-				[this](const sol::table& texture, float x, float y, float z)
-				{
-					if (texture["valid"])
-						m_window->render_ui_texture(texture["ptr"].get<Texture*>(), { x, y }, z);
-					else
-						spdlog::error("Invalid texture, cannot render");
-				},
-				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah)
-				{
-					if (texture["valid"])
+			window_table["render_ui"] =
+				sol::overload
+				(
+					[this](const sol::table& texture, float x, float y)
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
-						m_window->render_ui_texture(t, { x, y }, { ax, ay, aw, ah });
-					}
-					else
+						if (texture["valid"])
+							m_window->render_ui_texture(texture["ptr"].get<Texture*>(), { x, y });
+						else
+							spdlog::error("Invalid texture, cannot render");
+					},
+					[this](const sol::table& texture, float x, float y, float z)
 					{
-						spdlog::error("Invalid texture, cannot render");
-					}
-				},
-				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah, float z)
-				{
-					if (texture["valid"])
+						if (texture["valid"])
+							m_window->render_ui_texture(texture["ptr"].get<Texture*>(), { x, y }, z);
+						else
+							spdlog::error("Invalid texture, cannot render");
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah)
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
-						m_window->render_ui_texture(t, { x, y }, { ax, ay, aw, ah }, z);
-					}
-					else
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_ui_texture(t, { x, y }, { ax, ay, aw, ah });
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah, float z)
 					{
-						spdlog::error("Invalid texture, cannot render");
-					}
-				},
-				[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah,
-					float r, float z, float cr, float cg, float cb, float ca, float sx, float sy)
-				{
-					if (texture["valid"])
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_ui_texture(t, { x, y }, { ax, ay, aw, ah }, z);
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah,
+						float r, float z, float cr, float cg, float cb, float ca, float sx, float sy)
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
-						m_window->render_ui_texture(t, { x, y }, r, { ax, ay, aw, ah }, z, { cr, cg, cb, ca }, { sx, sy });
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_ui_texture(t, { x, y }, r, { ax, ay, aw, ah }, z, { cr, cg, cb, ca }, { sx, sy });
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
 					}
-					else
+				);
+		}
+		else
+		{
+			window_table["render"] =
+				sol::overload
+				(
+					[this](const sol::table& texture, float x, float y)
 					{
-						spdlog::error("Invalid texture, cannot render");
+						if (texture["valid"])
+							m_window->render_texture(texture["ptr"].get<Texture*>(), { x, y }, lua::bindings::get_texture_region(texture));
+						else
+							spdlog::error("Invalid texture, cannot render");
+					},
+					[this](const sol::table& texture, float x, float y, float z)
+					{
+						if (texture["valid"])
+							m_window->render_texture(texture["ptr"].get<Texture*>(), { x, y }, lua::bindings::get_texture_region(texture), z);
+						else
+							spdlog::error("Invalid texture, cannot render");
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah)
+					{
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_texture(t, { x, y }, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }));
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah, float z)
+					{
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_texture(t, { x, y }, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }), z);
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah, 
+						float r, float z, float cr, float cg, float cb, float ca, float sx, float sy)
+					{
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_texture(t, { x, y }, r, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }), z, { cr, cg, cb, ca }, { sx, sy });
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
 					}
-				}
-			);
+				);
+
+			window_table["render_ui"] =
+				sol::overload
+				(
+					[this](const sol::table& texture, float x, float y)
+					{
+						if (texture["valid"])
+							m_window->render_ui_texture(texture["ptr"].get<Texture*>(), { x, y }, lua::bindings::get_texture_region(texture));
+						else
+							spdlog::error("Invalid texture, cannot render");
+					},
+					[this](const sol::table& texture, float x, float y, float z)
+					{
+						if (texture["valid"])
+							m_window->render_ui_texture(texture["ptr"].get<Texture*>(), { x, y }, lua::bindings::get_texture_region(texture), z);
+						else
+							spdlog::error("Invalid texture, cannot render");
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah)
+					{
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_ui_texture(t, { x, y }, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }));
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah, float z)
+					{
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_ui_texture(t, { x, y }, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }), z);
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
+					},
+					[this](const sol::table& texture, float x, float y, float ax, float ay, float aw, float ah,
+						float r, float z, float cr, float cg, float cb, float ca, float sx, float sy)
+					{
+						if (texture["valid"])
+						{
+							const auto t{ texture["ptr"].get<ax::Texture*>() };
+							m_window->render_ui_texture(t, { x, y }, r, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }), z, { cr, cg, cb, ca }, { sx, sy });
+						}
+						else
+						{
+							spdlog::error("Invalid texture, cannot render");
+						}
+					}
+				);
+		}
 
 		app["window"] = window_table;
 
@@ -517,7 +726,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 			sprite_table["setup"] =
 				sol::overload
 				(
-					[](SpriteDefinition* sprite, const sol::table& texture, float x, float y, float rx, float ry, float rw, float rh)
+					[useAtlas = m_atlasTexture != nullptr](SpriteDefinition* sprite, const sol::table& texture, float x, float y, float rx, float ry, float rw, float rh)
 					{
 						if (texture["valid"])
 						{
@@ -525,24 +734,25 @@ void ax::Application::add_application_bindings(sol::state& state)
 							sprite->gpuData.pos.x = x;
 							sprite->gpuData.pos.y = y;
 							sprite->gpuData.useRegion = 1;
-							sprite->gpuData.region.x = rx;
-							sprite->gpuData.region.y = ry;
-							sprite->gpuData.region.z = rw;
-							sprite->gpuData.region.w = rh;
+							sprite->gpuData.region = useAtlas
+								? lua::bindings::get_texture_region(texture, { rx, ry, rw, rh })
+								: rectf{ rx, ry, rw, rh };
 						}
 						else
 						{
 							spdlog::error("Invalid texture, cannot setup sprite");
 						}
 					},
-					[](SpriteDefinition* sprite, const sol::table& texture, float x, float y)
+					[useAtlas = m_atlasTexture != nullptr](SpriteDefinition* sprite, const sol::table& texture, float x, float y)
 					{
 						if (texture["valid"])
 						{
 							sprite->tex = texture["ptr"].get<Texture*>();
 							sprite->gpuData.pos.x = x;
 							sprite->gpuData.pos.y = y;
-							sprite->gpuData.useRegion = 0;
+							sprite->gpuData.useRegion = useAtlas ? 1 : 0;
+							if (useAtlas)
+								sprite->gpuData.region = lua::bindings::get_texture_region(texture);
 						}
 						else
 						{
@@ -853,8 +1063,31 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 
 	if (m_create_window)
 	{
-		const auto& icon{ m_textures.get(window_manifest["icon"])->create_glfw_image() };
-		glfwSetWindowIcon(m_window->glfw_handle(), 1, &icon);
+		const auto& icon{ m_textures.get(window_manifest["icon"]) };
+		if (icon)
+		{
+			const auto img { icon->create_glfw_image() };
+			glfwSetWindowIcon(m_window->glfw_handle(), 1, &img);
+		}
+	}
+
+	if (manifest["atlas_texture"].valid())
+	{
+		const auto atlas_texture{ manifest["atlas_texture"].get<std::string>() };
+		if (atlas_texture != "null")
+			m_atlasTexture = m_textures.get(atlas_texture);
+
+		const sol::table& atlas_regions{ manifest["texture_atlas"].get<sol::table>() };
+		for (const auto& entry : atlas_regions)
+		{
+			const auto subTexture{ entry.first.as<std::string>() };
+			const auto regionTable{ entry.second.as<sol::table>() };
+			rectf region { regionTable[1], regionTable[2], regionTable[3], regionTable[4] };
+			if (m_atlasTexture)
+				m_atlasTexture->add_region(subTexture, region);
+		}
+
+		spdlog::info("Loaded texture atlas with {} regions", atlas_regions.size());
 	}
 
 	const sol::table& scripts{ manifest["scripts"].get<sol::table>() };

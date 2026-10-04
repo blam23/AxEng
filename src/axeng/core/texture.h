@@ -2,11 +2,16 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <map>
+#include <optional>
+#include <string>
 #include <vector>
 
-#include "axeng/core/helpers.h"
 #include "axeng/core/asset.h"
 #include "axeng/core/asset_manager.h"
+#include "axeng/core/error.h"
+#include "axeng/core/helpers.h"
 
 #include <webgpu/webgpu_cpp.h>
 #include <webgpu/webgpu_cpp_print.h>
@@ -64,7 +69,8 @@ namespace ax
 
 		using Descriptor = std::string;
 
-		Texture(Badge<TextureManager>, const std::string& name, const std::vector<uint8_t> data, wgpu::Device& device);
+		Texture(Badge<TextureManager>, const std::string& name, const std::vector<uint8_t> data, wgpu::Device* device);
+		Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, std::vector<uint8_t> rgbaPixels, wgpu::Device* device);
 		~Texture();
 
 		const wgpu::Texture& texture() const { return m_texture; }
@@ -75,13 +81,27 @@ namespace ax
 
 		GLFWimage create_glfw_image() const;
 
+		Error save_png(const std::filesystem::path& path) const;
+
+		std::optional<rectf> region(const std::string& subTexture) const;
+		const std::map<std::string, rectf>& regions() const { return m_regions; }
+
+		void add_region(const std::string& subTexture, const rectf& region);
+
 	private:
+		void upload(const std::string& name, const void* rgbaPixels, uint32_t bytesPerRow, wgpu::Device& device);
+
 		wgpu::Texture m_texture;
 		wgpu::TextureView m_view;
 		void* m_stbiPtr{ nullptr };
+		std::vector<uint8_t> m_pixels{};
+		std::map<std::string, rectf> m_regions{};
+
+		friend class TextureManager;
 
 		uint32_t m_width{ 0 };
 		uint32_t m_height{ 0 };
+		uint32_t m_channels{ 4 };
 	};
 
 	class TextureManager : public AssetManager<Texture, TextureManager>
@@ -90,8 +110,12 @@ namespace ax
 		TextureManager(Badge<Application>, ResourceLoader& loader);
 		void set_device(wgpu::Device& device);
 
+		// Packs all given textures into a single texture stored under `name`.
+		// Sub-texture pixel regions can be queried with Texture::region(descriptor).
+		Error create_texture_atlas(const Texture::Descriptor& name, const std::vector<Texture::Descriptor>& textures, float minPadding = 2.0f);
+
 	private:
-		wgpu::Device* m_device;
+		wgpu::Device* m_device{ nullptr };
 
 		std::unique_ptr<Texture> load_from_raw_impl(const std::string& name, const std::vector<uint8_t>& data);
 		std::unique_ptr<Texture> load_impl(const std::string& name, const Texture::Descriptor& description);
