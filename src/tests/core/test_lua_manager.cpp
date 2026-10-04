@@ -1,0 +1,119 @@
+#include <gtest/gtest.h>
+
+#include "axeng/core/lua/lua_engine.h"
+#include "axeng/core/resource_loader.h"
+#include "axeng/core/lua/script.h"
+#include "axeng/external/flag_set.hpp"
+
+#include "tests/main/log_capture.h"
+
+using namespace ax;
+using namespace ax::lua;
+
+constexpr const char* s_access_error_message = "Access to library is denied (permission not requested)";
+
+static void register_minimal_init()
+{
+	static const char init[] = "-- minimal init";
+	ax::Resource::register_embedded_resource<ax::lua::Script>("@init", ax::EmbeddedResource{ (const uint8_t*)init, sizeof(init) - 1 });
+}
+
+TEST(LuaManagerTests, NoPermissions_AccessIOAndOS_LogsErrors)
+{
+	testlog::LogCapture::instance().expect_total_error_count(4);
+
+	register_minimal_init();
+
+	flag_set<Permission> perms; // no permissions
+	Manager m(perms);
+	ASSERT_EQ(ax::Error::Success, m.setup());
+
+	m.state().do_string("local f = io.open; local g = os.exit;", "@test_no_perms");
+	ASSERT_LOG_CONTAINS(s_access_error_message);
+
+	testlog::LogCapture::instance().clear_messages();
+
+	m.state().do_string("local f = io.open;", "@test_no_perms_io_only");
+	ASSERT_LOG_CONTAINS(s_access_error_message);
+
+	testlog::LogCapture::instance().clear_messages();
+	m.state().do_string("local g = os.exit;", "@test_no_perms_os_only");
+	ASSERT_LOG_CONTAINS(s_access_error_message);
+
+	m.cleanup();
+}
+
+TEST(LuaManagerTests, IOAllowed_OSNot_OnlyOSLogs)
+{
+	testlog::LogCapture::instance().expect_total_error_count(1);
+
+	register_minimal_init();
+
+	flag_set<Permission> perms;
+	perms |= Permission::IO;
+
+	Manager m(perms);
+	ASSERT_EQ(ax::Error::Success, m.setup());
+
+	// Access io - should NOT log an error
+	m.state().do_string("local f = io.open;", "@test_io_allowed");
+	EXPECT_LOG_NOT_CONTAINS(s_access_error_message);
+
+	// clear captured messages and then access os which should log
+	testlog::LogCapture::instance().clear_messages();
+	m.state().do_string("local g = os.exit;", "@test_os_denied");
+	ASSERT_LOG_CONTAINS(s_access_error_message);
+
+	m.cleanup();
+}
+
+TEST(LuaManagerTests, IOAllowed_PopenReadsOutput)
+{
+	register_minimal_init();
+
+	flag_set<Permission> perms;
+	perms |= Permission::IO;
+	perms |= Permission::OS;
+
+	Manager m(perms);
+	ASSERT_EQ(ax::Error::Success, m.setup());
+
+	const auto result{ m.state().do_string(
+		"local handle, pid = io.popen('echo AxEngPopenTest & ping -n 3 127.0.0.1 > nul', 'r'); "
+		"assert(handle, 'popen failed'); "
+		"assert(type(pid) == 'number' and pid > 0, 'invalid PID'); "
+		"local pidHandle = io.popen('tasklist /FI \"PID eq ' .. pid .. '\" /FO CSV /NH', 'r'); "
+		"assert(pidHandle, 'tasklist popen failed'); "
+		"local processInfo = pidHandle:read('*a'); "
+		"assert(pidHandle:close(), 'tasklist close failed: ' .. processInfo); "
+		"assert(processInfo:lower():find('\"ping.exe\"', 1, true), 'PID did not identify ping.exe: ' .. processInfo); "
+		"local output = handle:read('*a'); "
+		"assert(handle:close()); "
+		"assert(output:find('AxEngPopenTest', 1, true));",
+		"@test_io_popen") };
+	if (!result.valid())
+	{
+		sol::error error = result;
+		FAIL() << error.what();
+	}
+
+	m.cleanup();
+}
+
+TEST(LuaManagerTests, OSAllowed_IOAllowed_NoLogs)
+{
+	register_minimal_init();
+
+	flag_set<Permission> perms;
+	perms |= Permission::IO;
+	perms |= Permission::OS;
+
+	Manager m(perms);
+	ASSERT_EQ(ax::Error::Success, m.setup());
+
+	m.state().do_string("local f = io.open; local g = os.exit;", "@test_both_allowed");
+
+	EXPECT_LOG_NOT_CONTAINS(s_access_error_message);
+
+	m.cleanup();
+}
