@@ -39,7 +39,6 @@ namespace ax
 
         void write(const std::string& content) noexcept
         {
-            spdlog::debug("Writing content to file: {}", content);
             file << content;
         }
 

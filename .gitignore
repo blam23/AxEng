@@ -10,6 +10,7 @@ build/
 AxCompiler2*
 AxCompiler_Old*
 *.spv
+test_log_*
 
 vcpkg_installed/
 .vs/

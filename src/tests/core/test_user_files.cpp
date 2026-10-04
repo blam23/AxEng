@@ -97,3 +97,31 @@ TEST_F(UserFileManagerTests, ClosingNullHandleSucceeds)
 {
     EXPECT_EQ(manager.close_file(nullptr), ax::Error::Success);
 }
+
+TEST_F(UserFileManagerTests, ReopeningClosedFileSucceeds)
+{
+    auto* handle = manager.open_file(filename, "r");
+    ASSERT_NE(handle, nullptr);
+    ASSERT_TRUE(handle->file.is_open());
+    EXPECT_EQ(manager.close_file(handle), ax::Error::Success);
+
+    auto* reopened = manager.open_file(filename, "r");
+    ASSERT_NE(reopened, nullptr);
+    ASSERT_TRUE(reopened->file.is_open());
+    EXPECT_EQ(manager.close_file(reopened), ax::Error::Success);
+}
+
+#include "tests/main/log_capture.h"
+TEST_F(UserFileManagerTests, CannotOpenFilesOutsideAllowedDirectory)
+{
+    testlog::LogCapture::instance().expect_total_error_count(3);
+
+    auto* handle = manager.open_file("../outside.txt", "w");
+    EXPECT_EQ(handle, nullptr);
+
+    auto* handle2 = manager.open_file("/absolute/path/outside.txt", "w");
+    EXPECT_EQ(handle2, nullptr);
+
+    auto* handle3 = manager.open_file("C://absolute/path/outside.txt", "w");
+    EXPECT_EQ(handle3, nullptr);
+}
