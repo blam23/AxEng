@@ -17,7 +17,7 @@ if (-not (Get-Command xmake -ErrorAction SilentlyContinue)) { throw "xmake not f
 $modes = if ($Mode -eq "both") { @("debug", "release") } else { @($Mode) }
 foreach ($m in $modes) {
     Write-Host "=== $m ===" -ForegroundColor Cyan
-    xmake f -y -p windows -a x64 -m $m --toolchain=clang-cl
+    xmake f -y -p windows -a x64 -m $m --toolchain=clang
     if ($LASTEXITCODE) { throw "configure failed ($m)" }
     xmake -y
     if ($LASTEXITCODE) { throw "build failed ($m)" }
