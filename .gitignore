@@ -11,7 +11,9 @@ AxCompiler2*
 AxCompiler_Old*
 *.spv
 test_log_*
+compiled_lua_tests
 
+# vs stuff
 vcpkg_installed/
 .vs/
 .vscode/compile_commands.json

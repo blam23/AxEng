@@ -53,6 +53,14 @@ rule("vcpkg.runtime_dlls")
         end
     end)
 
+-- Copy Compiler & Lua Tests to the target directory
+-- This allows LuaTests.RunLuaTestSuite to run from the target directory directly
+rule("copy.lua_tests")
+    after_build(function (target)
+        os.cp(path.join(os.projectdir(), "lua_tests"), target:targetdir())
+        os.cp(path.join(os.projectdir(), "AxCompiler"), target:targetdir())
+    end)
+
 local src = "src"
 
 target("AxEngLib")
@@ -76,7 +84,7 @@ target("AxEng")
 
 target("Tests")
     set_kind("binary")
-    add_rules("vcpkg.runtime_dlls")
+    add_rules("vcpkg.runtime_dlls", "copy.lua_tests")
     add_files(src .. "/tests/**.cpp")
     add_deps("AxEngLib")
     add_tests("default")

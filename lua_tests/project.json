@@ -1,0 +1,20 @@
+{
+   "entry_point":"runner",
+   "highlight":"#A256FF",
+   "icon":"test",
+   "name":"Lua Test Suite",
+   "headless":true,
+   "required_permissions":[
+
+   ],
+   "scripts":{
+      "base_test":"scripts/base_test.lua",
+      "class":"scripts/lib/class.lua",
+      "runner":"scripts/runner.lua",
+      "suite":"scripts/test_suite.lua",
+      "test_lua_user_io_access":"scripts/tests/lua_user_io_access.lua"
+   },
+   "textures":{
+
+   }
+}

@@ -166,7 +166,8 @@ local function gen_permissions_text(project)
 end
 
 local function create_manifest(project, dir, strip_debug_output)
-    local tfile = io.open("compiler/templates/output_template.luat", "r")
+    -- TODO: I need to make this use the project directory directly
+    local tfile = io.open("AxCompiler/templates/output_template.luat", "r")
     if tfile == nil then
         log.error("Cannot open manifest template file!")
         return false
