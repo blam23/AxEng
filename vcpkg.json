@@ -1,0 +1,29 @@
+{
+    "name":  "axeng",
+    "version":  "0.1.0",
+    "builtin-baseline": "e99d87dcf02926bfd629560e11e156329d5720c1",
+    "dependencies":  [
+                         "fmt",
+                         "glfw3",
+                         "glm",
+                         {
+                             "name":  "imgui",
+                             "features":  [
+                                              "docking-experimental"
+                                          ]
+                         },
+                         "lua",
+                         "minizip-ng",
+                         "sol2",
+                         "spdlog",
+                         "dawn",
+                         "vulkan-headers",
+                         "gtest"
+                     ],
+    "overrides": [
+        {
+            "name": "dawn",
+            "version": "20260714.215939"
+        }
+    ]
+}

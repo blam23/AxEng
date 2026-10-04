@@ -1,0 +1,37 @@
+#include "axeng/core/lua/bindings/bind_all.h"
+
+#include "axeng/core/lua/bindings/lua_error_bindings.h"
+#include "axeng/core/lua/bindings/lua_log_bindings.h"
+#include "axeng/core/lua/bindings/lua_event_bindings.h"
+#include "axeng/core/lua/bindings/lua_type_bindings.h"
+#include "axeng/core/lua/bindings/lua_key_bindings.h"
+#include "axeng/core/lua/bindings/lua_mouse_bindings.h"
+#include "axeng/core/lua/bindings/lua_window_bindings.h"
+#include "axeng/core/lua/bindings/lua_imgui_bindings.h"
+#include "axeng/core/lua/bindings/lua_texture_bindings.h"
+
+void ax::lua::bindings::setup()
+{
+	bindings::register_binding("error_code", &setup_error_bindings);
+
+	bindings::register_binding("log", &setup_log_bindings);
+
+	bindings::register_binding("event", &setup_event_bindings);
+
+	bindings::register_binding("type", &setup_type_bindings);
+
+	bindings::register_binding("keyboard", &setup_key_bindings);
+	bindings::register_cleanup("keyboard", &cleanup_key_bindings);
+
+	bindings::register_binding("mouse", &setup_mouse_bindings);
+	bindings::register_cleanup("mouse", &cleanup_mouse_bindings);
+
+	bindings::register_binding("window", &setup_window_bindings);
+
+	bindings::register_binding("ui", &setup_imgui_bindings);
+	bindings::register_cleanup("ui", &cleanup_imgui_bindings);
+
+	bindings::register_binding("texture", &setup_texture_bindings);
+
+}
+
