@@ -10,6 +10,12 @@
 
 int main(int argc, char* argv[])
 {
+	if (GetConsoleOutputCP() != 0 && !SetConsoleOutputCP(CP_UTF8))
+	{
+		spdlog::error("Failed to set console output to UTF-8: Windows error {}", GetLastError());
+		return RET(ax::Error::IO);
+	}
+
 	//
 	// Parse Args
 	//
