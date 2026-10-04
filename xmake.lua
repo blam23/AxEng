@@ -61,10 +61,17 @@ rule("copy.lua_tests")
         os.cp(path.join(os.projectdir(), "AxCompiler"), target:targetdir())
     end)
 
+local function enable_release_pdbs()
+    if is_mode("release") then
+        set_symbols("debug")
+    end
+end
+
 local src = "src"
 
 target("AxEngLib")
     set_kind("static")
+    enable_release_pdbs()
     add_rules("vcpkg.manifest")
     add_files(src .. "/axeng/**.cpp", src .. "/axeng/**.c")
     -- stb_image.h defines helpers that are only used on some code paths
@@ -78,12 +85,14 @@ target("AxEngLib")
 
 target("AxEng")
     set_kind("binary")
+    enable_release_pdbs()
     add_rules("vcpkg.runtime_dlls")
     add_files(src .. "/app/**.cpp")
     add_deps("AxEngLib")
 
 target("Tests")
     set_kind("binary")
+    enable_release_pdbs()
     add_rules("vcpkg.runtime_dlls", "copy.lua_tests")
     add_files(src .. "/tests/**.cpp")
     add_deps("AxEngLib")
