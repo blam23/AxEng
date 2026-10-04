@@ -19,6 +19,7 @@ local try_run = ax.import("try_run")
 local unsaved_config = false
 local unsaved_scripts = false
 local show_close_confirm_modal = false
+local should_embed_app = false
 
 function is_unsaved()
     return unsaved_config or unsaved_scripts
@@ -140,10 +141,11 @@ function main_menu(delta)
         if running and running_app_name == "app" then
             -- #A256FF
             ui.draw_rect(1, 1, app.window.width-2, app.window.height-2, 0, 4.0, 0.63, 0.34, 1.0, 1.0)
-
-            if not embedded and launched_app.pid > 0 then
-                if app.window.try_embed_child(launched_app.pid) then
-                    embedded = true
+            if should_embed_app then
+                if not embedded and launched_app.pid > 0 then
+                    if app.window.try_embed_child(launched_app.pid) then
+                        embedded = true
+                    end
                 end
             end
         else
@@ -173,6 +175,10 @@ function main_menu(delta)
             else
                 app.window.try_kill_child(launched_app.pid)
             end
+        end
+        local sea, changed = ui.checkbox("Embed App", should_embed_app)
+        if changed then
+            should_embed_app = sea
         end
     ui.end_main_menu_bar()
 end
