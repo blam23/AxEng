@@ -15,11 +15,14 @@ local asset_inspector = ax.import("asset_inspector")
 local build_info = ax.import("build_info")
 local editor = ax.import("script_editor")
 local try_run = ax.import("try_run")
+local settings = ax.import("settings")
 
+
+settings:load()
 local unsaved_config = false
 local unsaved_scripts = false
 local show_close_confirm_modal = false
-local should_embed_app = false
+local should_embed_app = settings:get_or("should_embed_app", true)
 
 function is_unsaved()
     return unsaved_config or unsaved_scripts
@@ -179,6 +182,7 @@ function main_menu(delta)
         local sea, changed = ui.checkbox("Embed App", should_embed_app)
         if changed then
             should_embed_app = sea
+            settings:set("should_embed_app", should_embed_app)
         end
     ui.end_main_menu_bar()
 end

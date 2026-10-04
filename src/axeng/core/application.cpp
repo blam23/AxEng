@@ -49,6 +49,22 @@ void ax::Application::add_application_bindings(sol::state& state)
 {
 	auto app{ state.create_table() };
 
+	auto user_io_table{ state.create_table() };
+	user_io_table["open"] =
+		[this](const std::string& filename, const char* mode) -> UserFileHandle*
+		{
+			return m_userFileManager.open_file(filename, mode);
+		};
+	app["user_io"] = user_io_table;
+
+	state.new_usertype<UserFileHandle>
+	(
+		"UserFileHandle",
+		"read_all", &ax::UserFileHandle::read_all,
+		"write", &ax::UserFileHandle::write,
+		"close", &ax::UserFileHandle::close
+	);
+
 	app["call_deferred"] =
 		[this](sol::protected_function f)
 		{
@@ -753,6 +769,17 @@ void ax::Application::add_manifest_bindings(sol::state&)
 {
 }
 
+std::string make_safe_directory_name(const std::string& name)
+{
+	std::string safe_name = name;
+	for (auto& c : safe_name)
+	{
+		if (!std::isalnum(c) && c != '_' && c != '-')
+			c = '_';
+	}
+	return safe_name;
+}
+
 bool ax::Application::try_load(const std::vector<std::string>& args)
 {
 	LogTimer _timer{ "Application Load" };
@@ -794,6 +821,9 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 
 	auto manifest{ m_env["manifest"] };
 	m_name = manifest["name"];
+	m_directory_name = make_safe_directory_name(m_name);
+	spdlog::info("Application '{}' will use directory '{}'", m_name, m_directory_name);
+	m_userFileManager.set_application(*this);
 
 	const sol::table& permissions{ manifest["permissions"].get<sol::table>() };
 	for (const auto& entry : permissions)

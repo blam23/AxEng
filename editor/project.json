@@ -17,6 +17,7 @@
       "run_app_in_background":"scripts/run_app_in_background.lua",
       "save_project":"scripts/save_project.lua",
       "script_editor":"scripts/script_editor.lua",
+      "settings":"scripts/settings.lua",
       "try_run":"scripts/try_run.lua"
    },
    "textures":{

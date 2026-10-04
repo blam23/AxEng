@@ -16,6 +16,7 @@
 #include "axeng/core/lua/script.h"
 #include "axeng/core/lua/shared.h"
 #include "axeng/core/texture.h"
+#include "axeng/core/user_files.h"
 #include "axeng/core/window.h"
 
 // GFX
@@ -58,6 +59,8 @@ namespace ax
 
 		void call_deferred(std::function<void()>);
 
+		std::string safe_directory_name() const noexcept { return m_directory_name; }
+
 	private:
 		Application(flag_set<lua::Permission> permissions, ResourceLoader&& loader);
 
@@ -77,6 +80,7 @@ namespace ax
 		bool m_create_window{ true };
 
 		std::string m_name{};
+		std::string m_directory_name{};
 		lua::Script* m_entryPoint{};
 
 		bool m_loaded{ false };
@@ -86,5 +90,7 @@ namespace ax
 		BackgroundWorker m_backgroundWorker;
 		std::mutex m_shared_mutex{};
 		std::map<std::string, ax::lua::SharedObject> m_shared{};
+
+		UserFileManager m_userFileManager;
 	};
 }
