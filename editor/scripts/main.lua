@@ -30,10 +30,10 @@ end
 
 local function update_title()
     if is_unsaved() then
-        window.set_title(app.window.handle, "AxEdit - " .. project.name .. " *")
+        app.window.set_title("AxEdit - " .. project.name .. " *")
     else
-        window.set_title(app.window.handle, "AxEdit - " .. project.name)
-        window.set_title(app.window.handle, "AxEdit - " .. project.name)
+        app.window.set_title("AxEdit - " .. project.name)
+        app.window.set_title("AxEdit - " .. project.name)
     end
 end
 
@@ -194,7 +194,7 @@ function close_confirm_modal()
 
         ui.text("You have unsaved work, are you sure you want to exit?\n\n")
         if ui.button("Yes, close it!") then
-            window.request_close(app.window.handle)
+            app.window.request_close()
             show_close_confirm_modal = false
             ui.close_current_popup()
         end

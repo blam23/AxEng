@@ -51,6 +51,7 @@ namespace ax
 	public:
 		DISABLE_COPY_AND_MOVE(BackgroundWorker);
 		
+		BackgroundWorker(bool useLua, Application&, flag_set<lua::Permission> permissions);
 		BackgroundWorker(bool useLua, flag_set<lua::Permission> permissions);
 		~BackgroundWorker();
 

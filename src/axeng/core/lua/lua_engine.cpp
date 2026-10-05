@@ -204,6 +204,12 @@ namespace
 }
 #endif
 
+ax::lua::Manager::Manager(Application& application, flag_set<Permission> requestedPermissions)
+	: m_permissionFlags{ requestedPermissions }
+	, m_application{ &application }
+{
+}
+
 ax::lua::Manager::Manager(flag_set<Permission> requestedPermissions)
 	: m_permissionFlags{ requestedPermissions }
 {
@@ -212,7 +218,12 @@ ax::lua::Manager::Manager(flag_set<Permission> requestedPermissions)
 ax::lua::Manager::~Manager()
 {
 	if (m_loaded)
-		bindings::cleanup_state(m_state);
+	{
+		if (m_application)
+			bindings::cleanup_state(*m_application, m_state);
+		else
+			bindings::cleanup_state(m_state);
+	}
 }
 
 inline void lua_panic(sol::optional<std::string> maybe_msg)
@@ -310,7 +321,10 @@ ax::Error ax::lua::Manager::setup()
 ax::Error ax::lua::Manager::cleanup()
 {
 	m_loaded = false;
-	bindings::cleanup_state(m_state);
+	if (m_application)
+		bindings::cleanup_state(*m_application, m_state);
+	else
+		bindings::cleanup_state(m_state);
 
 	return ax::Error::Success;
 }

@@ -1,6 +1,12 @@
 #include "axeng/core/background_worker.h"
 #include "axeng/core/lua/shared.h"
 
+ax::BackgroundWorker::BackgroundWorker(bool useLua, Application& application, flag_set<lua::Permission> permissions)
+	: m_lua{ application, permissions }
+	, m_useLua{ useLua }
+{
+}
+
 ax::BackgroundWorker::BackgroundWorker(bool useLua, flag_set<lua::Permission> permissions)
 	: m_lua{ permissions }
 	, m_useLua{ useLua }

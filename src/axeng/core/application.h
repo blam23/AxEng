@@ -10,7 +10,10 @@
 #include "axeng/core/background_worker.h"
 #include "axeng/core/custom_type.h"
 #include "axeng/core/helpers.h"
+#include "axeng/core/forward.h"
 #include "axeng/core/log_timer.h"
+#include "axeng/core/lua/bindings/lua_application_bindings.h"
+#include "axeng/core/lua/lua_bindings.h"
 #include "axeng/core/lua/lua_engine.h"
 #include "axeng/core/resource_loader.h"
 #include "axeng/core/lua/script.h"
@@ -61,14 +64,28 @@ namespace ax
 
 		std::string safe_directory_name() const noexcept { return m_directory_name; }
 
+		bool has_permission(lua::Permission p) const noexcept { return m_allowedPermissions[p]; }
+		bool has_atlas_texture() const noexcept { return m_atlasTexture != nullptr; }
+
+		using Predicate = lua::bindings::Predicate;
+		using BindingCallback = lua::bindings::BindingCallback;
+		using ConditionalBinding = lua::bindings::ConditionalBinding;
+		void register_conditional_binding
+		(
+			const std::string& name,
+			Predicate&& predicate,
+			BindingCallback&& binding
+		);
+
 	private:
+		friend void lua::bindings::setup_application_bindings(Application&, sol::state&);
+
 		Application(flag_set<lua::Permission> permissions, ResourceLoader&& loader);
 
 		const std::vector<std::string> m_args;
 
 		bool init_window(wgpu::BackendType backendType);
 		void add_manifest_bindings(sol::state&);
-		void add_application_bindings(sol::state&);
 		void add_thread_bindings(sol::state&, const std::vector<std::string>& args);
 		std::unique_ptr<Window> m_window;
 
@@ -93,5 +110,7 @@ namespace ax
 		std::map<std::string, ax::lua::SharedObject> m_shared{};
 		
 		UserFileManager m_userFileManager;
+
+		std::map<std::string, ConditionalBinding> m_conditionalBindings;
 	};
 }

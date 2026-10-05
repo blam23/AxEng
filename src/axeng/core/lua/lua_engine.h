@@ -1,8 +1,9 @@
 #pragma once
 
+#include "axeng/core/error.h"
+#include "axeng/core/forward.h"
 #include "axeng/core/helpers.h"
 #include "axeng/core/resource_loader.h"
-#include "axeng/core/error.h"
 
 #include <string>
 
@@ -30,7 +31,8 @@ namespace ax::lua
 	public:
 		DISABLE_COPY_AND_MOVE(Manager);
 
-		Manager(flag_set<Permission> requestedPermissions);
+		Manager(Application&, flag_set<Permission> requestedPermissions);
+		explicit Manager(flag_set<Permission> requestedPermissions);
 		~Manager();
 		 
 		ax::Error setup();
@@ -48,5 +50,6 @@ namespace ax::lua
 		sol::state m_state;
 		bool m_loaded{ false };
 		flag_set<Permission> m_permissionFlags;
+		Application* m_application{};
 	};
 }
