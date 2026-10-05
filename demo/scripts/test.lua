@@ -53,7 +53,7 @@ end
 
 function esc_key_event(pressed, mods)
     if pressed then
-        window.request_close(app.window.handle)
+        app.window.request_close()
     end
 end
 

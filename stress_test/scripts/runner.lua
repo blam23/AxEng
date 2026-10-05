@@ -49,7 +49,7 @@ function check_next()
         start_next()
     else
         log.info("All tests completed.")
-        window.request_close(app.window.handle)
+        app.window.request_close()
     end
 end
 

@@ -93,6 +93,11 @@ ax::Error ax::lua::ScriptManager::setup(Badge<Application>)
 	return m_lua.setup();
 }
 
+ax::Error ax::lua::ScriptManager::run_init(Badge<Application>)
+{
+	return m_lua.run_init();
+}
+
 ax::Error ax::lua::ScriptManager::cleanup(Badge<Application> b)
 {
 	unload_all(b);

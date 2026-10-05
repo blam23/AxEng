@@ -1,5 +1,4 @@
 #include "axeng/core/lua/lua_engine.h"
-#include "axeng/core/lua/lua_bindings.h"
 #include "axeng/core/log_timer.h"
 #include "axeng/core/lua/script.h"
 
@@ -209,12 +208,6 @@ ax::lua::Manager::Manager(flag_set<Permission> requestedPermissions)
 {
 }
 
-ax::lua::Manager::~Manager()
-{
-	if (m_loaded)
-		bindings::cleanup_state(m_state);
-}
-
 inline void lua_panic(sol::optional<std::string> maybe_msg)
 {
 	if (maybe_msg)
@@ -237,18 +230,6 @@ int lua_exception_handler(lua_State* L, sol::optional<const std::exception&> may
 ax::Error ax::lua::Manager::setup()
 {
 	LogTimer _timer{ "setup lua" };
-
-	const auto initLoad{ Resource::embedded_load_as_text<Script>("@init") };
-	std::string initScript{};
-	if (initLoad.has_value())
-	{
-		initScript = initLoad.value();
-	}
-	else
-	{
-		spdlog::error("Failed to load @init script: ResourceLoadError::{}", (int)initLoad.error());
-		return ax::Error::IO;
-	}
 
 	m_state.set_panic(sol::c_call<decltype(&lua_panic), &lua_panic>);
 	m_state.set_exception_handler(&lua_exception_handler);
@@ -293,8 +274,19 @@ ax::Error ax::lua::Manager::setup()
 		m_state["io"]["popen"] = &lua_io_popen;
 #endif
 
-	bindings::bind_to_state(m_state);
+	return ax::Error::Success;
+}
 
+ax::Error ax::lua::Manager::run_init()
+{
+	const auto initLoad{ Resource::embedded_load_as_text<Script>("@init") };
+	if (!initLoad.has_value())
+	{
+		spdlog::error("Failed to load @init script: ResourceLoadError::{}", (int)initLoad.error());
+		return ax::Error::IO;
+	}
+
+	const std::string& initScript{ initLoad.value() };
 	const auto res{ m_state.do_string(initScript, "@init") };
 	if (!res.valid())
 	{
@@ -303,15 +295,11 @@ ax::Error ax::lua::Manager::setup()
 		return ax::Error::Lua;
 	}
 
-	m_loaded = true;
 	return ax::Error::Success;
 }
 
 ax::Error ax::lua::Manager::cleanup()
 {
-	m_loaded = false;
-	bindings::cleanup_state(m_state);
-
 	return ax::Error::Success;
 }
 
