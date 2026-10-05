@@ -29,7 +29,7 @@ protected:
         layout.emplace("main.lua", ax::EmbeddedResource{
             reinterpret_cast<const uint8_t*>(main_script), sizeof(main_script) - 1 });
         auto app = ax::Application::from_embedded({}, std::move(layout));
-        ASSERT_TRUE(app.try_load({}));
+        ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
         ASSERT_EQ(manager.set_application(app), ax::Error::Success);
         char app_data[MAX_PATH];
         ASSERT_TRUE(SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_APPDATA, nullptr, 0, app_data)));
