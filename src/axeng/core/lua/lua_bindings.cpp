@@ -30,14 +30,6 @@ bool ax::lua::bindings::register_cleanup(std::string_view name, std::function<vo
 	return true;
 }
 
-void ax::lua::bindings::bind_to_state(Application& app, sol::state& state)
-{
-	spdlog::debug("<Lua> Setting up all lua bindings, count: {}", s_stateBinds.size() + s_binds.size());
-	for (const auto& bind : s_stateBinds)
-		bind(state);
-	bind_conditional_to_state(app, state);
-}
-
 void ax::lua::bindings::bind_conditional_to_state(Application& app, sol::state& state)
 {
 	spdlog::debug("<Lua> Setting up conditional lua bindings, count: {}", s_binds.size());
@@ -61,11 +53,4 @@ void ax::lua::bindings::cleanup_state(Application& app, sol::state& state)
 	for (const auto& cu : s_cleanups)
 		if (cu.first(app, state))
 			cu.second(app, state);
-}
-
-void ax::lua::bindings::cleanup_state(sol::state& state)
-{
-	spdlog::debug("<Lua> Cleaning up lua state bindings, count: {}", s_stateCleanups.size());
-	for (const auto& cleanup : s_stateCleanups)
-		cleanup(state);
 }

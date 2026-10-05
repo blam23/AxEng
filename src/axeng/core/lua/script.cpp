@@ -70,9 +70,9 @@ std::unique_ptr<ax::lua::Script> ax::lua::ScriptManager::load_impl(const std::st
 		return nullptr;
 }
 
-ax::lua::ScriptManager::ScriptManager(Badge<Application> badge, Application& application, flag_set<Permission> permissions, ResourceLoader& loader)
+ax::lua::ScriptManager::ScriptManager(Badge<Application> badge, flag_set<Permission> permissions, ResourceLoader& loader)
 	: ax::AssetManager<Script, ScriptManager>{ badge, loader }
-	, m_lua{ application, permissions }
+	, m_lua{ permissions }
 {
 }
 
@@ -91,6 +91,11 @@ ax::Error ax::lua::ScriptManager::setup(Badge<Application>)
 	}
 
 	return m_lua.setup();
+}
+
+ax::Error ax::lua::ScriptManager::run_init(Badge<Application>)
+{
+	return m_lua.run_init();
 }
 
 ax::Error ax::lua::ScriptManager::cleanup(Badge<Application> b)

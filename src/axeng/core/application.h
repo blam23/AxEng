@@ -13,6 +13,10 @@
 #include "axeng/core/forward.h"
 #include "axeng/core/log_timer.h"
 #include "axeng/core/lua/bindings/lua_application_bindings.h"
+#include "axeng/core/lua/bindings/lua_resource_bindings.h"
+#include "axeng/core/lua/bindings/lua_shared_bindings.h"
+#include "axeng/core/lua/bindings/lua_sprite_bindings.h"
+#include "axeng/core/lua/bindings/lua_user_io_bindings.h"
 #include "axeng/core/lua/lua_bindings.h"
 #include "axeng/core/lua/lua_engine.h"
 #include "axeng/core/resource_loader.h"
@@ -78,7 +82,11 @@ namespace ax
 		);
 
 	private:
-		friend void lua::bindings::setup_application_bindings(Application&, sol::state&);
+		friend void lua::bindings::setup_application_bindings(Application&, sol::state&, bool);
+		friend void lua::bindings::setup_user_io_bindings(Application&, sol::state&);
+		friend void lua::bindings::setup_shared_bindings(Application&, sol::state&, bool);
+		friend void lua::bindings::setup_resource_bindings(Application&, sol::state&);
+		friend void lua::bindings::setup_sprite_bindings(Application&, sol::state&);
 
 		Application(flag_set<lua::Permission> permissions, ResourceLoader&& loader);
 
@@ -86,7 +94,7 @@ namespace ax
 
 		bool init_window(wgpu::BackendType backendType);
 		void add_manifest_bindings(sol::state&);
-		void add_thread_bindings(sol::state&, const std::vector<std::string>& args);
+		ax::Error add_thread_bindings(sol::state&, const std::vector<std::string>& args);
 		std::unique_ptr<Window> m_window;
 
 		ResourceLoader m_loader;
@@ -102,9 +110,12 @@ namespace ax
 		Texture* m_atlasTexture{};
 
 		bool m_loaded{ false };
+		bool m_mainBindingsInitialized{ false };
+		bool m_backgroundBindingsInitialized{ false };
 		flag_set<lua::Permission> m_allowedPermissions;
 
-		void initialise_background_worker(const std::vector<std::string>& args);
+		ax::Error initialise_background_worker(const std::vector<std::string>& args);
+		void cleanup_bindings();
 		BackgroundWorker m_backgroundWorker;
 		std::mutex m_shared_mutex{};
 		std::map<std::string, ax::lua::SharedObject> m_shared{};

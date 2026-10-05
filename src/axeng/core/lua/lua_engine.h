@@ -31,11 +31,11 @@ namespace ax::lua
 	public:
 		DISABLE_COPY_AND_MOVE(Manager);
 
-		Manager(Application&, flag_set<Permission> requestedPermissions);
 		explicit Manager(flag_set<Permission> requestedPermissions);
-		~Manager();
+		~Manager() = default;
 		 
 		ax::Error setup();
+		ax::Error run_init();
 		ax::Error cleanup();
 
 		sol::environment create_env();
@@ -48,8 +48,6 @@ namespace ax::lua
 
 	private:
 		sol::state m_state;
-		bool m_loaded{ false };
 		flag_set<Permission> m_permissionFlags;
-		Application* m_application{};
 	};
 }

@@ -9,6 +9,7 @@
 #include "axeng/core/lua/bindings/lua_window_bindings.h"
 #include "axeng/core/lua/bindings/lua_imgui_bindings.h"
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
+#include "axeng/core/lua/bindings/lua_vector_bindings.h"
 
 void ax::lua::bindings::setup()
 {
@@ -33,5 +34,6 @@ void ax::lua::bindings::setup()
 	bindings::register_cleanup("ui", &cleanup_imgui_bindings);
 
 	bindings::register_binding("texture", &setup_texture_bindings);
+	bindings::register_binding("vector", &setup_vector_bindings);
 
 }

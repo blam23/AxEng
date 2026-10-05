@@ -33,10 +33,11 @@ namespace ax::lua
 	class ScriptManager : public AssetManager<Script, ScriptManager>
 	{
 	public:
-		ScriptManager(Badge<Application>, Application&, flag_set<Permission> permissions, ResourceLoader& loader);
+		ScriptManager(Badge<Application>, flag_set<Permission> permissions, ResourceLoader& loader);
 		sol::environment create_env();
 
 		ax::Error setup(Badge<Application>);
+		ax::Error run_init(Badge<Application>);
 		ax::Error cleanup(Badge<Application>);
 
 		sol::state& state(Badge<Application>) { return m_lua.state(); }

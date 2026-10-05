@@ -43,9 +43,11 @@ bool ax::Application::init_window(wgpu::BackendType backendType)
 	return success;
 }
 
-void ax::Application::add_thread_bindings(sol::state& state, const std::vector<std::string>& args)
+ax::Error ax::Application::add_thread_bindings(sol::state& state, const std::vector<std::string>& args)
 {
-	initialise_background_worker(args);
+	const auto initErr{ initialise_background_worker(args) };
+	if (initErr != ax::Error::Success)
+		return initErr;
 
 	auto background_table{ state.create_table() };
 
@@ -63,13 +65,25 @@ void ax::Application::add_thread_bindings(sol::state& state, const std::vector<s
 		};
 
 	state["bg"] = background_table;
+	return ax::Error::Success;
 }
 
-void ax::Application::initialise_background_worker(const std::vector<std::string>& args)
+ax::Error ax::Application::initialise_background_worker(const std::vector<std::string>& args)
 {
-	m_backgroundWorker.lua().setup();
-	lua::bindings::setup_application_bindings(*this, m_backgroundWorker.lua().state());
+	auto& state{ m_backgroundWorker.lua().state() };
+	auto err{ m_backgroundWorker.lua().setup() };
+	if (err != ax::Error::Success)
+		return err;
+
+	lua::bindings::bind_to_state(state);
+	lua::bindings::setup_application_bindings(*this, state, false);
+	m_backgroundBindingsInitialized = true;
+	err = m_backgroundWorker.lua().run_init();
+	if (err != ax::Error::Success)
+		return err;
+
 	m_backgroundWorker.start(args);
+	return ax::Error::Success;
 }
 
 void ax::Application::add_manifest_bindings(sol::state&)
@@ -93,7 +107,15 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 
 	ax::lua::libs::register_embedded();
 	ax::Resource::setup_loader(m_loader);
-	m_scripts.setup({});
+	auto setupErr{ m_scripts.setup({}) };
+	if (setupErr != ax::Error::Success)
+		return false;
+
+	lua::bindings::bind_to_state(m_scripts.state({}));
+	m_mainBindingsInitialized = true;
+	setupErr = m_scripts.run_init({});
+	if (setupErr != ax::Error::Success)
+		return false;
 
 	ax::lua::Script* manifest_script{ m_scripts.load("!manifest", "manifest.luac") };
 	m_env = m_scripts.create_env();
@@ -204,8 +226,11 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 		return false;
 	}
 
-	lua::bindings::setup_application_bindings(*this, m_scripts.state({}));
+	lua::bindings::setup_application_bindings(*this, m_scripts.state({}), true);
 
+	//
+	// Main-thread specific bindings
+	//
 	sol::table app{ m_scripts.state({})["app"].get<sol::table>() };
 	app["run_in_this_environment"] =
 		[this](const sol::table& script) -> sol::object
@@ -233,34 +258,12 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 			}
 		};
 
-	app["thread"] = "main";
-	app["on_main_thread"] =
-		[]() -> bool
-		{
-			return true;
-		};
-
-	app["signal"] =
-		[](lua::SharedObject& obj, const std::string& signal_name)
-		{
-			obj.signal(signal_name);
-		};
-
-	app["on_signal"] =
-		[this](lua::SharedObject& obj, const std::string& signal_name, sol::protected_function func)
-		{
-			obj.on_signal(this, signal_name, func);
-		};
-
-	m_scripts.state({}).new_usertype<lua::SharedObject>
-		(
-			"shared",
-			"set", &lua::SharedObject::set,
-			"get", [this](lua::SharedObject& ref, const std::string& key) { return ref.get(m_scripts.state({}), key); }
-		);
-
 	if (m_allowedPermissions[ax::lua::Permission::Threads])
-		add_thread_bindings(m_scripts.state({}), args);
+	{
+		const auto threadErr{ add_thread_bindings(m_scripts.state({}), args) };
+		if (threadErr != ax::Error::Success)
+			return false;
+	}
 
 	spdlog::info("<Lua> Running entry point script: '{}'", entryPointScript);
 	const auto ep_res = m_entryPoint->run(m_env);
@@ -282,6 +285,9 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 
 void ax::Application::cleanup()
 {
+	m_backgroundWorker.stop();
+	cleanup_bindings();
+
 	{
 		std::lock_guard lock{ m_shared_mutex };
 		m_shared.clear();
@@ -301,8 +307,24 @@ ax::Application::~Application()
 
 	if (m_loaded)
 		cleanup();
+	else
+		cleanup_bindings();
 
 	m_scripts.cleanup({});
+}
+
+void ax::Application::cleanup_bindings()
+{
+	if (m_mainBindingsInitialized)
+	{
+		lua::bindings::cleanup_state(*this, m_scripts.state({}));
+		m_mainBindingsInitialized = false;
+	}
+	if (m_backgroundBindingsInitialized)
+	{
+		lua::bindings::cleanup_state(*this, m_backgroundWorker.lua().state());
+		m_backgroundBindingsInitialized = false;
+	}
 }
 
 void ax::Application::call_deferred(std::function<void()> func)
@@ -322,9 +344,9 @@ void ax::Application::register_conditional_binding
 
 ax::Application::Application(flag_set<lua::Permission> permissions, ResourceLoader&& loader)
 	: m_loader{ std::move(loader) }
-	, m_scripts{ Badge<Application>{}, *this, permissions, m_loader }
+	, m_scripts{ Badge<Application>{}, permissions, m_loader }
 	, m_textures{ Badge<Application>{}, m_loader }
 	, m_allowedPermissions{ permissions }
-	, m_backgroundWorker{ true, *this, permissions }
+	, m_backgroundWorker{ true, permissions }
 {
 }

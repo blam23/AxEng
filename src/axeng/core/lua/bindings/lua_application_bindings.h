@@ -5,5 +5,5 @@
 
 namespace ax::lua::bindings
 {
-	void setup_application_bindings(ax::Application&, sol::state&);
+	void setup_application_bindings(ax::Application&, sol::state&, bool mainThread);
 }

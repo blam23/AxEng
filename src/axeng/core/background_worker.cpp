@@ -1,12 +1,6 @@
 #include "axeng/core/background_worker.h"
 #include "axeng/core/lua/shared.h"
 
-ax::BackgroundWorker::BackgroundWorker(bool useLua, Application& application, flag_set<lua::Permission> permissions)
-	: m_lua{ application, permissions }
-	, m_useLua{ useLua }
-{
-}
-
 ax::BackgroundWorker::BackgroundWorker(bool useLua, flag_set<lua::Permission> permissions)
 	: m_lua{ permissions }
 	, m_useLua{ useLua }
@@ -28,60 +22,36 @@ void ax::BackgroundWorker::start(const std::vector<std::string>& args)
 		{
 			m_lua.state()["args"] = args;
 
-			m_lua.state().new_usertype<lua::SharedObject>
-				(
-					"shared",
-					"set", &lua::SharedObject::set,
-					"get", [this](lua::SharedObject& ref, const std::string& key) { return ref.get(m_lua.state(), key); }
-				);
-
-			sol::table app{ m_lua.state()["app"].get<sol::table>() };
-			app["run_in_this_environment"] =
-				[this](const sol::table& script) -> sol::object
-				{
-					if (script["valid"])
+			if (sol::optional<sol::table> app{ m_lua.state()["app"] })
+			{
+				(*app)["run_in_this_environment"] =
+					[this](const sol::table& script) -> sol::object
 					{
-						auto ptr{ script["ptr"].get<ax::lua::Script*>() };
-						if (ptr == nullptr)
+						if (script["valid"])
 						{
-							spdlog::error("Invalid script object, cannot run");
+							auto ptr{ script["ptr"].get<ax::lua::Script*>() };
+							if (ptr == nullptr)
+							{
+								spdlog::error("Invalid script object, cannot run");
+								return nullptr;
+							}
+							auto env{ m_lua.create_env() };
+							auto res{ ptr->run_different_state(m_lua.state(), env) };
+
+							if (!res.valid())
+							{
+								const sol::error msg = res;
+								spdlog::error("Failed to run script: {}", msg.what());
+							}
+							return res;
+						}
+						else
+						{
+							spdlog::error("Invalid script, cannot run");
 							return nullptr;
 						}
-						auto env{ m_lua.create_env() };
-						auto res{ ptr->run_different_state(m_lua.state(), env) };
-
-						if (!res.valid())
-						{
-							const sol::error msg = res;
-							spdlog::error("Failed to run script: {}", msg.what());
-						}
-						return res;
-					}
-					else
-					{
-						spdlog::error("Invalid script, cannot run");
-						return nullptr;
-					}
-				};
-
-			app["thread"] = "background";
-			app["on_main_thread"] =
-				[]() -> bool
-				{
-					return false;
-				};
-
-			app["signal"] =
-				[](lua::SharedObject& obj, const std::string& signal_name)
-				{
-					obj.signal(signal_name);
-				};
-
-			app["on_signal"] =
-				[](lua::SharedObject& obj, const std::string& signal_name, sol::protected_function func)
-				{
-					obj.on_signal(nullptr, signal_name, func);
-				};
+					};
+			}
 
 			const auto stdLibText{ Resource::embedded_load_as_text<lua::Script>("@std") };
 			const auto res{ m_lua.state().do_string(*stdLibText, "@std") };
