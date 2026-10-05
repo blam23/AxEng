@@ -139,17 +139,6 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 		};
 	window_table["on_resize"] = on_resize_table;
 
-	app.window()->get_resize_event_handler().subscribe
-	(
-		[&state](const ax::WindowResizeEvent& e)
-		{
-			auto app_table{ state["app"] };
-			auto window_table {app_table["window"].get<sol::table>() };
-			window_table["width"] = e.width;
-			window_table["height"] = e.height;
-		}
-	);
-
 	window_table["width"] = app.window()->width();
 	window_table["height"] = app.window()->height();
 

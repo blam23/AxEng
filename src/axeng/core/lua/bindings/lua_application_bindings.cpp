@@ -37,6 +37,20 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 					}
 				);
 			};
+
+		if (mainThread)
+		{
+			app.window()->get_resize_event_handler().subscribe
+			(
+				[&state](const ax::WindowResizeEvent& e)
+				{
+					auto app_table{ state["app"] };
+					auto window_table {app_table["window"].get<sol::table>() };
+					window_table["width"] = e.width;
+					window_table["height"] = e.height;
+				}
+			);
+		}
 	}
 
 	setup_shared_bindings(app, state, mainThread);
