@@ -1,4 +1,5 @@
 #include <windows.h>
+#include <map>
 
 #include "axeng/core/axeng.h"
 #include "axeng/comp/compiler.h"
@@ -49,6 +50,11 @@ int main(int argc, char* argv[])
 		.store_into(run)
 		.flag()
 		.help("Runs given application");
+
+	std::string backendName{ "auto" };
+	program.add_argument("--backend")
+		.store_into(backendName)
+		.help("WebGPU backend to use: auto, d3d11, d3d12 (dx), vulkan, opengl, or opengles");
 
 	bool verbose{ false };
 	program.add_argument("-v", "--verbose")
@@ -120,6 +126,24 @@ int main(int argc, char* argv[])
 		spdlog::error("{}", program.help().str());
 		return RET(ax::Error::InvalidConfiguration);
 	}
+
+	const std::map<std::string, wgpu::BackendType> backendTypes
+	{
+		{ "auto", wgpu::BackendType::Undefined },
+		{ "d3d11", wgpu::BackendType::D3D11 },
+		{ "d3d12", wgpu::BackendType::D3D12 },
+		{ "dx", wgpu::BackendType::D3D12 },
+		{ "vulkan", wgpu::BackendType::Vulkan },
+		{ "opengl", wgpu::BackendType::OpenGL },
+		{ "opengles", wgpu::BackendType::OpenGLES },
+	};
+	const auto backendIt{ backendTypes.find(backendName) };
+	if (backendIt == backendTypes.end())
+	{
+		spdlog::error("Unknown WebGPU backend '{}'. Choose auto, d3d11, d3d12, dx, vulkan, opengl, or opengles.", backendName);
+		return RET(ax::Error::InvalidConfiguration);
+	}
+	const wgpu::BackendType backendType{ backendIt->second };
 
 	//
 	// Validate Args
@@ -215,13 +239,13 @@ int main(int argc, char* argv[])
 
 		if (useZipFiles)
 		{
-			const auto err{ ax::run_from_zip(permissions, out_args, compile ? outDirectory + ".zip" : inDirectory)};
+			const auto err{ ax::run_from_zip(permissions, out_args, compile ? outDirectory + ".zip" : inDirectory, backendType)};
 			if (err != ax::Error::Success)
 				return RET(err);
 		}
 		else
 		{
-			const auto err{ ax::run_from_directory(permissions, out_args, compile ? outDirectory : inDirectory) };
+			const auto err{ ax::run_from_directory(permissions, out_args, compile ? outDirectory : inDirectory, backendType) };
 			if (err != ax::Error::Success)
 				return RET(err);
 		}

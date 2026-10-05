@@ -8,6 +8,7 @@
 
 namespace ax
 {
+	using EventID = std::uint16_t; // suitable for converting to and from Lua
 	template <typename T_EVENT>
 	class EventHandler
 	{
@@ -19,14 +20,14 @@ namespace ax
 		EventHandler<T_EVENT>() = default;
 		~EventHandler<T_EVENT>() = default;
 
-		size_t subscribe(T_FUNC&& handler)
+		EventID subscribe(T_FUNC&& handler)
 		{
 			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
 			m_subscriptions.emplace(m_nextIdx, handler);
 			return m_nextIdx++;
 		}
-
-		void unsubscribe(size_t id)
+		
+		void unsubscribe(EventID id)
 		{
 			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
 			m_subscriptions.erase(id);
@@ -46,8 +47,8 @@ namespace ax
 		}
 
 	private:
-		std::map<size_t, T_FUNC> m_subscriptions{};
+		std::map<EventID, T_FUNC> m_subscriptions{};
 		mutable std::mutex m_subscriptionMutex{};
-		std::size_t m_nextIdx;
+		EventID m_nextIdx{ 0 };
 	};
 };

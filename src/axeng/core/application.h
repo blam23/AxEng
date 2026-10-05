@@ -36,7 +36,7 @@ namespace ax
 
 		~Application();
 
-		bool try_load(const std::vector<std::string>& args);
+		bool try_load(const std::vector<std::string>& args, wgpu::BackendType backendType);
 		void cleanup();
 		
 		ResourceLoader& loader() noexcept { return m_loader; }
@@ -66,7 +66,7 @@ namespace ax
 
 		const std::vector<std::string> m_args;
 
-		bool init_window();
+		bool init_window(wgpu::BackendType backendType);
 		void add_manifest_bindings(sol::state&);
 		void add_application_bindings(sol::state&);
 		void add_thread_bindings(sol::state&, const std::vector<std::string>& args);

@@ -1,5 +1,6 @@
 #include "axeng/core/application.h"
 
+#include "axeng/core/event.h"
 #include "axeng/core/lua/external/lua_lib_loader.h"
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
 
@@ -21,7 +22,7 @@ ax::Application ax::Application::from_zip(flag_set<lua::Permission> permissions,
 	return { permissions, ZipResourceLoader{ zipFile } };
 }
 
-bool ax::Application::init_window()
+bool ax::Application::init_window(wgpu::BackendType backendType)
 {
 	LogTimer _timer{ "wgpu initial setup" };
 
@@ -36,7 +37,7 @@ bool ax::Application::init_window()
 	});
 
 	bool success{ true };
-	success = m_window->init_webgpu();
+	success = m_window->init_webgpu(backendType);
 	if (!success)
 		return false;
 
@@ -118,7 +119,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 	{
 		auto on_update_table{ state.create_table() };
 		on_update_table["subscribe"] =
-			[this](sol::protected_function f) -> size_t
+			[this](sol::protected_function f) -> EventID
 			{
 				return m_window->get_update_event_handler().subscribe
 				(
@@ -133,7 +134,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 					});
 			};
 		on_update_table["unsubscribe"] =
-			[this](size_t id)
+			[this](EventID id)
 			{
 				m_window->get_update_event_handler().unsubscribe(id);
 			};
@@ -387,7 +388,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 
 		auto on_ui_table{ state.create_table() };
 		on_ui_table["subscribe"] =
-			[this](sol::protected_function f) -> size_t
+			[this](sol::protected_function f) -> EventID
 			{
 				return m_window->get_ui_event_handler().subscribe([f](const ax::WindowUIEvent& e)
 					{
@@ -400,7 +401,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 					});
 			};
 		on_ui_table["unsubscribe"] =
-			[this](size_t id)
+			[this](EventID id)
 			{
 				m_window->get_ui_event_handler().unsubscribe(id);
 			};
@@ -408,7 +409,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 
 		auto on_render_table{ state.create_table() };
 		on_render_table["subscribe"] =
-			[this](sol::protected_function f) -> size_t
+			[this](sol::protected_function f) -> EventID
 			{
 				return m_window->get_render_event_handler().subscribe([f](const ax::WindowRenderEvent& e)
 					{
@@ -421,7 +422,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 					});
 			};
 		on_render_table["unsubscribe"] =
-			[this](size_t id)
+			[this](EventID id)
 			{
 				m_window->get_render_event_handler().unsubscribe(id);
 			};
@@ -429,7 +430,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 
 		auto on_close_table{ state.create_table() };
 		on_close_table["subscribe"] =
-			[this](sol::protected_function f) -> size_t
+			[this](sol::protected_function f) -> EventID
 			{
 				return m_window->get_request_close_event_handler().subscribe([f](const ax::WindowRequestCloseEvent&) {
 					const auto res{ f() };
@@ -441,7 +442,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 				});
 			};
 		on_close_table["unsubscribe"] =
-			[this](size_t id)
+			[this](EventID id)
 			{
 				m_window->get_request_close_event_handler().unsubscribe(id);
 			};
@@ -449,7 +450,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 
 		auto on_resize_table{ state.create_table() };
 		on_resize_table["subscribe"] =
-			[this](sol::protected_function f) -> size_t
+			[this](sol::protected_function f) -> EventID
 			{
 				return m_window->get_resize_event_handler().subscribe([f](const ax::WindowResizeEvent& e)
 					{
@@ -462,7 +463,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 					});
 			};
 		on_resize_table["unsubscribe"] =
-			[this](size_t id)
+			[this](EventID id)
 			{
 				m_window->get_resize_event_handler().unsubscribe(id);
 			};
@@ -917,7 +918,7 @@ void ax::Application::add_application_bindings(sol::state& state)
 		)
 	);
 
-	using EH = ax::EventHandler<sol::object>;
+	using EH = EventHandler<sol::object>;
 
 	state.new_usertype<EH>
 	(
@@ -990,7 +991,7 @@ std::string make_safe_directory_name(const std::string& name)
 	return safe_name;
 }
 
-bool ax::Application::try_load(const std::vector<std::string>& args)
+bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::BackendType backendType)
 {
 	LogTimer _timer{ "Application Load" };
 
@@ -1054,7 +1055,7 @@ bool ax::Application::try_load(const std::vector<std::string>& args)
 	const auto& window_manifest{ manifest["window"] };
 	if (m_create_window)
 	{
-		init_window();
+		init_window(backendType);
 
 		const sol::table& textures{ manifest["textures"].get<sol::table>() };
 		for (const auto& entry : textures)

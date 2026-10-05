@@ -216,7 +216,7 @@ bool ax::Window::create_surfaces()
 	return true;
 }
 
-bool ax::Window::init_webgpu()
+bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 {
 	//
 	// Get wgpu Instance
@@ -251,7 +251,8 @@ bool ax::Window::init_webgpu()
 	//
 	wgpu::RequestAdapterOptions options
 	{
-		.featureLevel = wgpu::FeatureLevel::Core
+		.featureLevel = wgpu::FeatureLevel::Core,
+		.backendType = backendType
 	};
 
 	auto adapter_callback =

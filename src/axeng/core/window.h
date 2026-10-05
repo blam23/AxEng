@@ -86,7 +86,7 @@ namespace ax
 		static void resize_event_handler(GLFWwindow* window, int width, int height);
 
 
-		bool init_webgpu();
+		bool init_webgpu(wgpu::BackendType backendType = wgpu::BackendType::Undefined);
 		bool init_imgui();
 		void run_loop();
 
