@@ -17,6 +17,8 @@ function game:stop()
 end
 
 function game:start()
+    app.window.set_clear_color(0.36, 0.53, 0.22, 1.0)
+
     mouse.set_cursor(app.window.handle, mouse.cursors.arrow)
     game:setup_grass()
     tower:setup(app.window.width/2, app.window.height/2)

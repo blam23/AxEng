@@ -8,6 +8,10 @@ menu.options_color = {r = 0.0, g = 0.8, b = 0.8, a = 1}
 
 local pressed = false
 
+function menu:start()
+    app.window.set_clear_color(0.05, 0.05, 0.08, 1.0)
+end
+
 function menu:tick(delta)
     self.play_color = {r = 0.0, g = 0.8, b = 0.8, a = 1}
     self.options_color = {r = 0.0, g = 0.8, b = 0.8, a = 1}
