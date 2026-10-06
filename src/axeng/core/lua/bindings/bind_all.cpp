@@ -11,29 +11,34 @@
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
 #include "axeng/core/lua/bindings/lua_vector_bindings.h"
 
+#include <mutex>
+
 void ax::lua::bindings::setup()
 {
-	bindings::register_binding("error_code", &setup_error_bindings);
+	static std::once_flag registered;
+	std::call_once(registered, []
+	{
+		bindings::register_binding("error_code", &setup_error_bindings);
 
-	bindings::register_binding("log", &setup_log_bindings);
+		bindings::register_binding("log", &setup_log_bindings);
 
-	bindings::register_binding("event", &setup_event_bindings);
+		bindings::register_binding("event", &setup_event_bindings);
 
-	bindings::register_binding("type", &setup_type_bindings);
+		bindings::register_binding("type", &setup_type_bindings);
 
-	bindings::register_binding("keyboard", &setup_key_bindings);
-	bindings::register_cleanup("keyboard", &cleanup_key_bindings);
+		bindings::register_binding("keyboard", &setup_key_bindings);
+		bindings::register_cleanup("keyboard", &cleanup_key_bindings);
 
-	bindings::register_binding("mouse", &setup_mouse_bindings);
-	bindings::register_cleanup("mouse", &cleanup_mouse_bindings);
+		bindings::register_binding("mouse", &setup_mouse_bindings);
+		bindings::register_cleanup("mouse", &cleanup_mouse_bindings);
 
-	bindings::register_binding("window", &window_predicate, &setup_window_bindings);
-	bindings::register_binding("window", &window_embed_predicate, &setup_window_embed_bindings);
+		bindings::register_binding("window", &window_predicate, &setup_window_bindings);
+		bindings::register_binding("window", &window_embed_predicate, &setup_window_embed_bindings);
 
-	bindings::register_binding("ui", &setup_imgui_bindings);
-	bindings::register_cleanup("ui", &cleanup_imgui_bindings);
+		bindings::register_binding("ui", &setup_imgui_bindings);
+		bindings::register_cleanup("ui", &cleanup_imgui_bindings);
 
-	bindings::register_binding("texture", &setup_texture_bindings);
-	bindings::register_binding("vector", &setup_vector_bindings);
-
+		bindings::register_binding("texture", &setup_texture_bindings);
+		bindings::register_binding("vector", &setup_vector_bindings);
+	});
 }
