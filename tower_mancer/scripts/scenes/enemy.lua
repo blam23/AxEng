@@ -3,6 +3,9 @@ local texture = app.res.get_texture("tower")
 local enemies = {}
 
 local wizard_sprite_area = { 49, 32, 13, 15 }
+local wizard_clothes_area = { 80, 32, 13, 15 }
+local wizard_face_area = { 114, 32, 13, 15 }
+local wizard_faces = 6
 local lizard_sprite_area = { 68, 33, 8, 15 }
 local shadow_sprite_area = { 176, 208, 16, 16 }
 local projectile_sprite_area = { 112, 240, 4, 4}
@@ -28,22 +31,29 @@ function enemies:setup(num_enemies)
         enemy.vr = 0
         enemy.rand_timer = 0
         enemy.sprite = app.sprites.allocate()
-        --enemy.shadow_sprite = app.sprites.allocate()
-        local sprite_area = ((math.random() > 0.5) and lizard_sprite_area  or wizard_sprite_area)
-        app.sprites.setup(enemy.sprite, texture, enemy.x, enemy.y, sprite_area[1], sprite_area[2], sprite_area[3], sprite_area[4])
-        --enemy.shadow_sprite.scale.x = 2
-        --enemy.shadow_sprite.scale.y = 1
-        --enemy.shadow_sprite.z = 0
+        enemy.shadow_sprite = app.sprites.allocate()
+        enemy.clothes_sprite = app.sprites.allocate()
+        local face = math.random(1, wizard_faces)
+        local sprite_area = wizard_face_area--((math.random() > 0.5) and lizard_sprite_area  or wizard_sprite_area)
+        local face_start = sprite_area[1] + (face - 1) * (sprite_area[3] + 1)
+        app.sprites.setup(enemy.sprite, texture, enemy.x, enemy.y, face_start, sprite_area[2], sprite_area[3], sprite_area[4])
+        app.sprites.setup(enemy.clothes_sprite, texture, enemy.x, enemy.y, wizard_clothes_area[1], wizard_clothes_area[2], wizard_clothes_area[3], wizard_clothes_area[4])
+        enemy.shadow_sprite.scale.x = 2
+        enemy.shadow_sprite.scale.y = 1
+        enemy.shadow_sprite.z = 0
         enemy.sprite.z = 1
         enemy.sprite.scale.x = 2
         enemy.sprite.scale.y = 2
-        --enemy.shadow_off_y = sprite_area[4] * enemy.sprite.scale.y - (shadow_sprite_area[4]/2)
-        --enemy.shadow_off_x = (sprite_area[3] / 2) * enemy.sprite.scale.x - (shadow_sprite_area[3])
-        --app.sprites.setup(enemy.shadow_sprite, texture, enemy.x + enemy.shadow_off_x, enemy.y + enemy.shadow_off_y, shadow_sprite_area[1], shadow_sprite_area[2], shadow_sprite_area[3], shadow_sprite_area[4])
-        --enemy.sprite.tint.x = math.random() + 0.2
-        --enemy.sprite.tint.y = math.random() + 0.2
-        --enemy.sprite.tint.z = math.random() + 0.2
-        --enemy.sprite.tint.w = 1.0
+        enemy.clothes_sprite.z = 2
+        enemy.clothes_sprite.scale.x = 2
+        enemy.clothes_sprite.scale.y = 2
+        enemy.shadow_off_y = sprite_area[4] * enemy.sprite.scale.y - (shadow_sprite_area[4]/2) + 1
+        enemy.shadow_off_x = (sprite_area[3] / 2) * enemy.sprite.scale.x - (shadow_sprite_area[3])
+        app.sprites.setup(enemy.shadow_sprite, texture, enemy.x + enemy.shadow_off_x, enemy.y + enemy.shadow_off_y, shadow_sprite_area[1], shadow_sprite_area[2], shadow_sprite_area[3], shadow_sprite_area[4])
+        local hsla_clothes = vec4:new(math.random() * 360, 0.3, 0.4, 1.0)
+        --local hsla_skin = vec4:new(math.random() * 360, math.random() * 0.4 + 0.2, (math.random() * 0.3) + 0.6, 1.0)
+        enemy.clothes_sprite.tint = ax.vec4_hsla_to_rgba(hsla_clothes)
+        --enemy.sprite.tint = ax.vec4_hsla_to_rgba(hsla_skin)
 
         --sprite_idx = sprite_idx + 1
         --sprite_updates[sprite_idx] = { sprite = enemy.sprite, x = enemy.x, y = enemy.y, r = enemy.r }
@@ -111,7 +121,8 @@ function enemies:tick(delta)
         -- sprite_updates[sprite_idx].y = enemy.y + enemy.shadow_off_y
 
         app.sprites.update_position(enemy.sprite, enemy.x, enemy.y, enemy.y, enemy.r)
-        --app.sprites.update_position(enemy.shadow_sprite, enemy.x + enemy.shadow_off_x, enemy.y + enemy.shadow_off_y, enemy.y + enemy.shadow_off_y - 1000, 0)
+        app.sprites.update_position(enemy.clothes_sprite, enemy.x, enemy.y, enemy.y, enemy.r)
+        app.sprites.update_position(enemy.shadow_sprite, enemy.x + enemy.shadow_off_x, enemy.y + enemy.shadow_off_y, enemy.y + enemy.shadow_off_y - 1000, 0)
     end
 
     -- for i = 1, #enemies do

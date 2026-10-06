@@ -85,6 +85,39 @@ ax.import = function(script_name)
     return res
 end
 
+ax.vec4_hsla_to_rgba = function(hsla)
+    local r, g, b = ax.hsl_to_rgb(hsla.x, hsla.y, hsla.z)
+    local a = hsla.w or 1
+    return vec4:new(r, g, b, a)
+end
+
+local function hue2rgb(p, q, t)
+    if t < 0   then t = t + 1 end
+    if t > 1   then t = t - 1 end
+    if t < 1/6 then return p + (q - p) * 6 * t end
+    if t < 1/2 then return q end
+    if t < 2/3 then return p + (q - p) * (2/3 - t) * 6 end
+    return p
+end
+
+ax.hsl_to_rgb = function(h, s, l)
+    local r, g, b
+    local h = h / 360
+
+    if s == 0 then
+        r, g, b = l, l, l
+    else
+        local q = (l < 0.5) and l * (1 + s) or l + s - l * s
+        local p = l * 2 - q
+
+        r = hue2rgb(p, q, h + 1/3)
+        g = hue2rgb(p, q, h)
+        b = hue2rgb(p, q, h - 1/3)
+    end
+
+    return r, g, b
+end
+
 ax.template_replace = function(str, data)
     local ret = ""
     local pos = 0
@@ -142,7 +175,6 @@ ax.template_replace = function(str, data)
     return ret
 end
 
--- todo: generate this
 ax.key_map = {
     esc = 256,
     space = 32,
