@@ -6,6 +6,7 @@
 #include "axeng/core/helpers.h"
 #include "axeng/core/asset_manager.h"
 #include "axeng/core/lua/lua_engine.h"
+#include "axeng/debug/debug_view.h"
 
 namespace ax::lua
 {
@@ -42,8 +43,8 @@ namespace ax::lua
 
 		sol::state& state(Badge<Application>) { return m_lua.state(); }
 		const sol::state& state(Badge<Application>) const { return m_lua.state(); }
-		sol::state& debug_get_state(Badge<ax::debug::View>) { return m_lua.state(); }
-		const sol::state& debug_get_state(Badge<ax::debug::View>) const { return m_lua.state(); }
+		sol::state& debug_get_state(Badge<ax::debug::Debugger>) { return m_lua.state(); }
+		const sol::state& debug_get_state(Badge<ax::debug::Debugger>) const { return m_lua.state(); }
 
 	private:
 		ax::lua::Manager m_lua;

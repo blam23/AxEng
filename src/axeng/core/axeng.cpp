@@ -4,6 +4,9 @@
 
 void ax::init()
 {
+	// Setup log capturing as early as possible
+	debug::ViewManager::setup_console_logging();
+	
 	ax::lua::libs::load_all_embedded();
 	ax::lua::bindings::setup();
 	ax::setup_glfw();
@@ -11,6 +14,7 @@ void ax::init()
 
 void ax::teardown()
 {
+	debug::ViewManager::teardown_console_logging();
 	ax::teardown_glfw();
 }
 
@@ -21,12 +25,20 @@ ax::Error ax::run(const std::vector<std::string>& args, Application&& app, wgpu:
 		auto loaded{ app.try_load(args, backendType) };
 
 		if (!loaded)
+		{
+			ax::teardown();
 			return Error::ApplicationLoadFailed;
+		}
 
 		if (app.has_window())
 		{
-			ax::debug::View::register_debug_view(app);
+			debug::ViewManager::setup(app);
+			debug::ViewManager::register_view(GLFW_KEY_F11, debug::ViewManager::debug_view_callback);
+			debug::ViewManager::register_view(GLFW_KEY_F10, debug::ViewManager::console_view_callback);
+			
 			app.window()->run_loop();
+
+			debug::ViewManager::teardown();
 		}
 
 		app.cleanup();

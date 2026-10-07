@@ -26,6 +26,7 @@
 #include "axeng/debug/debug_view.h"
 #include "axeng/core/camera.h"
 #include "axeng/core/texture.h"
+#include "axeng/core/window_events.h"
 
 namespace ax
 {
@@ -39,40 +40,6 @@ namespace ax
 		std::string title{ "AxEng" };
 		bool vsync{ true };
 		bool resizable{ true };
-	};
-
-	struct WindowUpdateEvent
-	{
-		double delta;
-	};
-
-	struct WindowRequestCloseEvent
-	{
-		Window* window;
-	};
-
-	// Before the render pass is setup
-	struct WindowPreRenderEvent
-	{
-		double delta;
-	};
-
-	// After the render pass is setup
-	struct WindowRenderEvent
-	{
-		double delta;
-		wgpu::RenderPassEncoder& pass;
-	};
-
-	struct WindowUIEvent
-	{
-		double delta;
-	};
-
-	struct WindowResizeEvent
-	{
-		uint32_t width;
-		uint32_t height;
 	};
 
 	class Window

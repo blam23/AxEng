@@ -59,8 +59,8 @@ namespace ax
 		const lua::ScriptManager& scripts() const noexcept { return m_scripts; }
 		lua::ScriptManager& scripts() noexcept { return m_scripts; }
 
-		const sol::environment& debug_get_env(Badge<debug::View>) const noexcept { return m_env; }
-		sol::environment& debug_get_env(Badge<debug::View>) noexcept { return m_env; }
+		const sol::environment& debug_get_env(Badge<debug::Debugger>) const noexcept { return m_env; }
+		sol::environment& debug_get_env(Badge<debug::Debugger>) noexcept { return m_env; }
 
 		void set_headless() noexcept { m_create_window = false; }
 
