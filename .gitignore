@@ -12,6 +12,7 @@ AxCompiler_Old*
 *.spv
 test_log_*
 compiled_lua_tests
+vsxmake*
 
 # vs stuff
 vcpkg_installed/

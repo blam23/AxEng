@@ -4,42 +4,56 @@ set_xmakever("2.9.0")
 
 set_allowedplats("windows")
 set_allowedarchs("x64")
+set_allowedmodes("debug", "release")
 set_toolchains("clang")
-set_runtimes("MD")
 set_languages("c17", "c++23")
 set_encodings("utf-8")
 set_warnings("all", "error")
 add_rules("mode.debug", "mode.release")
 
-local vcpkg_triplet = "x64-windows-static-md-release"
+local vcpkg_debug = is_mode("debug")
+local vcpkg_triplet = "x64-windows-static-md"
 local vcpkg_triplet_dir = path.join(os.projectdir(), "triplets")
+local vcpkg_config_dir = vcpkg_debug and "debug" or ""
+set_runtimes(vcpkg_debug and "MDd" or "MD")
+add_defines("_ITERATOR_DEBUG_LEVEL=" .. (vcpkg_debug and "2" or "0"))
 
 -- Dependencies come from vcpkg.json (vcpkg manifest mode). The rule installs them into
--- build/vcpkg_installed using release-only libraries for both app configurations.
+-- build/vcpkg_installed with both configurations; each target links its matching CRT/STL ABI.
 -- The vcpkg location is taken from VCPKG_ROOT (or vcpkg on PATH).
 rule("vcpkg.manifest")
     on_load(function (target)
         local installroot = path.join(os.projectdir(), "build", "vcpkg_installed")
         local prefix = path.join(installroot, vcpkg_triplet)
-        local stamp = path.join(installroot, ".stamp")
-        local manifest = path.join(os.projectdir(), "vcpkg.json")
-        local triplet_file = path.join(vcpkg_triplet_dir, vcpkg_triplet .. ".cmake")
-        if not os.isfile(stamp) or os.mtime(manifest) > os.mtime(stamp) or os.mtime(triplet_file) > os.mtime(stamp) then
-            local vcpkg = "vcpkg"
-            local vcpkg_root = os.getenv("VCPKG_ROOT")
-            if vcpkg_root and os.isfile(path.join(vcpkg_root, "vcpkg.exe")) then
-                vcpkg = path.join(vcpkg_root, "vcpkg.exe")
-            end
-            os.mkdir(installroot)
-            os.execv(vcpkg, {"install", "--triplet", vcpkg_triplet,
-                             "--overlay-triplets=" .. vcpkg_triplet_dir,
-                             "--x-manifest-root=" .. os.projectdir(),
-                             "--x-install-root=" .. installroot})
-            io.writefile(stamp, "")
+        local toolchain = target:toolchain("clang")
+        assert(toolchain and toolchain:check(), "AxEng requires the Windows clang toolchain with an MSVC SDK")
+        local vcvars = toolchain:config("vcvars")
+        assert(vcvars and vcvars.VSInstallDir and vcvars.VCToolsVersion and vcvars.WindowsSDKVersion,
+               "Unable to determine the MSVC toolset and Windows SDK selected by clang")
+        local cc = toolchain:tool("cc")
+        assert(cc, "Unable to locate xmake's selected clang compiler")
+        local clang_cl = path.join(path.directory(cc), "clang-cl.exe")
+        assert(os.isfile(clang_cl), "Missing clang-cl beside xmake's selected compiler: " .. clang_cl)
+        local vcpkg = "vcpkg"
+        local vcpkg_root = os.getenv("VCPKG_ROOT")
+        if vcpkg_root and os.isfile(path.join(vcpkg_root, "vcpkg.exe")) then
+            vcpkg = path.join(vcpkg_root, "vcpkg.exe")
         end
+        -- Let vcpkg validate its own ABI cache, including changes to the selected toolset.
+        os.execv(vcpkg, {"install", "--triplet", vcpkg_triplet,
+                         "--overlay-triplets=" .. vcpkg_triplet_dir,
+                         "--x-manifest-root=" .. os.projectdir(),
+                         "--x-install-root=" .. installroot}, {envs = {
+            VCPKG_VISUAL_STUDIO_PATH = vcvars.VSInstallDir:gsub("[/\\]+$", ""),
+            AXENG_CLANG_CL = clang_cl,
+            AXENG_VS_TOOLSET_VERSION = vcvars.VCToolsVersion,
+            AXENG_WINDOWS_SDK_VERSION = vcvars.WindowsSDKVersion:gsub("[/\\]+$", "")
+        }})
+        local libdir = path.join(prefix, vcpkg_config_dir, "lib")
+        assert(os.isdir(libdir), "Missing vcpkg libraries for the selected build mode: " .. libdir)
         target:add("sysincludedirs", path.join(prefix, "include"), {public = true})
-        target:add("linkdirs", path.join(prefix, "lib"), {public = true})
-        for _, lib in ipairs(os.files(path.join(prefix, "lib", "*.lib"))) do
+        target:add("linkdirs", libdir, {public = true})
+        for _, lib in ipairs(os.files(path.join(libdir, "*.lib"))) do
             target:add("links", path.basename(lib), {public = true})
         end
     end)
@@ -47,7 +61,7 @@ rule("vcpkg.manifest")
 rule("vcpkg.runtime_dlls")
     after_build(function (target)
         local prefix = path.join(os.projectdir(), "build", "vcpkg_installed", vcpkg_triplet)
-        local bindir = path.join(prefix, "bin")
+        local bindir = path.join(prefix, vcpkg_config_dir, "bin")
         for _, dll in ipairs(os.files(path.join(bindir, "*.dll"))) do
             os.cp(dll, target:targetdir())
         end
