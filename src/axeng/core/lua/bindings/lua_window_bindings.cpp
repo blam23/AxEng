@@ -371,6 +371,12 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 			);
 	}
 
+	window_table["screen_contains_region"] =
+		[&app](float x, float y, float w, float h) -> bool
+		{
+			return app.window()->screen_contains_region({ x, y, w, h });
+		};
+
 	auto app_table{ state["app"] };
 	app_table["window"] = window_table;
 }

@@ -920,10 +920,29 @@ glm::vec2 ax::Window::global_to_viewport(const glm::vec2& position) const
 	return ((position - viewportCenter) / m_camera.zoom()) + m_camera.position();
 }
 
+glm::vec4 ax::Window::global_to_viewport(const glm::vec4& rect) const
+{
+	return glm::vec4(global_to_viewport({ rect.x, rect.y }), rect.z / m_camera.zoom(), rect.w / m_camera.zoom());
+}
+
 glm::vec2 ax::Window::viewport_to_global(const glm::vec2& position) const
 {
 	const glm::vec2 viewportCenter{ m_width * 0.5f, m_height * 0.5f };
 	return ((position - m_camera.position()) * m_camera.zoom()) + viewportCenter;
+}
+
+glm::vec4 ax::Window::viewport_to_global(const glm::vec4& rect) const
+{
+	return glm::vec4(viewport_to_global({ rect.x, rect.y }), rect.z * m_camera.zoom(), rect.w * m_camera.zoom());
+}
+
+bool ax::Window::screen_contains_region(const glm::vec4& rect) const
+{
+	const auto transformedRect { viewport_to_global(rect) };
+	return transformedRect.x + transformedRect.z >= 0
+			&& transformedRect.y + transformedRect.w >= 0
+			&& transformedRect.x <= m_width
+			&& transformedRect.y <= m_height;
 }
 
 wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view)

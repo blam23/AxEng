@@ -2,8 +2,8 @@ local draw_helpers = ax.import("draw_helpers")
 local math_helpers = ax.import("math_helpers")
 local scene = ax.import("scene")
 local game = scene:new(true)
+local chunk = ax.import("chunk")
 
-local enemies = ax.import("enemy")
 local tower = ax.import("tower")
 
 local texture = app.res.get_texture("tower")
@@ -12,6 +12,8 @@ local grass_texture = app.res.get_texture("grass")
 local shadow_sprite_area = { 176, 208, 16, 16 }
 
 local grass_tiles = {}
+
+local chunks = {}
 
 function game:stop()
 end
@@ -22,14 +24,39 @@ function game:start()
     mouse.set_cursor(app.window.handle, mouse.cursors.arrow)
     game:setup_grass()
     tower:setup(app.window.width/2, app.window.height/2)
-    enemies:setup(10000)
+
+    for y = -100, 100 do
+        for x= -100, 100 do
+            table.insert(chunks, chunk:new(x, y))
+        end
+    end
+
+    for _, c in ipairs(chunks) do
+        c:setup(50)
+        if c:onscreen() then
+            c:show()
+        end
+    end
 end
 
 local camera = app.window.camera
 local zoom = 1.0
 function game:tick(delta)
     tower:tick(delta)
-    enemies:tick(delta)
+
+    -- local mx, my = ax.viewport_mouse_position()
+    for _, c in ipairs(chunks) do
+        c:tick(delta)
+        if c:onscreen() then
+            if not c.visible then
+                c:show()
+            end
+        else
+            if c.visible then
+                c:hide()
+            end
+        end
+    end
 
     if keyboard.is_pressed(ax.key_map.w) then
         camera:translate(vec2:new(0, -200 * delta))

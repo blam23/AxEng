@@ -8,9 +8,10 @@
 
    ],
    "scripts":{
+      "chunk":"scripts/chunk.lua",
       "class":"scripts/lib/class.lua",
       "draw_helpers":"scripts/lib/draw_helpers.lua",
-      "enemy":"scripts/scenes/enemy.lua",
+      "enemy":"scripts/enemy.lua",
       "game":"scripts/scenes/game.lua",
       "main":"scripts/main.lua",
       "math_helpers":"scripts/lib/math_helpers.lua",

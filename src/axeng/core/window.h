@@ -109,8 +109,14 @@ namespace ax
 		std::uint32_t height() const noexcept { return m_height; }
 		Camera& camera() noexcept { return m_camera; }
 		const Camera& camera() const noexcept { return m_camera; }
+		// Legacy naming: global is screen pixels; viewport is world coordinates.
+		// Rectangles use (x, y, width, height).
 		glm::vec2 global_to_viewport(const glm::vec2& position) const;
+		glm::vec4 global_to_viewport(const glm::vec4& rect) const;
 		glm::vec2 viewport_to_global(const glm::vec2& position) const;
+		glm::vec4 viewport_to_global(const glm::vec4& rect) const;
+		// Tests world-space overlap with the screen, including touching edges.
+		bool screen_contains_region(const glm::vec4& rect) const;
 
 		bool vsync() const noexcept { return m_vsync; }
 		// Must call create_surfaces() after changing vsync
