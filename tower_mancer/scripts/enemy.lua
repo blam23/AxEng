@@ -44,19 +44,6 @@ function enemies:setup(num_enemies, x, y, w, h)
         hue = hue + math.random(1,5)
         hue = hue % 360
     end
-
-    local start = 0
-    local end_ = math.floor(#self / self.section_count)
-    for i = 1, self.section_count do
-        self.update_sections[i] = { start, end_ }
-        start = end_ + 1
-        end_ = math.floor(#self / self.section_count * (i + 1))
-    end
-
-    self.last_ticks = {}
-    for i = 1, self.section_count do
-        self.last_ticks[i] = 0
-    end
 end
 
 function enemies:hide()
@@ -78,6 +65,72 @@ function enemies:disable()
 end
 function enemies:enable()
     self.processing = true
+end
+
+function enemies:remove(enemy)
+    for i, e in ipairs(self) do
+        if e == enemy then
+            if enemy.sprite then
+                app.sprites.free(enemy.sprite)
+            end
+            if enemy.clothes_sprite then
+                app.sprites.free(enemy.clothes_sprite)
+            end
+            if enemy.shadow_sprite then
+                app.sprites.free(enemy.shadow_sprite)
+            end
+            table.remove(self, i)
+            break
+        end
+    end
+end
+
+function enemies:add(enemy)
+    table.insert(self, enemy)
+    if self.visible and enemy.sprite == nil then
+        enemy.sprite = app.sprites.allocate()
+    end
+    if self.visible and enemy.clothes_sprite == nil then
+        enemy.clothes_sprite = app.sprites.allocate()
+    end
+    if self.visible and enemy.shadow_sprite == nil then
+        enemy.shadow_sprite = app.sprites.allocate()
+    end
+end
+
+function enemies:swap_to(enemy, new_chunk)
+    for i, e in ipairs(self) do
+        if e == enemy then
+            table.remove(self, i)
+            break
+        end
+    end
+    new_chunk.enemies[#new_chunk.enemies + 1] = enemy
+
+    if not new_chunk.visible then
+        if enemy.sprite then
+            app.sprites.free(enemy.sprite)
+            enemy.sprite = nil
+        end
+        if enemy.clothes_sprite then
+            app.sprites.free(enemy.clothes_sprite)
+            enemy.clothes_sprite = nil
+        end
+        if enemy.shadow_sprite then
+            app.sprites.free(enemy.shadow_sprite)
+            enemy.shadow_sprite = nil
+        end
+    else
+        if self.visible and enemy.sprite == nil then
+            enemy.sprite = app.sprites.allocate()
+        end
+        if self.visible and enemy.clothes_sprite == nil then
+            enemy.clothes_sprite = app.sprites.allocate()
+        end
+        if self.visible and enemy.shadow_sprite == nil then
+            enemy.shadow_sprite = app.sprites.allocate()
+        end
+    end
 end
 
 function enemies:show()
@@ -109,27 +162,22 @@ function enemies:show()
 end
 
 
-function enemies:tick(delta)
+function enemies:tick(chunk, delta)
     if not self.processing then
         return
     end
-    self.frame_number = self.frame_number + 1
-    self.last_ticks[self.frame_number % self.section_count + 1] = delta
-    local sum_delta = 0
-    for i = 1, self.section_count do
-        sum_delta = sum_delta + self.last_ticks[i]
-    end
 
-    local loop_start = self.update_sections[self.frame_number % self.section_count + 1][1] + 1
-    local loop_end = self.update_sections[self.frame_number % self.section_count + 1][2]
-    for i = loop_start, loop_end do
+    for i = 1, #self do
         local enemy = self[i]
         local ex = enemy.x
         local ey = enemy.y
         enemy.r = math.sin((time + i) * 3.0) * 0.2
-        enemy.x = ex + enemy.vx * sum_delta
-        enemy.y = ey + enemy.vy * sum_delta
-        enemy.rand_timer = enemy.rand_timer - sum_delta
+        enemy.x = ex + enemy.vx * delta
+        enemy.y = ey + enemy.vy * delta
+        if not chunk:contains_point(enemy.x, enemy.y) then
+            chunk:reparent(enemy)
+        end
+        enemy.rand_timer = enemy.rand_timer - delta
         if enemy.rand_timer <= 0 then
             enemy.vx = math.random(-100, 100) / 10.0
             enemy.vy = math.random(-100, 100) / 10.0
@@ -141,6 +189,16 @@ function enemies:tick(delta)
             app.sprites.update_position(enemy.clothes_sprite, enemy.x, enemy.y, enemy.y, enemy.r)
             app.sprites.update_position(enemy.shadow_sprite, enemy.x + enemy.shadow_off_x, enemy.y + enemy.shadow_off_y, enemy.y + enemy.shadow_off_y - 1000, 0)
         end
+    end
+end
+
+function enemies:debug_render(delta, pass)
+    if not self.processing then
+        return
+    end
+    for i = 1, #self do
+        local enemy = self[i]
+        pass.debug_rect_outline(enemy.x, enemy.y, wizard_sprite_area[3] * enemy.sprite.scale.x, wizard_sprite_area[4] * enemy.sprite.scale.y, enemy.clothes_color, 1.0)
     end
 end
 

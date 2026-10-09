@@ -27,6 +27,7 @@
       "grass":"assets/grass.png",
       "icon":"assets/icon.png",
       "paused":"assets/paused.png",
+      "tilesheet":"assets/tilesheet.png",
       "tower":"assets/tower-sheet.png"
    }
 }

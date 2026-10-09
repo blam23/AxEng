@@ -25,18 +25,27 @@ function game:start()
     game:setup_grass()
     tower:setup(app.window.width/2, app.window.height/2)
 
-    for y = -20, 20 do
-        for x= -20, 20 do
+    for y = -3, 3 do
+        for x= -3, 3 do
             table.insert(chunks, chunk:new(x, y))
         end
     end
 
     for _, c in ipairs(chunks) do
-        c:setup(50)
+        c:setup(self, 50)
         if c:onscreen() then
             c:show()
         end
     end
+end
+
+function game:get_chunk(x, y)
+    for _, c in ipairs(chunks) do
+        if c.x == x and c.y == y then
+            return c
+        end
+    end
+    return nil
 end
 
 local camera = app.window.camera
@@ -58,25 +67,26 @@ function game:tick(delta)
         end
     end
 
+    local movement = 200 * delta / camera.zoom
     if keyboard.is_pressed(ax.key_map.w) then
-        camera:translate(vec2:new(0, -200 * delta))
+        camera:translate(vec2:new(0, -movement))
     end
     if keyboard.is_pressed(ax.key_map.s) then
-        camera:translate(vec2:new(0, 200 * delta))
+        camera:translate(vec2:new(0, movement))
     end
     if keyboard.is_pressed(ax.key_map.a) then
-        camera:translate(vec2:new(-200 * delta, 0))
+        camera:translate(vec2:new(-movement, 0))
     end
     if keyboard.is_pressed(ax.key_map.d) then
-        camera:translate(vec2:new(200 * delta, 0))
+        camera:translate(vec2:new(movement, 0))
     end
 
     if keyboard.is_pressed(ax.key_map.q) then
-        zoom = zoom * 1.01
+        zoom = zoom * 1.01 ^ (60 * delta)
         camera.zoom = zoom
     end
     if keyboard.is_pressed(ax.key_map.e) then
-        zoom = zoom / 1.01
+        zoom = zoom / 1.01 ^ (60 * delta)
         camera.zoom = zoom
     end
 end
