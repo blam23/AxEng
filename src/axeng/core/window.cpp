@@ -631,14 +631,120 @@ ax::SpriteDefinition* ax::Window::allocate_sprite()
 	}
 
 	m_activeSprites.push_back(sprite);
+	++m_spriteAllocations;
+	sprite->activeIndex = m_activeSprites.size() - 1;
+	sprite->allocated = true;
+	sprite->generation = ++m_spriteGeneration;
 	return sprite;
+}
+
+std::shared_ptr<ax::SpriteGroup> ax::Window::create_sprite_group()
+{
+	if (m_rendererThread != std::this_thread::get_id())
+		throw sol::error("Sprite groups must be created on the renderer thread");
+	auto group{ std::make_shared<SpriteGroup>() };
+	group->m_owner = this;
+	m_spriteVisibilityGroups.push_back(group);
+	return group;
+}
+
+ax::SpriteDefinition* ax::Window::allocate_group_sprite(const std::shared_ptr<SpriteGroup>& group)
+{
+	if (!group || group->m_released || group->m_owner != this)
+		throw sol::error("Invalid sprite group");
+	group->check_thread();
+	auto sprite{ allocate_sprite() };
+	transfer_sprite(sprite, group);
+	return sprite;
+}
+
+void ax::Window::transfer_sprite(SpriteDefinition* sprite, const std::shared_ptr<SpriteGroup>& group)
+{
+	if (!sprite || !sprite->allocated || !group || group->m_released || group->m_owner != this)
+		throw sol::error("Invalid sprite or sprite group");
+	group->check_thread();
+	if (sprite->group == group.get())
+		return;
+	if (sprite->group)
+	{
+		auto& old{ sprite->group->m_sprites };
+		old.back()->groupIndex = sprite->groupIndex;
+		old[sprite->groupIndex] = old.back();
+		old.pop_back();
+	}
+	sprite->group = group.get();
+	sprite->groupIndex = group->m_sprites.size();
+	group->m_sprites.push_back(sprite);
+}
+
+void ax::Window::release_sprite_group(const std::shared_ptr<SpriteGroup>& group)
+{
+	if (!group || group->m_owner != this)
+		throw sol::error("Invalid sprite group");
+	group->check_thread();
+	if (group->m_released)
+		return;
+	while (!group->m_sprites.empty())
+		free_sprite(group->m_sprites.back());
+	group->m_released = true;
+	group->m_visible = false;
+	std::erase(m_spriteVisibilityGroups, group);
+}
+
+std::shared_ptr<ax::StaticSpriteBatch> ax::Window::attach_sprite_batch(Texture* texture,
+	std::shared_ptr<SpriteBuffer> data, glm::vec2 atlasOffset, std::int64_t order)
+{
+	if (m_rendererThread != std::this_thread::get_id())
+		throw sol::error("Static batches must be attached on the renderer thread");
+	if (!texture || !data || !data->sealed() || data->size() * SpriteGpuData::gpuDataSize > 65536)
+		throw sol::error("Static sprite batches require a texture and 1-1024 sealed records");
+	auto batch{ std::make_shared<StaticSpriteBatch>() };
+	batch->m_texture = texture;
+	batch->m_data = std::move(data);
+	batch->m_atlasOffset = atlasOffset;
+	batch->m_order = order;
+	m_staticSpriteBatches.push_back(batch);
+	std::stable_sort(m_staticSpriteBatches.begin(), m_staticSpriteBatches.end(),
+		[](const auto& a, const auto& b) { return a->m_order < b->m_order; });
+	return batch;
+}
+
+void ax::Window::stage_sprite_batches()
+{
+	m_spriteSetupDeadline = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count() + 0.001;
+	std::erase_if(m_staticSpriteBatches, [](const auto& batch) { return batch->released(); });
+	for (const auto& batch : m_staticSpriteBatches)
+	{
+		if (batch->ready() || !batch->m_error.empty())
+			continue;
+		try
+		{
+			auto buffer{ upload_static_sprites(m_device, *batch->m_data, batch->m_atlasOffset) };
+			batch->m_bindGroup = setup_bind_groups(batch->m_texture->view(), buffer);
+			batch->m_buffer = std::move(buffer);
+			++m_staticUploads;
+		}
+		catch (const std::exception& error)
+		{
+			batch->m_error = error.what();
+			spdlog::error("Static sprite batch staging failed: {}", batch->m_error);
+		}
+		break; // At most one 64 KiB static upload per frame.
+	}
 }
 
 void ax::Window::free_sprite(SpriteDefinition* sprite)
 {
-	const auto activeSprite = std::find(m_activeSprites.begin(), m_activeSprites.end(), sprite);
-	if (activeSprite == m_activeSprites.end())
+	if (!sprite || !sprite->allocated)
 		return;
+	const auto index{ sprite->activeIndex };
+	if (sprite->group)
+	{
+		auto& members{ sprite->group->m_sprites };
+		members.back()->groupIndex = sprite->groupIndex;
+		members[sprite->groupIndex] = members.back();
+		members.pop_back();
+	}
 
 	if (sprite->groupedTexture != nullptr)
 	{
@@ -647,10 +753,18 @@ void ax::Window::free_sprite(SpriteDefinition* sprite)
 			group->second.erase(std::remove(group->second.begin(), group->second.end(), sprite), group->second.end());
 	}
 
-	*activeSprite = m_activeSprites.back();
+	m_activeSprites.back()->activeIndex = index;
+	m_activeSprites[index] = m_activeSprites.back();
 	m_activeSprites.pop_back();
 	*sprite = {};
 	m_freeSpriteSlots.push_back(sprite);
+	++m_spriteFrees;
+}
+
+std::size_t ax::Window::static_batch_count() const
+{
+	return std::count_if(m_staticSpriteBatches.begin(), m_staticSpriteBatches.end(),
+		[](const auto& batch) { return !batch->released(); });
 }
 
 std::size_t ax::Window::get_sprite_count() const
@@ -956,13 +1070,18 @@ bool ax::Window::screen_contains_region(const glm::vec4& rect) const
 
 wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view)
 {
+	return setup_bind_groups(view, m_uniforms);
+}
+
+wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view, const wgpu::Buffer& buffer)
+{
 	auto bindGroups{ std::vector<wgpu::BindGroupEntry>{ 3 } };
 
 	// Uniforms
 	bindGroups[0].binding = 0;
-	bindGroups[0].buffer = m_uniforms;
+	bindGroups[0].buffer = buffer;
 	bindGroups[0].offset = 0;
-	bindGroups[0].size = m_uniforms.GetSize();
+	bindGroups[0].size = buffer.GetSize();
 
 	// Texture
 	bindGroups[1].binding = 1;
@@ -1081,6 +1200,7 @@ void ax::Window::run_loop()
 	while (!glfwWindowShouldClose(m_window))
 	{
 		glfwPollEvents();
+		stage_sprite_batches();
 
 		updateDelta = glfwGetTime() - updatePrev;
 		updatePrev = glfwGetTime();
@@ -1115,10 +1235,13 @@ void ax::Window::run_loop()
 
 		{
 			PROFILER_SEGMENT_SCOPED(frame, deferred);
-			std::lock_guard lock{ m_deferredMutex };
-			for (auto& func : m_deferred)
+			std::vector<std::function<void()>> deferred;
+			{
+				std::lock_guard lock{ m_deferredMutex };
+				deferred.swap(m_deferred);
+			}
+			for (auto& func : deferred)
 				func();
-			m_deferred.clear();
 		}
 	}
 
@@ -1383,7 +1506,8 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 				for (const auto* sprite : *pendingSprites)
 					m_spriteUploadData.push_back(sprite->gpuData);
 			for (const auto* sprite : activeSprites)
-				m_spriteUploadData.push_back(sprite->gpuData);
+				if (!sprite->group || sprite->group->visible())
+					m_spriteUploadData.push_back(sprite->gpuData);
 
 			const uint32_t count = static_cast<uint32_t>(m_spriteUploadData.size());
 			if (count == 0)
@@ -1428,6 +1552,14 @@ void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::
 {
 	pass.SetPipeline(pipeline);
 	pass.SetBindGroup(1, m_viewportBindGroup);
+	// Static batches precede ordinary sprites in both passes, with stable caller-specified order.
+	for (const auto& batch : m_staticSpriteBatches)
+	{
+		if (!batch->ready() || !batch->visible())
+			continue;
+		pass.SetBindGroup(0, batch->m_bindGroup);
+		pass.Draw(6, static_cast<std::uint32_t>(batch->size()));
+	}
 	for (const auto& range : m_spriteGroupRanges)
 	{
 		auto it = m_textureBindGroups.find(range.tex);

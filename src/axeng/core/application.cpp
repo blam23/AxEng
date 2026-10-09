@@ -65,11 +65,21 @@ ax::Error ax::Application::add_thread_bindings(sol::state& state, const std::vec
 		};
 
 	state["bg"] = background_table;
+	bind_native_tasks(state, background_table, *m_nativeTasks, m_backgroundWorker);
 	return ax::Error::Success;
 }
 
 ax::Error ax::Application::initialise_background_worker(const std::vector<std::string>& args)
 {
+	std::map<std::string, std::string> sources;
+	m_scripts.for_each([&sources](const std::string& name, const lua::Script& script)
+	{
+		sources.emplace(name, script.code());
+	});
+	m_nativeTasks = std::make_unique<NativeTaskService>(m_allowedPermissions, std::move(sources));
+	m_backgroundWorker.set_thread_hooks(
+		[this]() { m_nativeTasks->initialize(); },
+		[this]() { m_nativeTasks->finalize(); });
 	auto& state{ m_backgroundWorker.lua().state() };
 	auto err{ m_backgroundWorker.lua().setup() };
 	if (err != ax::Error::Success)
@@ -285,6 +295,8 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 
 void ax::Application::cleanup()
 {
+	if (m_nativeTasks)
+		m_nativeTasks->stop();
 	m_backgroundWorker.stop();
 	cleanup_bindings();
 
@@ -303,6 +315,8 @@ void ax::Application::cleanup()
 
 ax::Application::~Application()
 {
+	if (m_nativeTasks)
+		m_nativeTasks->stop();
 	m_backgroundWorker.stop();
 
 	if (m_loaded)

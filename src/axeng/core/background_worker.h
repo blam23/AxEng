@@ -12,6 +12,7 @@
 #include <queue>
 #include <memory>
 #include <vector>
+#include <map>
 
 namespace ax
 {
@@ -34,10 +35,6 @@ namespace ax
 
 	private:
 		ax::Error error{ ax::Error::Success };
-		sol::object data{};
-		std::condition_variable finished{};
-		std::mutex finishedMutex{};
-
 		std::function<ax::Error()> task;
 		success_t successCallback;
 		failure_t failureCallback;
@@ -62,18 +59,22 @@ namespace ax
 		BackgroundTask* create_script_task(lua::Script*);
 
 		lua::Manager& lua() { return m_lua; }
+		void set_thread_hooks(std::function<void()> start, std::function<void()> stop);
 
 	private:
 		std::mutex m_mutex{};
 		std::thread m_thread{};
 		std::condition_variable m_condition{};
-		std::queue<BackgroundTask*> m_queue{};
-		std::vector<std::unique_ptr<BackgroundTask>> m_tasks{};
+		std::queue<std::shared_ptr<BackgroundTask>> m_queue{};
+		std::map<BackgroundTask*, std::shared_ptr<BackgroundTask>> m_tasks{};
 		bool m_running{ true };
+		std::function<void()> m_onStart;
+		std::function<void()> m_onStop;
 
 		// Only to be used on the background thread
 		lua::Manager m_lua;
 		bool m_useLua{ false };
+		bool m_luaInitialized{ true };
 
 		friend struct BackgroundTaskResult;
 	};
@@ -82,20 +83,14 @@ namespace ax
 	{
 		DISABLE_COPY_AND_MOVE(BackgroundTaskResult);
 
-		BackgroundTaskResult(BackgroundWorker& w, BackgroundTask* t) : task(t), worker(w) {}
-		~BackgroundTaskResult()
-		{
-			if (task)
-				std::erase_if(worker.m_tasks, [this](const auto& ownedTask) { return ownedTask.get() == task; });
-		}
+		explicit BackgroundTaskResult(ax::Error error) : m_error{ error } {}
 
 	public:
-		bool is_valid() const { return task; }
-		ax::Error get_error() const { return task ? task->error : ax::Error::GenericFailure; }
-		sol::object get_data() const { return task ? task->data : sol::nil; }
+		bool is_valid() const { return true; }
+		ax::Error get_error() const { return m_error; }
+		sol::object get_data() const { return sol::nil; }
 
 	private:
-		BackgroundTask* task;
-		BackgroundWorker& worker;
+		ax::Error m_error;
 	};
 }

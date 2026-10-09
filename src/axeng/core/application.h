@@ -8,6 +8,7 @@
 
 // AxEng
 #include "axeng/core/background_worker.h"
+#include "axeng/core/native_tasks.h"
 #include "axeng/core/custom_type.h"
 #include "axeng/core/helpers.h"
 #include "axeng/core/forward.h"
@@ -117,6 +118,7 @@ namespace ax
 		ax::Error initialise_background_worker(const std::vector<std::string>& args);
 		void cleanup_bindings();
 		BackgroundWorker m_backgroundWorker;
+		std::unique_ptr<NativeTaskService> m_nativeTasks;
 		std::mutex m_shared_mutex{};
 		std::map<std::string, ax::lua::SharedObject> m_shared{};
 		

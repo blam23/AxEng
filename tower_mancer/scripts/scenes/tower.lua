@@ -3,6 +3,11 @@ local tower_sprite_area = { 0, 0, 48, 48 }
 
 local tower = {}
 
+function tower:release()
+    if self.sprite then app.sprites.free(self.sprite) end
+    self.sprite = nil
+end
+
 function tower:setup(pos_x, pos_y)
     tower.sprite = app.sprites.allocate()
     tower.sprite.scale.x = 2

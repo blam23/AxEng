@@ -25,6 +25,7 @@
 
 namespace ax
 {
+	class SpriteGroup;
 	using rectf = glm::vec4;
 
 	struct SpriteGpuData
@@ -46,6 +47,11 @@ namespace ax
 		SpriteGpuData gpuData{};
 		Texture* tex{ nullptr };
 		Texture* groupedTexture{ nullptr };
+		SpriteGroup* group{ nullptr };
+		std::size_t groupIndex{};
+		std::size_t activeIndex{};
+		bool allocated{ false };
+		std::uint64_t generation{};
 	};
 
 	static_assert(sizeof(glm::vec2) == 2 * sizeof(float));
