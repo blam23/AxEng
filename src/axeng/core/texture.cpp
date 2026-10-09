@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 
@@ -10,6 +11,8 @@
 #define STBI_ONLY_PNG
 #define STB_IMAGE_IMPLEMENTATION
 #include "axeng/external/stb_image.h"
+#define STB_RECT_PACK_IMPLEMENTATION
+#include "axeng/external/stb_rect_pack.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_WRITE_NO_STDIO
 #include "axeng/external/stb_image_write.h"
@@ -243,60 +246,91 @@ ax::Error ax::TextureManager::create_texture_atlas(const Texture::Descriptor &na
 		return Error::InvalidTexture;
 	}
 
+	if (images.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+	{
+		spdlog::error("Texture atlas '{}': too many images to pack.", name);
+		return Error::InvalidTexture;
+	}
+
+	if (!std::isfinite(minPadding) || minPadding > maxDimension / 2.0f)
+	{
+		spdlog::error("Texture atlas '{}': invalid padding {}.", name, minPadding);
+		return Error::InvalidTexture;
+	}
+
 	// Each image gets `pad` pixels of its own on every side, so neighbours are 2 * pad apart
 	const uint32_t pad{ static_cast<uint32_t>(std::ceil(std::max(minPadding, 0.0f))) };
 
-	// Shelf packing: sort tallest first, then fill rows left to right
-	std::vector<Image*> order{};
-	order.reserve(images.size());
 	uint64_t totalArea{ 0 };
 	uint32_t widestCell{ 0 };
 	for (auto& img : images)
 	{
-		order.push_back(&img);
 		const uint64_t cw{ img.width + 2ull * pad };
 		const uint64_t ch{ img.height + 2ull * pad };
+		if (cw > maxDimension || ch > maxDimension)
+		{
+			spdlog::error("Texture atlas '{}': image '{}' with padding exceeds the maximum dimension of {}.", name, img.desc, maxDimension);
+			return Error::InvalidTexture;
+		}
+
 		totalArea += cw * ch;
 		widestCell = std::max(widestCell, static_cast<uint32_t>(cw));
 	}
-	std::ranges::stable_sort(order, [](const Image* a, const Image* b)
-		{
-			return a->height != b->height ? a->height > b->height : a->width > b->width;
-		});
-
-	// Aim for a roughly square atlas, but always wide enough for the widest image
-	const uint32_t atlasWidth{ std::max(widestCell, static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<double>(totalArea))))) };
-
-	uint32_t cursorX{ 0 }, cursorY{ 0 }, shelfHeight{ 0 }, usedWidth{ 0 };
-	for (auto* img : order)
+	if (totalArea > static_cast<uint64_t>(maxDimension) * maxDimension)
 	{
-		const uint32_t cw{ img->width + 2 * pad };
-		const uint32_t ch{ img->height + 2 * pad };
+		spdlog::error("Texture atlas '{}': total padded image area exceeds the maximum texture area.", name);
+		return Error::InvalidTexture;
+	}
 
-		if (cursorX + cw > atlasWidth)
+	const uint32_t initialWidth{ std::max(widestCell, static_cast<uint32_t>(std::ceil(std::sqrt(static_cast<double>(totalArea))))) };
+	uint32_t finalWidth{ 0 };
+	uint32_t finalHeight{ 0 };
+	bool packed{ false };
+	for (uint32_t packWidth{ initialWidth };;)
+	{
+		std::vector<stbrp_rect> rects{};
+		rects.reserve(images.size());
+		for (size_t i{ 0 }; i < images.size(); ++i)
 		{
-			cursorY += shelfHeight;
-			cursorX = 0;
-			shelfHeight = 0;
+			const auto& img{ images[i] };
+			rects.push_back({
+				.id = static_cast<int>(i),
+				.w = static_cast<int>(img.width + 2 * pad),
+				.h = static_cast<int>(img.height + 2 * pad)
+			});
 		}
 
-		img->x = cursorX + pad;
-		img->y = cursorY + pad;
-		cursorX += cw;
-		usedWidth = std::max(usedWidth, cursorX);
-		shelfHeight = std::max(shelfHeight, ch);
-	}
-	const uint32_t atlasHeight{ cursorY + shelfHeight };
-	const uint32_t finalWidth{ usedWidth };
+		std::vector<stbrp_node> nodes(packWidth);
+		stbrp_context context{};
+		stbrp_init_target(&context, static_cast<int>(packWidth), static_cast<int>(maxDimension), nodes.data(), static_cast<int>(nodes.size()));
+		if (stbrp_pack_rects(&context, rects.data(), static_cast<int>(rects.size())))
+		{
+			for (const auto& rect : rects)
+			{
+				auto& img{ images[static_cast<size_t>(rect.id)] };
+				img.x = static_cast<uint32_t>(rect.x) + pad;
+				img.y = static_cast<uint32_t>(rect.y) + pad;
+				finalWidth = std::max(finalWidth, static_cast<uint32_t>(rect.x + rect.w));
+				finalHeight = std::max(finalHeight, static_cast<uint32_t>(rect.y + rect.h));
+			}
 
-	if (finalWidth > maxDimension || atlasHeight > maxDimension)
+			packed = true;
+			break;
+		}
+
+		if (packWidth == maxDimension)
+			break;
+		packWidth = std::min(maxDimension, packWidth + std::max(1u, packWidth / 8));
+	}
+
+	if (!packed)
 	{
-		spdlog::error("Texture atlas '{}' would be {}x{}, exceeding the maximum of {}.", name, finalWidth, atlasHeight, maxDimension);
+		spdlog::error("Texture atlas '{}': images could not be packed within the maximum dimension of {}.", name, maxDimension);
 		return Error::InvalidTexture;
 	}
 
 	// Blit, extruding each image's edge pixels into its padding to avoid sampling bleed
-	std::vector<uint8_t> atlas(static_cast<size_t>(finalWidth) * atlasHeight * bpp, 0);
+	std::vector<uint8_t> atlas(static_cast<size_t>(finalWidth) * finalHeight * bpp, 0);
 	for (const auto& img : images)
 	{
 		const int64_t x0{ static_cast<int64_t>(img.x) - pad }, y0{ static_cast<int64_t>(img.y) - pad };
@@ -315,7 +349,7 @@ ax::Error ax::TextureManager::create_texture_atlas(const Texture::Descriptor &na
 		}
 	}
 
-	auto texture{ std::make_unique<Texture>(Badge<TextureManager>{}, name, finalWidth, atlasHeight, std::move(atlas), m_device) };
+	auto texture{ std::make_unique<Texture>(Badge<TextureManager>{}, name, finalWidth, finalHeight, std::move(atlas), m_device) };
 	if (!texture->is_loaded())
 		return Error::InvalidTexture;
 
@@ -326,7 +360,7 @@ ax::Error ax::TextureManager::create_texture_atlas(const Texture::Descriptor &na
 			static_cast<float>(img.width), static_cast<float>(img.height) };
 	}
 
-	spdlog::info("Created texture atlas '{}' ({}x{}) from {} textures.", name, finalWidth, atlasHeight, images.size());
+	spdlog::info("Created texture atlas '{}' ({}x{}) from {} textures.", name, finalWidth, finalHeight, images.size());
 
 	m_store.try_emplace(name, AssetStore{ name, std::move(texture) });
 	return Error::Success;
