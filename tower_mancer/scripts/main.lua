@@ -18,7 +18,8 @@ local function esc_key_event(pressed, mods)
 end
 
 debug = {
-    enabled = false
+    enabled = false,
+    show_noise = false
 }
 local function debug_key_event(pressed, mods)
     if pressed then

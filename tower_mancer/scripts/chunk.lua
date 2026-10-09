@@ -10,10 +10,16 @@ chunk.__index = chunk
 
 local tilesheet = app.res.get_texture("tilesheet")
 
-function chunk:new(x, y)
+function chunk:new(cx, cy)
+    local noise_scale = 50.0
+    local lacunarity = 2.0
+    local gain = 0.5
+    local octaves = 6
+    local amplitude_sum = (1.0 - gain ^ octaves) / (1.0 - gain)
+
     local instance = setmetatable({}, chunk)
-    instance.x = x
-    instance.y = y
+    instance.x = cx
+    instance.y = cy
     instance.visible = true
     instance.enemies = enemies.new()
     instance.debug_color = ax.vec4_hsla_to_rgba(vec4:new(math.random() * 360, 0.6, 0.7, 1.0))
@@ -25,18 +31,27 @@ function chunk:new(x, y)
     instance.tile_count_y = chunk_size / tile_size
     for y = 0, instance.tile_count_y - 1 do
         for x = 0, instance.tile_count_x - 1 do
+            local nx = (x + cx * instance.tile_count_x) / noise_scale
+            local ny = (y + cy * instance.tile_count_y) / noise_scale
+            local raw_noise = noise.fbm(nx, ny, lacunarity, gain, octaves)
+            local normalized_noise = math.max(
+                0.0,
+                math.min(1.0, 0.5 + 0.5 * raw_noise / amplitude_sum)
+            )
             local tile = {
                 x = x,
                 y = y,
-                tx = math.random(0, 1),
+                noise = normalized_noise,
                 ty = 0,
             }
+            tile.tx = (tile.noise < 0.4) and 1 or 0
+            print("Hue: " .. (normalized_noise * 720))
             if tile.tx == 0 then
-                tile.hue = math.random(50,112)
-                tile.sat = 0.3
+                tile.hue = normalized_noise * 720
+                tile.sat = 0.4
             else
-                tile.hue = 0
-                tile.sat = 0.0
+                tile.hue = normalized_noise * 720
+                tile.sat = normalized_noise
             end
             table.insert(instance.tiles, tile)
         end
@@ -123,7 +138,22 @@ end
 
 local debug_chunk_outline_thickness = 2.0
 function chunk:render(delta, pass)
-    if (debug.enabled) then
+    if self.visible and debug.show_noise then
+        for x = 1, self.tile_count_x do
+            for y = 1, self.tile_count_y do
+                local tile = self.tiles[(y - 1) * self.tile_count_x + x]
+                local color = vec4:new(tile.noise, tile.noise, tile.noise, 0.6)
+                pass.debug_rect_fill(
+                    (self.x * chunk_size) + (x - 1) * tile_size,
+                    (self.y * chunk_size) + (y - 1) * tile_size,
+                    tile_size,
+                    tile_size,
+                    color
+                )
+            end
+        end
+    end
+    if debug.enabled then
         pass.debug_rect_fill(self.x * chunk_size, self.y * chunk_size, chunk_size, chunk_size, self.debug_color_fill)
         pass.debug_rect_outline(self.x * chunk_size, self.y * chunk_size, chunk_size, chunk_size, self.debug_color, debug_chunk_outline_thickness)
         pass.debug_rect_outline(self.x * chunk_size - chunk_screen_margin, self.y * chunk_size - chunk_screen_margin, chunk_size + chunk_screen_margin * 2, chunk_size + chunk_screen_margin * 2, self.debug_color, 1.0)
