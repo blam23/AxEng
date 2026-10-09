@@ -1,5 +1,6 @@
 #include "axeng/core/lua/bindings/lua_shape_bindings.h"
 
+#include "axeng/core/shapes/debug_shapes.h"
 #include "axeng/core/shapes/shape_renderer.h"
 
 #include <algorithm>
@@ -14,6 +15,33 @@
 namespace
 {
 	using namespace std::string_view_literals;
+
+	bool is_nil_type(sol::type type)
+	{
+		return type == sol::type::lua_nil || type == sol::type::none;
+	}
+
+	std::optional<float> component(const sol::table& t, const char* name, int index)
+	{
+		auto o{ t.get<sol::object>(name) };
+		if (!o.valid() || is_nil_type(o.get_type()))
+			o = t.get<sol::object>(index);
+		if (o.get_type() != sol::type::number)
+			return std::nullopt;
+		return o.as<float>();
+	}
+
+	// { r = .., g = .., b = .., a = .. } or { r, g, b, a }. Alpha defaults to 1.
+	std::optional<glm::vec4> colour_from_table(const sol::table& t)
+	{
+		const auto r{ component(t, "r", 1) };
+		const auto g{ component(t, "g", 2) };
+		const auto b{ component(t, "b", 3) };
+		const auto a{ component(t, "a", 4) };
+		if (r && g && b)
+			return glm::vec4{ *r, *g, *b, a.value_or(1.0f) };
+		return std::nullopt;
+	}
 
 	class ShapeParser
 	{
@@ -137,13 +165,8 @@ namespace
 
 			if (o.get_type() == sol::type::table)
 			{
-				const auto t{ o.as<sol::table>() };
-				const auto r{ component(t, "r", 1) };
-				const auto g{ component(t, "g", 2) };
-				const auto b{ component(t, "b", 3) };
-				const auto a{ component(t, "a", 4) };
-				if (r && g && b)
-					return { *r, *g, *b, a.value_or(1.0f) };
+				if (const auto colour{ colour_from_table(o.as<sol::table>()) })
+					return *colour;
 			}
 
 			fail(key, "must be a vec4, { r, g, b, a } or { r = .., g = .., b = .., a = .. }");
@@ -228,19 +251,138 @@ namespace
 		}
 
 	private:
-		static std::optional<float> component(const sol::table& t, const char* name, int index)
-		{
-			auto o{ t.get<sol::object>(name) };
-			if (is_nil(o))
-				o = t.get<sol::object>(index);
-			if (o.get_type() != sol::type::number)
-				return std::nullopt;
-			return o.as<float>();
-		}
-
 		sol::table m_table;
 		std::string_view m_type;
 	};
+
+	// Positional arguments for the pass.debug_* functions. Accepts both pass.debug_x(...) and
+	// pass:debug_x(...) by skipping a leading render pass.
+	class DebugArgs
+	{
+	public:
+		DebugArgs(const sol::variadic_args& args, std::string_view function)
+			: m_args(args), m_function(function)
+		{
+			if (m_args.size() > 0 && m_args[0].is<wgpu::RenderPassEncoder>())
+				m_offset = 1;
+		}
+
+		[[noreturn]] void fail(std::size_t index, std::string_view name, std::string_view message) const
+		{
+			throw sol::error(std::format("{}: argument {} ('{}') {}", m_function, index + 1, name, message));
+		}
+
+		std::optional<float> opt_number(std::size_t index, std::string_view name) const
+		{
+			const auto arg{ at(index) };
+			if (!arg)
+				return std::nullopt;
+			if (arg->get_type() != sol::type::number)
+				fail(index, name, "must be a number");
+			return arg->get<float>();
+		}
+
+		float number(std::size_t index, std::string_view name) const
+		{
+			const auto value{ opt_number(index, name) };
+			if (!value)
+				fail(index, name, "is required");
+			return *value;
+		}
+
+		glm::vec2 vec2(std::size_t index, std::string_view xName, std::string_view yName) const
+		{
+			return { number(index, xName), number(index + 1, yName) };
+		}
+
+		glm::vec4 colour(std::size_t index) const
+		{
+			const auto arg{ at(index) };
+			if (!arg)
+				return ax::DebugShapes::default_colour;
+			if (arg->is<glm::vec4>())
+				return arg->get<glm::vec4>();
+			if (arg->get_type() == sol::type::table)
+			{
+				if (const auto colour{ colour_from_table(arg->get<sol::table>()) })
+					return *colour;
+			}
+			fail(index, "colour", "must be a vec4, { r, g, b, a } or { r = .., g = .., b = .., a = .. }");
+		}
+
+	private:
+		std::optional<sol::stack_proxy> at(std::size_t index) const
+		{
+			const auto i{ index + m_offset };
+			if (i >= m_args.size())
+				return std::nullopt;
+			auto arg{ m_args[static_cast<std::ptrdiff_t>(i)] };
+			if (is_nil_type(arg.get_type()))
+				return std::nullopt;
+			return arg;
+		}
+
+		const sol::variadic_args& m_args;
+		std::string_view m_function;
+		std::size_t m_offset{ 0 };
+	};
+
+	void register_render_pass(sol::state& state)
+	{
+		using ax::DebugShapes;
+
+		state.new_usertype<wgpu::RenderPassEncoder>
+		(
+			"render_pass",
+			sol::no_constructor,
+
+			// pass.debug_rect_fill(x, y, width, height, [colour])
+			"debug_rect_fill",
+			[](sol::variadic_args va)
+			{
+				const DebugArgs args{ va, "debug_rect_fill" };
+				DebugShapes::rect_fill(args.vec2(0, "x", "y"), args.vec2(2, "width", "height"), args.colour(4));
+			},
+			// pass.debug_rect_outline(x, y, width, height, [colour], [thickness = 1])
+			"debug_rect_outline",
+			[](sol::variadic_args va)
+			{
+				const DebugArgs args{ va, "debug_rect_outline" };
+				DebugShapes::rect_outline(args.vec2(0, "x", "y"), args.vec2(2, "width", "height"), args.colour(4),
+					args.opt_number(5, "thickness").value_or(1.0f));
+			},
+			// pass.debug_circle_fill(x, y, radius, [colour])
+			"debug_circle_fill",
+			[](sol::variadic_args va)
+			{
+				const DebugArgs args{ va, "debug_circle_fill" };
+				DebugShapes::circle_fill(args.vec2(0, "x", "y"), args.number(2, "radius"), args.colour(3));
+			},
+			// pass.debug_circle_outline(x, y, radius, [colour], [thickness = 1])
+			"debug_circle_outline",
+			[](sol::variadic_args va)
+			{
+				const DebugArgs args{ va, "debug_circle_outline" };
+				DebugShapes::circle_outline(args.vec2(0, "x", "y"), args.number(2, "radius"), args.colour(3),
+					args.opt_number(4, "thickness").value_or(1.0f));
+			},
+			// pass.debug_line(x1, y1, x2, y2, [colour], [thickness = 1])
+			"debug_line",
+			[](sol::variadic_args va)
+			{
+				const DebugArgs args{ va, "debug_line" };
+				DebugShapes::line(args.vec2(0, "x1", "y1"), args.vec2(2, "x2", "y2"), args.colour(4),
+					args.opt_number(5, "thickness").value_or(1.0f));
+			},
+			// pass.debug_point(x, y, [colour], [radius = 3])
+			"debug_point",
+			[](sol::variadic_args va)
+			{
+				const DebugArgs args{ va, "debug_point" };
+				DebugShapes::circle_fill(args.vec2(0, "x", "y"), args.opt_number(3, "radius").value_or(3.0f), args.colour(2));
+			}
+		);
+	}
 
 	using ax::lua::bindings::LuaShapeList;
 
@@ -367,6 +509,8 @@ void ax::lua::bindings::shapes_from_table(const sol::table& descriptions, ax::Sh
 
 sol::table ax::lua::bindings::create_shape_table(sol::state& state)
 {
+	register_render_pass(state);
+
 	state.new_usertype<LuaShapeList>
 	(
 		"shape_list",

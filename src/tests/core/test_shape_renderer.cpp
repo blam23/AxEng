@@ -4,6 +4,7 @@
 
 #include "axeng/core/lua/bindings/lua_shape_bindings.h"
 #include "axeng/core/lua/bindings/lua_vector_bindings.h"
+#include "axeng/core/shapes/debug_shapes.h"
 #include "axeng/core/shapes/shape_renderer.h"
 #include "tests/main/log_capture.h"
 
@@ -886,4 +887,36 @@ TEST_F(ShapeRendererTest, LuaShapeListSettersUpdateShapes)
 	EXPECT_PIXEL(image, 20, 110, glm::vec4(1.0f));
 	EXPECT_PIXEL(image, 20, 120, s_black);
 	EXPECT_PIXEL(image, 100, 100, s_black);
+}
+
+TEST_F(ShapeRendererTest, LuaDebugShapesDrawOnFlush)
+{
+	ax::DebugShapes::clear();
+	auto state{ make_lua_state() };
+	const auto draw{ load_lua(state, R"(
+		return function(pass)
+			pass.debug_rect_fill(16, 16, 32, 32, { 1, 0, 0 })
+			pass.debug_rect_outline(64, 16, 48, 48, { 0, 1, 0 }, 4)
+			pass:debug_line(0, 100, 127, 100, { 0, 0, 1 }, 4)
+		end
+	)") };
+	ASSERT_TRUE(draw.valid());
+
+	const auto image{ render_pass([&draw](wgpu::RenderPassEncoder& pass)
+		{
+			call_lua(draw, pass);
+			// Debug shapes go on top of shapes drawn with a lower z.
+			ax::ShapeRenderer::draw(pass, { ax::Rectangle{ .position = { 0, 0 }, .size = { 24, 24 }, .fill = s_blue, .z = 10 } });
+			ax::DebugShapes::flush(pass);
+		}, { .viewport = glm::vec2{ s_size }, .cameraPosition = glm::vec2{ s_size * 0.5f } }) };
+	EXPECT_TRUE(ax::DebugShapes::queued().empty());
+	EXPECT_EQ(ax::ShapeRenderer::last_draw_stats().drawCalls, 1u);
+
+	EXPECT_PIXEL(image, 32, 32, s_red);
+	EXPECT_PIXEL(image, 20, 20, s_red);
+	EXPECT_PIXEL(image, 8, 8, s_blue);
+	EXPECT_PIXEL(image, 66, 40, s_green);
+	EXPECT_PIXEL(image, 88, 40, s_black);
+	EXPECT_PIXEL(image, 64, 100, s_blue);
+	EXPECT_PIXEL(image, 64, 90, s_black);
 }

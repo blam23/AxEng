@@ -27,10 +27,9 @@ local last_names = { "Smith", "Johnson", "Williams", "Brown", "Jones", "Miller",
 --local sprite_updates = {}
 function enemies:setup(num_enemies, x, y, w, h)
     local sprite_idx = 0
+    local hue = 0
     for i = 1, num_enemies do
         local enemy = {}
-        enemy.name = first_names[math.random(1, #first_names)] .. " " .. last_names[math.random(1, #last_names)]
-        enemy.name_color = { r = math.random() + 0.5, g = math.random() + 0.5, b = math.random() + 0.5, a = 1.0 }
         enemy.x = math.random(x, x + w)
         enemy.y = math.random(y, y + h)
         enemy.r = 0
@@ -39,7 +38,11 @@ function enemies:setup(num_enemies, x, y, w, h)
         enemy.vr = 0
         enemy.rand_timer = 0
         enemy.face = math.random(1, wizard_faces)
+        local hsla_clothes = vec4:new(hue, math.random(5,8)*0.1, math.random(2,4)*0.1, 1.0)
+        enemy.clothes_color = ax.vec4_hsla_to_rgba(hsla_clothes)
         table.insert(self, enemy)
+        hue = hue + math.random(1,5)
+        hue = hue % 360
     end
 
     local start = 0
@@ -101,8 +104,7 @@ function enemies:show()
         enemy.shadow_off_y = sprite_area[4] * enemy.sprite.scale.y - (shadow_sprite_area[4]/2) + 1
         enemy.shadow_off_x = (sprite_area[3] / 2) * enemy.sprite.scale.x - (shadow_sprite_area[3])
         app.sprites.setup(enemy.shadow_sprite, texture, enemy.x + enemy.shadow_off_x, enemy.y + enemy.shadow_off_y, shadow_sprite_area[1], shadow_sprite_area[2], shadow_sprite_area[3], shadow_sprite_area[4])
-        local hsla_clothes = vec4:new(math.random() * 360, 0.3, 0.4, 1.0)
-        enemy.clothes_sprite.tint = ax.vec4_hsla_to_rgba(hsla_clothes)
+        enemy.clothes_sprite.tint = enemy.clothes_color
     end
 end
 

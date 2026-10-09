@@ -1,6 +1,6 @@
 local enemies = ax.import("enemy")
 
-local chunk_size = 256
+local chunk_size = 1024
 
 chunk = {}
 chunk.__index = chunk
@@ -11,6 +11,9 @@ function chunk:new(x, y)
     instance.y = y
     instance.visible = true
     instance.enemies = enemies.new()
+    instance.debug_color = ax.vec4_hsla_to_rgba(vec4:new(math.random() * 360, 0.6, 0.7, 1.0))
+    instance.debug_color_fill = instance.debug_color:copy()
+    instance.debug_color_fill.a = 0.1
     return instance
 end
 
@@ -48,7 +51,12 @@ function chunk:tick(delta)
     self.enemies:tick(delta)
 end
 
+local debug_chunk_outline_thickness = 2.0
 function chunk:render(delta, pass)
+    if (debug.enabled) then
+        pass.debug_rect_fill(self.x * chunk_size, self.y * chunk_size, chunk_size, chunk_size, self.debug_color_fill)
+        pass.debug_rect_outline(self.x * chunk_size, self.y * chunk_size, chunk_size, chunk_size, self.debug_color, debug_chunk_outline_thickness)
+    end
 end
 
 return chunk

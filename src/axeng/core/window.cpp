@@ -4,6 +4,7 @@
 #include "axeng/debug/perf_profiler.h"
 #include "axeng/core/window.h"
 #include "axeng/core/input/mouse.h"
+#include "axeng/core/shapes/debug_shapes.h"
 #include "axeng/core/shapes/shape_renderer.h"
 
 #include "spdlog/spdlog.h"
@@ -1412,6 +1413,13 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		}
 
 		draw_sprite_batches(pass, m_pipeline);
+	}
+
+	{
+		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, debug_shapes);
+
+		// After the sprites so translucent debug shapes (which don't write depth) blend over them.
+		DebugShapes::flush(pass);
 	}
 }
 

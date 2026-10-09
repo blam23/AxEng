@@ -185,12 +185,19 @@ ax.key_map = {
     up = 265,
 }
 
+-- Number keys
 for i = 48, 57 do
     ax.key_map[string.char(i)] = i
 end
 
+-- Letter keys
 for i = 65, 90 do
     ax.key_map[string.char(i):lower()] = i
+end
+
+-- Function keys
+for i = 1, 12 do
+    ax.key_map["f"..i] = 289 + i
 end
 
 return ax

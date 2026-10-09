@@ -19,7 +19,8 @@ namespace ax::lua::bindings
 	// Accepts either a single shape description or an array of them.
 	void shapes_from_table(const sol::table& descriptions, ax::ShapeList& out);
 
-	// Registers the shape_list usertype and returns the table normally exposed as app.shapes.
+	// Registers the shape_list and render_pass (pass.debug_* functions) usertypes and returns the
+	// table normally exposed as app.shapes.
 	sol::table create_shape_table(sol::state&);
 
 	void setup_shape_bindings(ax::Application&, sol::state&);

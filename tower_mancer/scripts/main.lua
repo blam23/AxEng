@@ -17,7 +17,18 @@ local function esc_key_event(pressed, mods)
     end
 end
 
+debug = {
+    enabled = false
+}
+local function debug_key_event(pressed, mods)
+    if pressed then
+        print("Toggling debug mode. Current state: " .. tostring(debug.enabled))
+        debug.enabled = not debug.enabled
+    end
+end
+
 keyboard.subscribe_key(ax.key_map.esc, esc_key_event)
+keyboard.subscribe_key(ax.key_map.f1, debug_key_event)
 
 time = 0
 app.on_update.subscribe(function(delta)

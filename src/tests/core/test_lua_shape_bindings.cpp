@@ -2,6 +2,7 @@
 
 #include "axeng/core/lua/bindings/lua_shape_bindings.h"
 #include "axeng/core/lua/bindings/lua_vector_bindings.h"
+#include "axeng/core/shapes/debug_shapes.h"
 
 #include <string>
 
@@ -251,4 +252,75 @@ TEST_F(LuaShapeBindings, SettersUpdateNativeShapes)
 	expect_vec(polygon.fill, { 0.1f, 0.2f, 0.3f, 1 });
 	expect_vec(polygon.outline.colour, { 1, 0, 0, 0.5f });
 	EXPECT_FLOAT_EQ(polygon.outline.thickness, 4);
+}
+
+TEST_F(LuaShapeBindings, DebugShapesAreQueuedFromRenderPass)
+{
+	ax::DebugShapes::clear();
+	wgpu::RenderPassEncoder pass{};
+	m_state["pass"] = &pass;
+	run(R"(
+		pass.debug_rect_fill(1, 2, 3, 4, vec4:new(1, 0, 0, 0.5))
+		pass.debug_rect_outline(5, 6, 7, 8, { 0, 1, 0 }, 2)
+		pass:debug_circle_fill(10, 20, 5, { r = 0, g = 0, b = 1, a = 0.25 })
+		pass:debug_circle_outline(30, 40, 6)
+		pass.debug_line(0, 0, 10, 10, { 1, 1, 1 }, 3)
+		pass.debug_point(7, 8)
+	)");
+
+	const auto& shapes{ ax::DebugShapes::queued() };
+	ASSERT_EQ(shapes.size(), 6u);
+
+	const auto& fill{ std::get<ax::Rectangle>(shapes[0]) };
+	expect_vec(fill.position, { 1, 2 });
+	expect_vec(fill.size, { 3, 4 });
+	expect_vec(fill.fill, { 1, 0, 0, 0.5f });
+	EXPECT_FLOAT_EQ(fill.outline.thickness, 0);
+	EXPECT_FLOAT_EQ(fill.z, ax::DebugShapes::default_z);
+	EXPECT_FALSE(fill.screenSpace);
+
+	const auto& outline{ std::get<ax::Rectangle>(shapes[1]) };
+	expect_vec(outline.position, { 5, 6 });
+	expect_vec(outline.size, { 7, 8 });
+	EXPECT_FLOAT_EQ(outline.fill.a, 0);
+	expect_vec(outline.outline.colour, { 0, 1, 0, 1 });
+	EXPECT_FLOAT_EQ(outline.outline.thickness, 2);
+
+	const auto& circle{ std::get<ax::Circle>(shapes[2]) };
+	expect_vec(circle.position, { 10, 20 });
+	EXPECT_FLOAT_EQ(circle.radius, 5);
+	expect_vec(circle.fill, { 0, 0, 1, 0.25f });
+
+	const auto& ring{ std::get<ax::Circle>(shapes[3]) };
+	EXPECT_FLOAT_EQ(ring.fill.a, 0);
+	expect_vec(ring.outline.colour, ax::DebugShapes::default_colour);
+	EXPECT_FLOAT_EQ(ring.outline.thickness, 1);
+
+	const auto& line{ std::get<ax::Line>(shapes[4]) };
+	expect_vec(line.end, { 10, 10 });
+	EXPECT_FLOAT_EQ(line.thickness, 3);
+
+	const auto& point{ std::get<ax::Circle>(shapes[5]) };
+	expect_vec(point.position, { 7, 8 });
+	EXPECT_FLOAT_EQ(point.radius, 3);
+	expect_vec(point.fill, ax::DebugShapes::default_colour);
+
+	ax::DebugShapes::clear();
+}
+
+TEST_F(LuaShapeBindings, DebugShapeArgumentErrors)
+{
+	ax::DebugShapes::clear();
+	wgpu::RenderPassEncoder pass{};
+	m_state["pass"] = &pass;
+	const auto error{ [this](const std::string& call)
+	{
+		const auto result{ m_state.safe_script("local ok, err = pcall(function() " + call + " end) return ok and '' or tostring(err)") };
+		return result.get<std::string>();
+	} };
+
+	EXPECT_NE(error("pass.debug_rect_fill(1, 2, 3)").find("argument 4 ('height') is required"), std::string::npos);
+	EXPECT_NE(error("pass.debug_line(1, 2, 3, 'x')").find("argument 4 ('y2') must be a number"), std::string::npos);
+	EXPECT_NE(error("pass.debug_point(1, 2, 'red')").find("argument 3 ('colour') must be"), std::string::npos);
+	EXPECT_TRUE(ax::DebugShapes::queued().empty());
 }

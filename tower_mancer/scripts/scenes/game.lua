@@ -25,8 +25,8 @@ function game:start()
     game:setup_grass()
     tower:setup(app.window.width/2, app.window.height/2)
 
-    for y = -100, 100 do
-        for x= -100, 100 do
+    for y = -20, 20 do
+        for x= -20, 20 do
             table.insert(chunks, chunk:new(x, y))
         end
     end
@@ -82,6 +82,11 @@ function game:tick(delta)
 end
 
 function game:render(delta, pass)
+    for _, c in ipairs(chunks) do
+        if c.visible then
+            c:render(delta, pass)
+        end
+    end
     draw_helpers.ui_string(5, 5, "000001a", 0, {r = 0.5, g = 1.0, b = 0.7, a = 0.4}, {x = 2, y = 2}, true, 3000)
 end
 
