@@ -17,6 +17,9 @@ local vcpkg_triplet_dir = path.join(os.projectdir(), "triplets")
 local vcpkg_config_dir = vcpkg_debug and "debug" or ""
 set_runtimes(vcpkg_debug and "MDd" or "MD")
 add_defines("_ITERATOR_DEBUG_LEVEL=" .. (vcpkg_debug and "2" or "0"))
+if is_mode("debug") then
+    add_defines("AX_DEBUG_BUILD")
+end
 
 -- Dependencies come from vcpkg.json (vcpkg manifest mode). The rule installs them into
 -- build/vcpkg_installed with both configurations; each target links its matching CRT/STL ABI.
@@ -88,9 +91,10 @@ target("AxEngLib")
     enable_release_pdbs()
     add_rules("vcpkg.manifest")
     add_files(src .. "/axeng/**.cpp", src .. "/axeng/**.c")
-    -- stb_image.h defines helpers that are only used on some code paths
     -- #embed is a Clang extension in C++ (it is not part of C++26)
     add_files(src .. "/axeng/core/lua/external/lua_libs.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
+    add_files(src .. "/axeng/core/shapes/shape_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
+    -- stb_image.h defines helpers that are only used on some code paths
     add_files(src .. "/axeng/core/texture.cpp", {force = {cxxflags = "-Wno-unused-function"}})
     add_includedirs(src, {public = true})
     add_defines("ENABLE_PROFILER", "IMGUI_IMPL_WEBGPU_BACKEND_DAWN", {public = true})

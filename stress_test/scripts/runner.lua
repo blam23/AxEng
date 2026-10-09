@@ -1,5 +1,12 @@
 -- -cxr --allow-io --allow-os --in "$(SolutionDir)stress_test" --out "E:\AxStress"
 
+-- Timings from a debug engine build are meaningless (and the tests take a very long time), so refuse to run.
+if app.engine_build.debug then
+    log.error("Stress tests require a release build of the engine, but this is a '" .. app.engine_build.mode .. "' build. "
+        .. "Rebuild with 'xmake f -m release' then 'xmake'.")
+    return error_code.InvalidConfiguration
+end
+
 math.randomseed(0574355)
 
 local tests = {}

@@ -1,8 +1,10 @@
 #include "axeng/core/lua/bindings/lua_application_bindings.h"
 
 #include "axeng/core/application.h"
+#include "axeng/core/build_info.h"
 #include "axeng/core/event.h"
 #include "axeng/core/lua/bindings/lua_resource_bindings.h"
+#include "axeng/core/lua/bindings/lua_shape_bindings.h"
 #include "axeng/core/lua/bindings/lua_shared_bindings.h"
 #include "axeng/core/lua/bindings/lua_sprite_bindings.h"
 #include "axeng/core/lua/bindings/lua_user_io_bindings.h"
@@ -16,6 +18,13 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 
 	app_table["thread"] = mainThread ? "main" : "background";
 	app_table["on_main_thread"] = [mainThread]() { return mainThread; };
+
+	// Describes how the engine executable was built (not the project's build.json config).
+	app_table["engine_build"] = state.create_table_with
+	(
+		"mode", ax::build::mode,
+		"debug", ax::build::is_debug
+	);
 
 	setup_user_io_bindings(app, state);
 
@@ -83,7 +92,10 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 
 	setup_resource_bindings(app, state);
 	if (app.has_window())
+	{
 		setup_sprite_bindings(app, state);
+		setup_shape_bindings(app, state);
+	}
 
 	using EH = EventHandler<sol::object>;
 

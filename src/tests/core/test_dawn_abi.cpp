@@ -2,14 +2,18 @@
 #include <dawn/native/DawnNative.h>
 #include <windows.h>
 
+#include "axeng/core/build_info.h"
+
 #include <string>
 #include <string_view>
 #include <vector>
 
 #if defined(_DEBUG)
 static_assert(_ITERATOR_DEBUG_LEVEL == 2);
+static_assert(ax::build::is_debug && ax::build::mode == "debug");
 #else
 static_assert(_ITERATOR_DEBUG_LEVEL == 0);
+static_assert(!ax::build::is_debug && ax::build::mode == "release");
 #endif
 
 TEST(DawnAbiTests, NativeInstanceAndToggleLookup)

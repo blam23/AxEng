@@ -26,6 +26,8 @@ ax::Error ax::run(const std::vector<std::string>& args, Application&& app, wgpu:
 
 		if (!loaded)
 		{
+			// Release the window (and everything else) while GLFW is still initialised.
+			app.cleanup();
 			ax::teardown();
 			return Error::ApplicationLoadFailed;
 		}

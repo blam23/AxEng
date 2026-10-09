@@ -4,6 +4,7 @@
 #include "axeng/debug/perf_profiler.h"
 #include "axeng/core/window.h"
 #include "axeng/core/input/mouse.h"
+#include "axeng/core/shapes/shape_renderer.h"
 
 #include "spdlog/spdlog.h"
 
@@ -54,6 +55,7 @@ ax::Window::~Window()
 
 			if (s_windows.size() == 0)
 			{
+				ShapeRenderer::shutdown();
 				ImGui_ImplGlfw_Shutdown();
 				ImGui_ImplWGPU_Shutdown();
 			}
@@ -225,7 +227,7 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 	wgpu::Instance instance;
 	desc.nextInChain = nullptr;
 
-	static const auto kTimedWaitAny = wgpu::InstanceFeatureName::TimedWaitAny;
+	static const auto s_timed_wait_any = wgpu::InstanceFeatureName::TimedWaitAny;
 	// Dawn loads d3dcompiler_47.dll / vulkan-1.dll with LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, which only
 	// accepts absolute paths, so the system directory has to be given to it explicitly.
 	char systemDir[MAX_PATH]{};
@@ -242,7 +244,7 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 	{
 		.nextInChain = &dawnDesc,
 		.requiredFeatureCount = 1,
-		.requiredFeatures = &kTimedWaitAny
+		.requiredFeatures = &s_timed_wait_any
 	};
 	instance = wgpu::CreateInstance(&instanceDesc);
 	
@@ -498,6 +500,12 @@ void ax::Window::reload_pipeline()
 	//
 	pipelineDesc.layout = layout;
 	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+
+	ShapeRenderer::init(m_device, {
+		.colourFormat = m_surfaceFormat,
+		.depthFormat = m_depthTextureFormat,
+		.sampleCount = 4,
+	});
 
 	depthStencilState.depthWriteEnabled = wgpu::OptionalBool::False;
 	wgpu::BlendState accumulationBlend{};
@@ -1172,6 +1180,11 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_camera.position().x, m_camera.position().y, m_camera.zoom(), 0.f,
 		};
 		m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
+		ShapeRenderer::begin_frame({
+			.viewport = { static_cast<float>(m_width), static_cast<float>(m_height) },
+			.cameraPosition = m_camera.position(),
+			.zoom = m_camera.zoom(),
+		});
 
 		wgpu::RenderPassColorAttachment sceneColorAttachment
 		{

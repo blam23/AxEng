@@ -9,9 +9,12 @@
    "scripts":{
       "base_test":"scripts/base_test.lua",
       "class":"scripts/lib/class.lua",
+      "shape_gen":"scripts/lib/shape_gen.lua",
       "runner":"scripts/runner.lua",
       "test_single_update":"scripts/tests/sprites_single_update.lua",
-      "test_batch_update":"scripts/tests/sprites_batch_update.lua"
+      "test_batch_update":"scripts/tests/sprites_batch_update.lua",
+      "test_shapes_retained":"scripts/tests/shapes_retained.lua",
+      "test_shapes_immediate":"scripts/tests/shapes_immediate.lua"
    },
    "textures":{
       "test":"assets/test.png"
