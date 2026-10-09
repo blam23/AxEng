@@ -2,6 +2,10 @@
 
 Notes for AI agents working on AxEng. AxEng is a WIP WebGPU (Dawn) + Lua game engine. It is Windows-only and built with xmake, clang and C++23. See [README.md](README.md) for user-facing CLI docs.
 
+## Do not
+
+Update the README for anything except build changes that are relevant to the README examples
+
 ## Environment & building
 
 - xmake and LLVM may not be on `PATH` in a fresh shell. Dependencies come from vcpkg in manifest mode via `VCPKG_ROOT`:
