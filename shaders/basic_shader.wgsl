@@ -23,6 +23,7 @@ struct VSOut {
 	@builtin(position) pos : vec4<f32>,
 	@location(0) uv : vec2<f32>,
 	@location(1) tint : vec4<f32>,
+	@location(2) @interpolate(flat) texelBounds : vec4<f32>,
 };
 
 @vertex
@@ -74,7 +75,16 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	out.pos = vec4<f32>(ndcX, ndcY, depth, 1.0);
 	out.uv = uv;
 	out.tint = u.tint;
+	let texelMin = select(vec2<f32>(0.0), u.region.xy, useRegion);
+	let texelMax = select(textureSize, u.region.xy + u.region.zw, useRegion) - vec2<f32>(1.0);
+	out.texelBounds = clamp(vec4<f32>(texelMin, texelMax),
+		vec4<f32>(0.0), vec4<f32>(textureSize - vec2<f32>(1.0), textureSize - vec2<f32>(1.0)));
 	return out;
+}
+
+fn premultiplied_texel(coord: vec2<i32>, bounds: vec4<f32>) -> vec4<f32> {
+	let pixel = textureLoad(tex, clamp(coord, vec2<i32>(bounds.xy), vec2<i32>(bounds.zw)), 0);
+	return vec4<f32>(pixel.rgb * pixel.a, pixel.a);
 }
 
 fn sprite_color(in_: VSOut) -> vec4<f32> {
@@ -85,7 +95,23 @@ fn sprite_color(in_: VSOut) -> vec4<f32> {
 	let uvPixel = in_.uv * spriteScreenResolution;
 	let uvFactor = clamp(uvPixel - edge + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
 	let uv = (mix(uvPixelSrc - vec2<f32>(1.0), uvPixelSrc, uvFactor) + vec2<f32>(0.5)) * texturePixelSize;
-	return textureSample(tex, samp, uv) * in_.tint;
+	let texelPos = uv / texturePixelSize - vec2<f32>(0.5);
+	let base = vec2<i32>(floor(texelPos));
+	let fraction = fract(texelPos);
+	// Clamp each tap to the sprite region, not just the full atlas.
+	let top = mix(
+		premultiplied_texel(base, in_.texelBounds),
+		premultiplied_texel(base + vec2<i32>(1, 0), in_.texelBounds), fraction.x);
+	let bottom = mix(
+		premultiplied_texel(base + vec2<i32>(0, 1), in_.texelBounds),
+		premultiplied_texel(base + vec2<i32>(1, 1), in_.texelBounds), fraction.x);
+	let pixel = mix(top, bottom, fraction.y);
+	// The render passes expect straight alpha; unpremultiply only after filtering.
+	var rgb = vec3<f32>(0.0);
+	if (pixel.a > 0.0) {
+		rgb = pixel.rgb / pixel.a;
+	}
+	return vec4<f32>(rgb, pixel.a) * in_.tint;
 }
 
 @fragment
