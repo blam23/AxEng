@@ -1,4 +1,4 @@
--- -cxr --allow-io --allow-os --in "$(SolutionDir)tower_mancer" --out "E:\TowerMancer"
+-- -cxr --allow-threads --allow-io --allow-os --in "$(SolutionDir)tower_mancer" --out "E:\TowerMancer"
 
 math.randomseed(0800001066)
 

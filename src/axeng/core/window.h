@@ -26,6 +26,7 @@
 #include "axeng/debug/debug_view.h"
 #include "axeng/core/camera.h"
 #include "axeng/core/texture.h"
+#include "axeng/core/retained_sprites.h"
 #include "axeng/core/window_events.h"
 
 namespace ax
@@ -128,12 +129,24 @@ namespace ax
 		}
 
 		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view);
+		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view, const wgpu::Buffer& buffer);
 		void reload_pipeline();
 		bool create_surfaces();
 
 		SpriteDefinition* allocate_sprite();
+		SpriteDefinition* allocate_group_sprite(const std::shared_ptr<SpriteGroup>& group);
+		std::shared_ptr<SpriteGroup> create_sprite_group();
+		void release_sprite_group(const std::shared_ptr<SpriteGroup>& group);
+		void transfer_sprite(SpriteDefinition* sprite, const std::shared_ptr<SpriteGroup>& group);
+		std::shared_ptr<StaticSpriteBatch> attach_sprite_batch(Texture* texture,
+			std::shared_ptr<SpriteBuffer> data, glm::vec2 atlasOffset, std::int64_t order);
 		void free_sprite(SpriteDefinition* sprite);
 		std::size_t get_sprite_count() const;
+		std::size_t sprite_allocations() const { return m_spriteAllocations; }
+		std::size_t sprite_frees() const { return m_spriteFrees; }
+		std::size_t static_uploads() const { return m_staticUploads; }
+		std::size_t static_batch_count() const;
+		double sprite_setup_deadline() const { return m_spriteSetupDeadline; }
 
 		void render_texture(Texture* tex, glm::vec2 position);
 		void render_texture(Texture* tex, glm::vec2 position, rectf region);
@@ -161,6 +174,7 @@ namespace ax
 		// Rendering
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
 		void draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline);
+		void stage_sprite_batches();
 		void draw_transparent_sprites(wgpu::RenderPassEncoder& pass);
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
 		void run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture);
@@ -232,6 +246,14 @@ namespace ax
 		std::deque<SpriteDefinition> m_spriteSlots;
 		std::vector<SpriteDefinition*> m_activeSprites;
 		std::vector<SpriteDefinition*> m_freeSpriteSlots;
+		std::vector<std::shared_ptr<SpriteGroup>> m_spriteVisibilityGroups;
+		std::vector<std::shared_ptr<StaticSpriteBatch>> m_staticSpriteBatches;
+		std::size_t m_spriteAllocations{};
+		std::size_t m_spriteFrees{};
+		std::size_t m_staticUploads{};
+		double m_spriteSetupDeadline{};
+		std::uint64_t m_spriteGeneration{};
+		std::thread::id m_rendererThread{ std::this_thread::get_id() };
 		std::vector<SpriteDefinition> m_pendingTextures;
 		std::unordered_map<Texture*, std::vector<const SpriteDefinition*>> m_spriteGroups;
 		std::unordered_map<Texture*, std::vector<const SpriteDefinition*>> m_pendingSpriteGroups;
