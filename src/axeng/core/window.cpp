@@ -711,7 +711,6 @@ std::shared_ptr<ax::StaticSpriteBatch> ax::Window::attach_sprite_batch(Texture* 
 
 void ax::Window::stage_sprite_batches()
 {
-	m_spriteSetupDeadline = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count() + 0.001;
 	std::erase_if(m_staticSpriteBatches, [](const auto& batch) { return batch->released(); });
 	if (const auto batch{ next_static_sprite_batch(m_staticSpriteBatches) })
 	{
@@ -728,6 +727,7 @@ void ax::Window::stage_sprite_batches()
 			spdlog::error("Static sprite batch staging failed: {}", batch->m_error);
 		}
 	}
+	m_spriteSetupDeadline = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count() + 0.001;
 }
 
 void ax::Window::free_sprite(SpriteDefinition* sprite)

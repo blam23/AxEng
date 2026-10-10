@@ -50,16 +50,20 @@ function chunk:poll()
     end
 end
 
-function chunk:prepare(enemy_budget, deadline)
+function chunk:prepare(enemy_budget, deadline, prepare_enemies)
     if self.status ~= "staging" then return 0 end
     if self.terrain:error() ~= "" then
         log.error("Chunk (" .. self.x .. ", " .. self.y .. ") staging failed: " .. self.terrain:error())
         self.status = "failed"
         self.terrain:release()
+        self.enemies:release()
         self.noise = nil
         return 0
     end
-    local prepared = self.enemies:prepare(enemy_budget, deadline)
+    local prepared = 0
+    if prepare_enemies then
+        prepared = self.enemies:prepare(enemy_budget, deadline)
+    end
     if self.terrain:ready() and self.enemies:ready() then
         self.status = "ready"
     end

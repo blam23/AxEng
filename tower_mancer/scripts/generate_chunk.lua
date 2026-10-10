@@ -11,7 +11,7 @@ return function(request, task)
             local value = math.max(0.0, math.min(1.0, 0.5 + 0.5 * raw_noise / amplitude_sum))
             local tx = value < 0.4 and 1 or 0
             local saturation = tx == 0 and 0.4 or value
-            local hue = (tx == 0 and 100 or 250) + value * 720
+            local hue = (tx == 0 and 100 + value * 720 or math.random(214,218))
             local tint = ax.vec4_hsla_to_rgba(vec4:new(hue, saturation, 0.5, 1.0))
             local index = y * 32 + x + 1
             values:set(index, value)

@@ -169,9 +169,9 @@ function game:update_chunks()
     local submissions = math.min(2 - outstanding, 2 - bg.outstanding())
     for i = 1, math.min(#pending, submissions) do pending[i]:request() end
     local budget = 16
-    local deadline = math.min(app.clock() + 0.001, app.sprites.setup_deadline())
+    local deadline = app.clock() + 0.001
     for _, c in ipairs(staging) do
-        budget = budget - c:prepare(budget, deadline)
+        budget = budget - c:prepare(budget, deadline, c.desired_visible)
         if budget <= 0 or app.clock() >= deadline then break end
     end
     for _, c in ipairs(chunks) do

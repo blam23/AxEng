@@ -46,7 +46,7 @@ function enemies:prepare(budget, deadline)
         enemy.vy = 0
         enemy.vr = 0
         enemy.rand_timer = 0
-        enemy.time = 0
+        enemy.offset = math.random(0,1000)
         enemy.face = math.random(1, wizard_faces)
         local hsla_clothes = vec4:new(self.spawn_hue, math.random(3,6)*0.1, math.random(1,3)*0.1, 1.0)
         enemy.clothes_color = ax.vec4_hsla_to_rgba(hsla_clothes)
@@ -151,6 +151,11 @@ function enemies:release()
         enemy.clothes_sprite = nil
         enemy.shadow_sprite = nil
     end
+    for i = #self, 1, -1 do
+        self[i] = nil
+    end
+    self.pending_count = 0
+    self.spawn_region = nil
 end
 
 function enemies:tick(chunk, delta)
@@ -162,7 +167,7 @@ function enemies:tick(chunk, delta)
         local enemy = self[i]
         local ex = enemy.x
         local ey = enemy.y
-        enemy.r = math.sin((enemy.time + i) * 3.0) * 0.2
+        enemy.r = math.sin((app.clock() + enemy.offset) * 3.0) * 0.2
         enemy.x = ex + enemy.vx * delta
         enemy.y = ey + enemy.vy * delta
         if not chunk:contains_point(enemy.x, enemy.y) then
@@ -174,7 +179,6 @@ function enemies:tick(chunk, delta)
             enemy.vy = math.random(-100, 100) / 10.0
             enemy.rand_timer = math.random(10, 30) / 10.0
         end
-        enemy.time = enemy.time + delta
 
         if self.visible then
             app.sprites.update_position(enemy.sprite, enemy.x, enemy.y, enemy.y, enemy.r)
