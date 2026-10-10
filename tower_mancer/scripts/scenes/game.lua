@@ -147,6 +147,9 @@ function game:update_chunks()
         c.priority = c.desired_visible and 0 or
             (app.window.screen_contains_region(c.x * 1024 - 1024, c.y * 1024 - 1024, 3072, 3072) and 1 or 2)
         c.distance = (c.x - cx) ^ 2 + (c.y - cy) ^ 2
+        if c.status == "staging" then
+            c.terrain:set_staging(c.desired_visible, math.floor(c.distance))
+        end
         if not c.retiring and c.status == "pending" then
             pending[#pending + 1] = c
         elseif not c.retiring and c.status == "generating" then

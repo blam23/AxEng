@@ -52,11 +52,35 @@ void ax::StaticSpriteBatch::set_visible(bool visible)
 	m_visible = visible;
 }
 
+void ax::StaticSpriteBatch::set_staging(bool eligible, std::int64_t priority)
+{
+	check_thread();
+	if (m_released)
+		throw sol::error("Sprite batch has been released");
+	m_stagingEligible = eligible;
+	m_stagingPriority = priority;
+}
+
+std::shared_ptr<ax::StaticSpriteBatch> ax::next_static_sprite_batch(
+	std::span<const std::shared_ptr<StaticSpriteBatch>> batches)
+{
+	std::shared_ptr<StaticSpriteBatch> next;
+	for (const auto& batch : batches)
+	{
+		if (!batch->staging_eligible() || batch->ready() || !batch->error().empty())
+			continue;
+		if (!next || batch->staging_priority() < next->staging_priority())
+			next = batch;
+	}
+	return next;
+}
+
 void ax::StaticSpriteBatch::release()
 {
 	check_thread();
 	m_released = true;
 	m_visible = false;
+	m_stagingEligible = false;
 	m_bindGroup = nullptr;
 	m_buffer = nullptr;
 	m_data.reset();

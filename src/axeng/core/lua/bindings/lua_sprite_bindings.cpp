@@ -36,6 +36,9 @@ void ax::lua::bindings::setup_sprite_bindings(ax::Application& app, sol::state& 
 		sprite_table["setup_deadline"] = [&app]() { return app.window()->sprite_setup_deadline(); };
 		state.new_usertype<StaticSpriteBatch>("static_sprite_batch", sol::no_constructor,
 			"set_visible", &StaticSpriteBatch::set_visible,
+			"set_staging", &StaticSpriteBatch::set_staging,
+			"staging_eligible", &StaticSpriteBatch::staging_eligible,
+			"staging_priority", &StaticSpriteBatch::staging_priority,
 			"visible", &StaticSpriteBatch::visible, "ready", &StaticSpriteBatch::ready,
 			"error", &StaticSpriteBatch::error,
 			"release", &StaticSpriteBatch::release, "size", &StaticSpriteBatch::size);

@@ -713,10 +713,8 @@ void ax::Window::stage_sprite_batches()
 {
 	m_spriteSetupDeadline = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count() + 0.001;
 	std::erase_if(m_staticSpriteBatches, [](const auto& batch) { return batch->released(); });
-	for (const auto& batch : m_staticSpriteBatches)
+	if (const auto batch{ next_static_sprite_batch(m_staticSpriteBatches) })
 	{
-		if (batch->ready() || !batch->m_error.empty())
-			continue;
 		try
 		{
 			auto buffer{ upload_static_sprites(m_device, *batch->m_data, batch->m_atlasOffset) };
@@ -729,7 +727,6 @@ void ax::Window::stage_sprite_batches()
 			batch->m_error = error.what();
 			spdlog::error("Static sprite batch staging failed: {}", batch->m_error);
 		}
-		break; // At most one 64 KiB static upload per frame.
 	}
 }
 

@@ -88,17 +88,36 @@ On the main thread, attach a published sprite buffer:
 
 ```lua
 local batch = app.sprites.attach_batch("tilesheet", result.sprites, chunk_order)
--- Attachment starts hidden; GPU staging happens in subsequent frames.
+-- Attachment starts hidden and ineligible for GPU staging.
+-- Request staging before ready(), independently of draw visibility.
+batch:set_staging(true, math.floor(distance_squared))
 if batch:ready() then batch:set_visible(true) end
+-- When no longer needed onscreen, withdraw any pending upload:
+batch:set_staging(false, math.floor(distance_squared))
 batch:set_visible(false)
 -- At scene exit:
 batch:release()
 ```
 
 Each batch accepts 1-1,024 sealed records, uploads once, and retains its storage
-buffer. Hidden batches do not draw or upload. `ready()`, `error()`, `visible()`
-and `size()` expose its state. Check `error()` if staging fails. `release()` is
-idempotent; subsequent visibility changes are invalid.
+buffer. Hidden batches do not draw. GPU staging is opt-in via
+`set_staging(eligible, priority)`, independently of `set_visible(bool)`, so a
+hidden batch can upload before becoming ready to draw. Unrequested batches retain
+only their CPU payload and do not upload. Tower Mancer requests staging only for
+chunks that want to become visible, using squared camera distance as priority,
+and withdraws requests for offscreen or retiring chunks.
+
+At most one batch (64 KiB) uploads per frame, in subsequent frames after the
+request. Lower integer staging priorities upload first; equal priorities use
+`chunk_order`, then attachment order. Requests can be withdrawn or reprioritized
+until upload. Hiding a batch or withdrawing staging does not evict an existing GPU
+buffer; it stays resident until `release()`. No additional upload occurs when the
+batch becomes visible again.
+
+`ready()`, `error()`, `visible()`, `staging_eligible()`, `staging_priority()` and
+`size()` expose its state. Check `error()` if staging fails; failed batches are
+not retried. `release()` is idempotent; subsequent visibility or staging changes
+are invalid.
 
 The required integer `chunk_order` defines static-batch ordering, independent of
 task completion. Lower orders draw first; static batches draw before ordinary

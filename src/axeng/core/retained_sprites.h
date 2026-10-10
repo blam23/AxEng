@@ -2,6 +2,8 @@
 
 #include "axeng/core/native_tasks.h"
 
+#include <span>
+
 namespace ax
 {
 	wgpu::Buffer upload_static_sprites(const wgpu::Device& device, const SpriteBuffer& data, glm::vec2 atlasOffset);
@@ -26,6 +28,9 @@ namespace ax
 	{
 	public:
 		void set_visible(bool visible);
+		void set_staging(bool eligible, std::int64_t priority);
+		bool staging_eligible() const { return !m_released && m_stagingEligible; }
+		std::int64_t staging_priority() const { return m_stagingPriority; }
 		bool visible() const { return !m_released && m_visible; }
 		bool ready() const { return m_buffer != nullptr && !m_released; }
 		bool released() const { return m_released; }
@@ -35,6 +40,8 @@ namespace ax
 	private:
 		void check_thread() const;
 		bool m_visible{ false };
+		bool m_stagingEligible{ false };
+		std::int64_t m_stagingPriority{};
 		bool m_released{ false };
 		std::thread::id m_thread{ std::this_thread::get_id() };
 		std::string m_error;
@@ -46,4 +53,7 @@ namespace ax
 		wgpu::BindGroup m_bindGroup;
 		friend class Window;
 	};
+
+	std::shared_ptr<StaticSpriteBatch> next_static_sprite_batch(
+		std::span<const std::shared_ptr<StaticSpriteBatch>> batches);
 }

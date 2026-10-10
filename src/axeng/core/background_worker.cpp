@@ -23,8 +23,16 @@ void ax::BackgroundWorker::start(const std::vector<std::string>& args)
 
 	m_thread = std::thread([this, args]()
 	{
-		if (m_onStart)
-			m_onStart();
+		try
+		{
+			if (m_onStart)
+				m_onStart();
+		}
+		catch (const std::exception& error)
+		{
+			spdlog::error("Background worker start hook raised an exception: {}", error.what());
+		}
+		
 		m_luaInitialized = true;
 		if (m_useLua)
 		{
@@ -129,8 +137,16 @@ void ax::BackgroundWorker::start(const std::vector<std::string>& args)
 			}
 
 		}
-		if (m_onStop)
-			m_onStop();
+		
+		try
+		{
+			if (m_onStop)
+				m_onStop();
+		}
+		catch (const std::exception& error)
+		{
+			spdlog::error("Background worker stop hook raised an exception: {}", error.what());
+		}
 	});
 }
 
