@@ -59,6 +59,9 @@ namespace ax
 		const lua::ScriptManager& scripts() const noexcept { return m_scripts; }
 		lua::ScriptManager& scripts() noexcept { return m_scripts; }
 
+		const UserFileManager& user_files() const noexcept { return m_userFileManager; }
+		UserFileManager& user_files() noexcept { return m_userFileManager; }
+
 		const sol::environment& debug_get_env(Badge<debug::Debugger>) const noexcept { return m_env; }
 		sol::environment& debug_get_env(Badge<debug::Debugger>) noexcept { return m_env; }
 

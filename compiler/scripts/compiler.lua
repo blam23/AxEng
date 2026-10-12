@@ -93,7 +93,7 @@ local function check_and_copy_textures(project, in_directory, out_directory)
         end
         ax.print_table(textures)
         app.res.create_mega_texture("compiler_temp_texture_atlas", textures, 2.0)
-        app.res.save_texture("compiler_temp_texture_atlas", out_directory .. "/texture_atlas.png")
+        app.res.save_texture_io("compiler_temp_texture_atlas", out_directory .. "/texture_atlas.png")
 
         local res = app.res.get_texture_regions("compiler_temp_texture_atlas")
         project.atlas_regions = {}

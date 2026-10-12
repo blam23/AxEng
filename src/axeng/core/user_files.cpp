@@ -82,3 +82,16 @@ void ax::UserFileHandle::close() noexcept
     if (manager)
         manager->close_file(this);
 }
+
+std::optional<std::filesystem::path> ax::UserFileManager::get_user_file_path(const std::string& filename) const noexcept
+{
+    const auto ret{ m_directory / filename };
+
+    if (!is_file_inside_directory(ret, m_directory))
+    {
+        spdlog::error("Attempted to get a user file path outside the user directory: {}", ret.string());
+        return std::nullopt;
+    }
+
+    return ret;
+}

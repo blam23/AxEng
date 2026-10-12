@@ -94,6 +94,32 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 				return ret;
 			};
 
+		if (app.has_permission(ax::lua::Permission::IO))
+		{
+			resource_lookup_table["save_texture_io"] =
+			[&app](const std::string& name, const std::string& path) -> bool
+			{
+				auto text{ app.m_textures.get(name) };
+				if (text)
+				{
+					return text->save_png(path) == ax::Error::Success;
+				}
+				return false;
+			};
+		}
+
+		resource_lookup_table["save_texture_user"] =
+			[&app](const std::string& name, const std::string& path) -> bool
+			{
+				auto outPath{ app.user_files().get_user_file_path(path) };
+				auto text{ app.m_textures.get(name) };
+				if (text)
+				{
+					return outPath.has_value() && text->save_png(outPath->string()) == ax::Error::Success;
+				}
+				return false;
+			};
+
 		resource_lookup_table["get_texture_regions"] =
 			[&app, &state](const std::string& name) -> sol::table
 			{
@@ -136,17 +162,6 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 
 					const auto err{ app.m_textures.create_texture_atlas(name, descs, minPadding) };
 					return err;
-				};
-
-			resource_lookup_table["save_texture"] =
-				[&app](const std::string& name, const std::string& path) -> bool
-				{
-					auto text{ app.m_textures.get(name) };
-					if (text)
-					{
-						return text->save_png(path) == ax::Error::Success;
-					}
-					return false;
 				};
 		}
 
