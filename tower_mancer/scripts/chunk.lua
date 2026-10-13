@@ -45,7 +45,6 @@ function chunk:new(cx, cy)
                 ty = 0,
             }
             tile.tx = (tile.noise < 0.4) and 1 or 0
-            print("Hue: " .. (normalized_noise * 720))
             if tile.tx == 0 then
                 tile.hue = normalized_noise * 720
                 tile.sat = 0.4

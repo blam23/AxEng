@@ -23,6 +23,7 @@
 
 std::map<GLFWwindow*, ax::Window*> s_windows{};
 std::mutex s_windows_mutex{};
+bool s_imgui_initialized{ false };
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -57,14 +58,19 @@ ax::Window::~Window()
 			if (s_windows.size() == 0)
 			{
 				ShapeRenderer::shutdown();
-				ImGui_ImplGlfw_Shutdown();
-				ImGui_ImplWGPU_Shutdown();
+				if (s_imgui_initialized)
+				{
+					ImGui_ImplGlfw_Shutdown();
+					ImGui_ImplWGPU_Shutdown();
+					s_imgui_initialized = false;
+				}
 			}
 		}
 		glfwDestroyWindow(m_window);
 	}
 
-	m_surface.Unconfigure();
+	if (m_surface.Get() != nullptr)
+		m_surface.Unconfigure();
 }
 
 void ax::Window::resize_event_handler(GLFWwindow* window, int width, int height)
@@ -599,6 +605,7 @@ void ax::Window::reload_pipeline()
 	m_compositePipeline = m_device.CreateRenderPipeline(&compositePipelineDesc);
 
 	m_textureBindGroups.clear();
+	m_pendingPipelines.clear();
 }
 
 void ax::Window::create_composite_bind_group()
@@ -656,6 +663,186 @@ void ax::Window::free_sprite(SpriteDefinition* sprite)
 std::size_t ax::Window::get_sprite_count() const
 {
 	return m_activeSprites.size();
+}
+
+bool ax::Window::bind_texture(Texture *view)
+{
+	if (view != nullptr && (view->texture().Get() == nullptr || view->view().Get() == nullptr
+		|| view->width() == 0 || view->height() == 0))
+	{
+		spdlog::error("Cannot bind an invalid render texture.");
+		return false;
+	}
+
+	m_boundTexture = view;
+	return true;
+}
+
+void ax::Window::draw_pending()
+{
+	PendingDrawBatch batch{};
+	batch.target = m_boundTexture;
+	batch.shapes = DebugShapes::queued();
+	batch.textures = std::move(m_pendingTextures);
+	m_pendingTextures.clear();
+
+	if (batch.shapes.empty() && batch.textures.empty())
+		return;
+
+	DebugShapes::clear();
+	m_pendingDrawBatches.push_back(std::move(batch));
+}
+
+wgpu::RenderPipeline ax::Window::setup_pending_pipeline(wgpu::TextureFormat format)
+{
+	const auto found{ m_pendingPipelines.find(format) };
+	if (found != m_pendingPipelines.end())
+		return found->second;
+
+	wgpu::BindGroupLayout layouts[2]{ m_groupLayout, m_globalLayout };
+	wgpu::PipelineLayoutDescriptor layoutDesc{};
+	layoutDesc.bindGroupLayoutCount = 2;
+	layoutDesc.bindGroupLayouts = layouts;
+	const auto layout{ m_device.CreatePipelineLayout(&layoutDesc) };
+
+	wgpu::BlendState blend{};
+	blend.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
+	blend.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+	blend.color.operation = wgpu::BlendOperation::Add;
+	blend.alpha.srcFactor = wgpu::BlendFactor::One;
+	blend.alpha.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+	blend.alpha.operation = wgpu::BlendOperation::Add;
+
+	wgpu::ColorTargetState target{};
+	target.format = format;
+	target.blend = &blend;
+	target.writeMask = wgpu::ColorWriteMask::All;
+	wgpu::FragmentState fragment{};
+	fragment.module = m_shader;
+	fragment.entryPoint = "fs_main";
+	fragment.targetCount = 1;
+	fragment.targets = &target;
+
+	wgpu::RenderPipelineDescriptor desc{};
+	desc.layout = layout;
+	desc.vertex.module = m_shader;
+	desc.vertex.entryPoint = "vs_main";
+	desc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+	desc.primitive.frontFace = wgpu::FrontFace::CCW;
+	desc.primitive.cullMode = wgpu::CullMode::None;
+	desc.multisample.count = 1;
+	desc.multisample.mask = ~0u;
+	desc.fragment = &fragment;
+
+	auto pipeline{ m_device.CreateRenderPipeline(&desc) };
+	if (pipeline.Get() == nullptr)
+	{
+		spdlog::error("Failed to create a pending-draw pipeline for texture format {}.", static_cast<uint32_t>(format));
+		return {};
+	}
+
+	m_pendingPipelines.emplace(format, pipeline);
+	return pipeline;
+}
+
+void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::TextureView& screenView)
+{
+	const auto targetView{ batch.target != nullptr ? batch.target->view() : screenView };
+	const auto format{ batch.target != nullptr ? batch.target->texture().GetFormat() : m_surfaceFormat };
+	const auto width{ batch.target != nullptr ? batch.target->width() : m_width };
+	const auto height{ batch.target != nullptr ? batch.target->height() : m_height };
+
+	std::vector<const SpriteDefinition*> sprites{};
+	sprites.reserve(batch.textures.size());
+	for (const auto& sprite : batch.textures)
+	{
+		if (sprite.tex == nullptr)
+			continue;
+		if (sprite.tex == batch.target)
+		{
+			spdlog::error("Cannot sample a texture while drawing pending content into that same texture.");
+			continue;
+		}
+		sprites.push_back(&sprite);
+	}
+
+	if (batch.shapes.empty() && sprites.empty())
+		return;
+
+	const auto pipeline{ sprites.empty() ? wgpu::RenderPipeline{} : setup_pending_pipeline(format) };
+	if (!sprites.empty() && pipeline.Get() == nullptr)
+		return;
+
+	if (!ShapeRenderer::init(m_device, {
+		.colourFormat = format,
+		.depthFormat = wgpu::TextureFormat::Undefined,
+		.sampleCount = 1,
+	}))
+		return;
+
+	const ShapeView shapeView
+	{
+		.viewport = { static_cast<float>(width), static_cast<float>(height) },
+		.cameraPosition = m_camera.position(),
+		.zoom = m_camera.zoom(),
+	};
+	ShapeRenderer::begin_frame(shapeView);
+
+	const float vp[8]{
+		static_cast<float>(width), static_cast<float>(height), 0.f, 0.f,
+		m_camera.position().x, m_camera.position().y, m_camera.zoom(), 0.f,
+	};
+	m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
+
+	wgpu::CommandEncoderDescriptor encoderDesc{};
+	encoderDesc.label = "pending draw encoder";
+	auto encoder{ m_device.CreateCommandEncoder(&encoderDesc) };
+	wgpu::RenderPassColorAttachment colorAttachment{};
+	colorAttachment.view = targetView;
+	colorAttachment.depthSlice = wgpu::kDepthSliceUndefined;
+	colorAttachment.loadOp = wgpu::LoadOp::Load;
+	colorAttachment.storeOp = wgpu::StoreOp::Store;
+	wgpu::RenderPassDescriptor passDesc{};
+	passDesc.colorAttachmentCount = 1;
+	passDesc.colorAttachments = &colorAttachment;
+	auto pass{ encoder.BeginRenderPass(&passDesc) };
+
+	if (!sprites.empty())
+	{
+		ensure_uniform_capacity(static_cast<uint32_t>(sprites.size()));
+		m_spriteUploadData.clear();
+		m_spriteUploadData.reserve(sprites.size());
+		for (const auto* sprite : sprites)
+			m_spriteUploadData.push_back(sprite->gpuData);
+		m_queue.WriteBuffer(m_uniforms, 0, m_spriteUploadData.data(), m_spriteUploadData.size() * m_uniformStride);
+
+		pass.SetPipeline(pipeline);
+		pass.SetBindGroup(1, m_viewportBindGroup);
+		for (uint32_t first = 0; first < sprites.size();)
+		{
+			uint32_t end{ first + 1 };
+			while (end < sprites.size() && sprites[end]->tex == sprites[first]->tex)
+				++end;
+
+			auto bindGroup{ m_textureBindGroups.find(sprites[first]->tex) };
+			if (bindGroup == m_textureBindGroups.end())
+				bindGroup = m_textureBindGroups.emplace(sprites[first]->tex, setup_bind_groups(sprites[first]->tex->view())).first;
+			pass.SetBindGroup(0, bindGroup->second);
+			pass.Draw(6, end - first, 0, first);
+			first = end;
+		}
+	}
+
+	if (!batch.shapes.empty())
+		ShapeRenderer::draw(pass, batch.shapes);
+
+	pass.End();
+	wgpu::CommandBufferDescriptor commandDesc{};
+	commandDesc.label = "pending draw command buffer";
+	auto command{ encoder.Finish(&commandDesc) };
+	m_queue.Submit(1, &command);
+	if (batch.target != nullptr)
+		batch.target->m_gpuModified = true;
 }
 
 void ax::Window::render_texture(Texture* tex, glm::vec2 position)
@@ -1009,6 +1196,7 @@ bool ax::Window::init_imgui()
 
 	ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 	ax::setup_imgui_style();
+	s_imgui_initialized = true;
 
 	// Default font
 	ImGuiIO& io = ImGui::GetIO();
@@ -1181,6 +1369,11 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_camera.position().x, m_camera.position().y, m_camera.zoom(), 0.f,
 		};
 		m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
+		ShapeRenderer::init(m_device, {
+			.colourFormat = m_surfaceFormat,
+			.depthFormat = m_depthTextureFormat,
+			.sampleCount = 4,
+		});
 		ShapeRenderer::begin_frame({
 			.viewport = { static_cast<float>(m_width), static_cast<float>(m_height) },
 			.cameraPosition = m_camera.position(),
@@ -1315,6 +1508,10 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			wgpu::CommandBuffer command{ encoder.Finish(&bufferDesc) };
 
 			m_queue.Submit(1, &command);
+
+			for (const auto& batch : m_pendingDrawBatches)
+				draw_pending_batch(batch, surfaceView);
+			m_pendingDrawBatches.clear();
 
 			m_surface.Present();
 

@@ -5,12 +5,12 @@
 #include "axeng/core/texture.h"
 #include "axeng/core/window.h"
 
-bool ax::lua::bindings::window_predicate(ax::Application& app, sol::state&)
+bool ax::lua::bindings::window_predicate(Application& app, sol::state&)
 {
 	return app.window() != nullptr;
 }
 
-void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& state)
+void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& state)
 {
 	auto window_table{ state.create_table() };
 
@@ -60,7 +60,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 	on_ui_table["subscribe"] =
 		[&app](sol::protected_function f) -> EventID
 		{
-			return app.window()->get_ui_event_handler().subscribe([f](const ax::WindowUIEvent& e)
+			return app.window()->get_ui_event_handler().subscribe([f](const WindowUIEvent& e)
 				{
 					const auto res{ f(e.delta) };
 					if (!res.valid())
@@ -81,7 +81,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 	on_render_table["subscribe"] =
 		[&app](sol::protected_function f) -> EventID
 		{
-			return app.window()->get_render_event_handler().subscribe([f](const ax::WindowRenderEvent& e)
+			return app.window()->get_render_event_handler().subscribe([f](const WindowRenderEvent& e)
 				{
 					const auto res{ f(e.delta, e.pass) };
 					if (!res.valid())
@@ -102,7 +102,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 	on_close_table["subscribe"] =
 		[&app](sol::protected_function f) -> EventID
 		{
-			return app.window()->get_request_close_event_handler().subscribe([f](const ax::WindowRequestCloseEvent&) {
+			return app.window()->get_request_close_event_handler().subscribe([f](const WindowRequestCloseEvent&) {
 				const auto res{ f() };
 				if (!res.valid())
 				{
@@ -122,7 +122,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 	on_resize_table["subscribe"] =
 		[&app](sol::protected_function f) -> EventID
 		{
-			return app.window()->get_resize_event_handler().subscribe([f](const ax::WindowResizeEvent& e)
+			return app.window()->get_resize_event_handler().subscribe([f](const WindowResizeEvent& e)
 				{
 					const auto res{ f(e.width, e.height) };
 					if (!res.valid())
@@ -165,7 +165,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_texture(t, { x, y }, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }));
 					}
 					else
@@ -177,7 +177,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_texture(t, { x, y }, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }), z);
 					}
 					else
@@ -190,7 +190,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_texture(t, { x, y }, r, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }), z, { cr, cg, cb, ca }, { sx, sy });
 					}
 					else
@@ -221,7 +221,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_ui_texture(t, { x, y }, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }));
 					}
 					else
@@ -233,7 +233,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_ui_texture(t, { x, y }, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }), z);
 					}
 					else
@@ -246,7 +246,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_ui_texture(t, { x, y }, r, lua::bindings::get_texture_region(texture, { ax, ay, aw, ah }), z, { cr, cg, cb, ca }, { sx, sy });
 					}
 					else
@@ -279,7 +279,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_texture(t, { x, y }, { ax, ay, aw, ah });
 					}
 					else
@@ -291,7 +291,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_texture(t, { x, y }, { ax, ay, aw, ah }, z);
 					}
 					else
@@ -304,7 +304,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_texture(t, { x, y }, r, { ax, ay, aw, ah }, z, { cr, cg, cb, ca }, { sx, sy });
 					}
 					else
@@ -335,7 +335,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_ui_texture(t, { x, y }, { ax, ay, aw, ah });
 					}
 					else
@@ -347,7 +347,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_ui_texture(t, { x, y }, { ax, ay, aw, ah }, z);
 					}
 					else
@@ -360,7 +360,7 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				{
 					if (texture["valid"])
 					{
-						const auto t{ texture["ptr"].get<ax::Texture*>() };
+						const auto t{ texture["ptr"].get<Texture*>() };
 						app.window()->render_ui_texture(t, { x, y }, r, { ax, ay, aw, ah }, z, { cr, cg, cb, ca }, { sx, sy });
 					}
 					else
@@ -370,6 +370,27 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 				}
 			);
 	}
+
+	window_table["bind_texture"] =
+		[&app](sol::optional<sol::table> texture) -> bool
+		{
+			if (!texture)
+				return app.window()->bind_texture(nullptr);
+
+			if ((*texture)["valid"])
+			{
+				return app.window()->bind_texture((*texture)["ptr"].get<Texture*>());
+			}
+
+			spdlog::error("Invalid texture, cannot bind");
+			return false;
+		};
+
+	window_table["draw_pending"] =
+		[&app]()
+		{
+			app.window()->draw_pending();
+		};
 
 	window_table["screen_contains_region"] =
 		[&app](float x, float y, float w, float h) -> bool
@@ -381,12 +402,12 @@ void ax::lua::bindings::setup_window_bindings(ax::Application& app, sol::state& 
 	app_table["window"] = window_table;
 }
 
-bool ax::lua::bindings::window_embed_predicate(ax::Application& app, sol::state&)
+bool ax::lua::bindings::window_embed_predicate(Application& app, sol::state&)
 {
 	return app.window() != nullptr && app.has_permission(lua::Permission::OS);
 }
 
-void ax::lua::bindings::setup_window_embed_bindings(ax::Application& app, sol::state& state)
+void ax::lua::bindings::setup_window_embed_bindings(Application& app, sol::state& state)
 {
 	auto app_table{ state["app"] };
 	auto window_table {app_table["window"].get<sol::table>() };

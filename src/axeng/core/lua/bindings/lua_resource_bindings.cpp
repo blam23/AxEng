@@ -67,6 +67,63 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 				};
 		}
 
+		static std::mutex temp_textures_mutex;
+		static std::map<std::string, std::unique_ptr<ax::Texture>> temp_textures;
+
+		resource_lookup_table["create_temp_texture"] =
+			[&app, &state](const std::string& name, const float width, const float height) -> sol::table
+			{
+				std::lock_guard<std::mutex> lock(temp_textures_mutex);
+				auto* text{ temp_textures[name].get() };
+
+				if (text == nullptr)
+				{
+					temp_textures[name] = app.m_textures.create_temporary(name, {}, width, height);
+					text = temp_textures[name].get();
+				}
+
+				auto ret = state.create_table();
+
+				if (text)
+				{
+					ret["temp"] = true;
+					ret["name"] = name;
+					ret["valid"] = true;
+					ret["ptr"] = text;
+					ret["view"] = text->view();
+					ret["ui_view"] = text->imgui_view();
+					ret["width"] = text->width();
+					ret["height"] = text->height();
+				}
+				else
+				{
+					ret["valid"] = false;
+				}
+
+				return ret;
+			};
+
+		resource_lookup_table["release_temp_texture"] =
+			[](sol::table tbl) -> bool
+			{
+				if (!tbl["valid"])
+				{
+					spdlog::warn("Attempted to release an invalid temporary texture.");
+					return true;
+				}
+				std::lock_guard<std::mutex> lock(temp_textures_mutex);
+				if (auto it = temp_textures.find(tbl["name"]); it != temp_textures.end())
+				{
+					temp_textures.erase(it);
+					tbl["ptr"] = nullptr;
+					tbl["valid"] = false;
+					return true;
+				}
+
+				spdlog::warn("Attempted to release a temporary texture that does not exist (don't release asset-based textures)");
+				return false;
+			};
+
 		resource_lookup_table["create_texture"] =
 			[&app, &state](const std::string& name, const std::string& data) -> sol::table
 			{

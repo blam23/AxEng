@@ -26,6 +26,7 @@
 #include "axeng/debug/debug_view.h"
 #include "axeng/core/camera.h"
 #include "axeng/core/texture.h"
+#include "axeng/core/shapes/shape.h"
 #include "axeng/core/window_events.h"
 
 namespace ax
@@ -135,6 +136,10 @@ namespace ax
 		void free_sprite(SpriteDefinition* sprite);
 		std::size_t get_sprite_count() const;
 
+		bool bind_texture(Texture* view);
+		// Snapshots queued sprites and debug shapes for execution after the active frame passes end.
+		void draw_pending();
+
 		void render_texture(Texture* tex, glm::vec2 position);
 		void render_texture(Texture* tex, glm::vec2 position, rectf region);
 		void render_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale);
@@ -158,14 +163,20 @@ namespace ax
 		void reset_input_redirection();
 
 	private:
+		friend struct WindowTestAccess;
+
+		struct PendingDrawBatch;
+
 		// Rendering
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
 		void draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline);
 		void draw_transparent_sprites(wgpu::RenderPassEncoder& pass);
+		void draw_pending_batch(const PendingDrawBatch& batch, const wgpu::TextureView& screenView);
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
 		void run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture);
 		void ensure_uniform_capacity(uint32_t required);
 		void create_composite_bind_group();
+		wgpu::RenderPipeline setup_pending_pipeline(wgpu::TextureFormat format);
 
 		// Logic
 		void handle_tick(double delta);
@@ -221,6 +232,16 @@ namespace ax
 		wgpu::Buffer m_viewportBuffer;
 		wgpu::BindGroup m_viewportBindGroup;
 		std::unordered_map<Texture*, wgpu::BindGroup> m_textureBindGroups;
+		std::map<wgpu::TextureFormat, wgpu::RenderPipeline> m_pendingPipelines;
+
+		struct PendingDrawBatch
+		{
+			Texture* target{ nullptr };
+			ShapeList shapes;
+			std::vector<SpriteDefinition> textures;
+		};
+		Texture* m_boundTexture{ nullptr };
+		std::vector<PendingDrawBatch> m_pendingDrawBatches;
 
 		struct SpriteGroupRange
 		{

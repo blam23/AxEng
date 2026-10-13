@@ -1,10 +1,13 @@
 #include "axeng/core/texture.h"
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <thread>
 
 #pragma warning(push)
 #pragma warning(disable : 4505) // unused functions due to PNG only flag
@@ -62,13 +65,34 @@ ax::Texture::Texture(Badge<TextureManager>, const std::string& name, uint32_t wi
 	m_loaded = true;
 }
 
+ax::Texture::Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, wgpu::Device* device)
+	: Asset{ name }, m_width{ width }, m_height{ height }
+{
+	if (width == 0 || height == 0 || device == nullptr)
+	{
+		spdlog::error("Failed to create temporary texture '{}', invalid dimensions or device.", name);
+		return;
+	}
+
+	upload(name, nullptr, 0, *device);
+	if (m_texture.Get() == nullptr || m_view.Get() == nullptr)
+	{
+		spdlog::error("Failed to create temporary texture '{}'.", name);
+		return;
+	}
+	m_loaded = true;
+}
+
 void ax::Texture::upload(const std::string& name, const void* rgbaPixels, uint32_t bytesPerRow, wgpu::Device& device)
 {
+	m_device = device;
+
 	// Create texture
 	wgpu::TextureDescriptor textureDesc
 	{
 		.label = name.data(),
-		.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst,
+		.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst
+			| wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::RenderAttachment,
 		.dimension = wgpu::TextureDimension::e2D,
 		.size = { .width = m_width, .height = m_height, .depthOrArrayLayers = 1 },
 		.format = wgpu::TextureFormat::RGBA8Unorm,
@@ -90,6 +114,9 @@ void ax::Texture::upload(const std::string& name, const void* rgbaPixels, uint32
 		.aspect = wgpu::TextureAspect::All
 	};
 	m_view = m_texture.CreateView(&viewDesc);
+
+	if (rgbaPixels == nullptr)
+		return;
 
 	// Copy data to texture
 	wgpu::TexelCopyTextureInfo copyInfo
@@ -128,8 +155,98 @@ GLFWimage ax::Texture::create_glfw_image() const
 
 ax::Error ax::Texture::save_png(const std::filesystem::path& path) const
 {
+	if (!m_loaded || m_width == 0 || m_height == 0)
+	{
+		spdlog::error("Cannot save texture '{}', no pixel data available.", m_name);
+		return Error::InvalidTexture;
+	}
+
+	std::vector<uint8_t> gpuPixels{};
+	const bool hasCpuPixels{ m_stbiPtr != nullptr || !m_pixels.empty() };
 	const void* pixels{ m_stbiPtr ? m_stbiPtr : static_cast<const void*>(m_pixels.data()) };
-	if (!m_loaded || pixels == nullptr || m_width == 0 || m_height == 0)
+	if (m_gpuModified || !hasCpuPixels)
+	{
+		if (m_device.Get() == nullptr || m_texture.Get() == nullptr)
+		{
+			spdlog::error("Cannot read back texture '{}', no GPU device is available.", m_name);
+			return Error::InvalidTexture;
+		}
+
+		const uint64_t rowBytes{ static_cast<uint64_t>(m_width) * 4 };
+		const uint64_t paddedRowBytes{ (rowBytes + 255) & ~uint64_t{ 255 } };
+		const uint64_t bufferSize{ paddedRowBytes * m_height };
+		if (paddedRowBytes > std::numeric_limits<uint32_t>::max())
+		{
+			spdlog::error("Cannot read back texture '{}', row size exceeds WebGPU limits.", m_name);
+			return Error::InvalidTexture;
+		}
+
+		wgpu::BufferDescriptor readbackDesc{};
+		readbackDesc.size = bufferSize;
+		readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+		readbackDesc.label = "Texture PNG readback";
+		auto readback{ m_device.CreateBuffer(&readbackDesc) };
+
+		wgpu::CommandEncoderDescriptor encoderDesc{};
+		encoderDesc.label = "Texture PNG readback encoder";
+		auto encoder{ m_device.CreateCommandEncoder(&encoderDesc) };
+		wgpu::TexelCopyTextureInfo source{};
+		source.texture = m_texture;
+		wgpu::TexelCopyBufferInfo destination{};
+		destination.buffer = readback;
+		destination.layout.bytesPerRow = static_cast<uint32_t>(paddedRowBytes);
+		destination.layout.rowsPerImage = m_height;
+		const wgpu::Extent3D extent{ m_width, m_height, 1 };
+		encoder.CopyTextureToBuffer(&source, &destination, &extent);
+		auto command{ encoder.Finish() };
+		m_device.GetQueue().Submit(1, &command);
+
+		struct MapResult
+		{
+			std::atomic<bool> complete{ false };
+			std::atomic<bool> succeeded{ false };
+		};
+		const auto result{ std::make_shared<MapResult>() };
+		readback.MapAsync(wgpu::MapMode::Read, 0, bufferSize, wgpu::CallbackMode::AllowSpontaneous,
+			[result](wgpu::MapAsyncStatus status, wgpu::StringView)
+			{
+				result->succeeded.store(status == wgpu::MapAsyncStatus::Success, std::memory_order_relaxed);
+				result->complete.store(true, std::memory_order_release);
+			});
+
+		const auto deadline{ std::chrono::steady_clock::now() + std::chrono::seconds{ 10 } };
+		while (!result->complete.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+		{
+			m_device.Tick();
+			std::this_thread::yield();
+		}
+		if (!result->complete.load(std::memory_order_acquire))
+		{
+			spdlog::error("Timed out reading back texture '{}' for PNG saving.", m_name);
+			return Error::GenericFailure;
+		}
+		if (!result->succeeded.load(std::memory_order_relaxed))
+		{
+			spdlog::error("Failed to map texture '{}' for PNG saving.", m_name);
+			return Error::GenericFailure;
+		}
+
+		const auto* mapped{ static_cast<const uint8_t*>(readback.GetConstMappedRange()) };
+		if (mapped == nullptr)
+		{
+			readback.Unmap();
+			spdlog::error("Failed to access texture '{}' readback data.", m_name);
+			return Error::GenericFailure;
+		}
+		gpuPixels.resize(static_cast<size_t>(rowBytes) * m_height);
+		for (uint32_t y{ 0 }; y < m_height; ++y)
+			std::memcpy(gpuPixels.data() + static_cast<size_t>(y) * rowBytes,
+				mapped + static_cast<size_t>(y) * paddedRowBytes, static_cast<size_t>(rowBytes));
+		readback.Unmap();
+		pixels = gpuPixels.data();
+	}
+
+	if (pixels == nullptr)
 	{
 		spdlog::error("Cannot save texture '{}', no pixel data available.", m_name);
 		return Error::InvalidTexture;
@@ -384,4 +501,35 @@ std::unique_ptr<ax::Texture> ax::TextureManager::load_impl(const std::string& na
 void ax::TextureManager::set_device(wgpu::Device& device)
 {
 	m_device = &device;
+}
+
+std::unique_ptr<ax::Texture> ax::TextureManager::create_temporary(const std::string& name, std::vector<uint8_t> rgbaPixels, float width, float height)
+{
+	if (m_device == nullptr || !std::isfinite(width) || !std::isfinite(height)
+		|| width < 1.0f || height < 1.0f || std::floor(width) != width || std::floor(height) != height
+		|| static_cast<double>(width) > std::numeric_limits<uint32_t>::max()
+		|| static_cast<double>(height) > std::numeric_limits<uint32_t>::max())
+	{
+		spdlog::error("Failed to create temporary texture '{}', invalid dimensions or device.", name);
+		return nullptr;
+	}
+
+	const auto textureWidth{ static_cast<uint32_t>(width) };
+	const auto textureHeight{ static_cast<uint32_t>(height) };
+	wgpu::Limits limits{};
+	if (!m_device->GetLimits(&limits) || textureWidth > limits.maxTextureDimension2D || textureHeight > limits.maxTextureDimension2D)
+	{
+		spdlog::error("Failed to create temporary texture '{}', dimensions {}x{} exceed device limits.", name, textureWidth, textureHeight);
+		return nullptr;
+	}
+
+	std::unique_ptr<Texture> texture{};
+	if (rgbaPixels.empty())
+		texture = std::make_unique<Texture>(Badge<TextureManager>{}, name, textureWidth, textureHeight, m_device);
+	else
+		texture = std::make_unique<Texture>(Badge<TextureManager>{}, name, textureWidth, textureHeight, std::move(rgbaPixels), m_device);
+
+	if (!texture->is_loaded())
+		return nullptr;
+	return texture;
 }
