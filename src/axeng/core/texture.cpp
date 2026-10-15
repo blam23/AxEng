@@ -118,6 +118,24 @@ void ax::Texture::upload(const std::string& name, const void* rgbaPixels, uint32
 	if (rgbaPixels == nullptr)
 		return;
 
+	std::vector<uint8_t> convertedPixels{};
+	if (m_channels != 4)
+	{
+		const auto* sourcePixels{ static_cast<const uint8_t*>(rgbaPixels) };
+		convertedPixels.resize(static_cast<size_t>(m_width) * m_height * 4);
+		for (size_t i{ 0 }, pixelCount{ static_cast<size_t>(m_width) * m_height }; i < pixelCount; ++i)
+		{
+			const auto* source{ sourcePixels + i * m_channels };
+			auto* destination{ convertedPixels.data() + i * 4 };
+			destination[0] = source[0];
+			destination[1] = m_channels <= 2 ? source[0] : source[1];
+			destination[2] = m_channels <= 2 ? source[0] : source[2];
+			destination[3] = m_channels == 2 ? source[1] : 255;
+		}
+		rgbaPixels = convertedPixels.data();
+		bytesPerRow = 4 * m_width;
+	}
+
 	// Copy data to texture
 	wgpu::TexelCopyTextureInfo copyInfo
 	{
@@ -162,10 +180,12 @@ ax::Error ax::Texture::save_png(const std::filesystem::path& path) const
 	}
 
 	std::vector<uint8_t> gpuPixels{};
+	uint32_t outputChannels{ m_channels };
 	const bool hasCpuPixels{ m_stbiPtr != nullptr || !m_pixels.empty() };
 	const void* pixels{ m_stbiPtr ? m_stbiPtr : static_cast<const void*>(m_pixels.data()) };
 	if (m_gpuModified || !hasCpuPixels)
 	{
+		outputChannels = 4;
 		if (m_device.Get() == nullptr || m_texture.Get() == nullptr)
 		{
 			spdlog::error("Cannot read back texture '{}', no GPU device is available.", m_name);
@@ -262,8 +282,8 @@ ax::Error ax::Texture::save_png(const std::filesystem::path& path) const
 			out->insert(out->end(), bytes, bytes + size);
 		},
 		&encoded,
-		static_cast<int>(m_width), static_cast<int>(m_height), static_cast<int>(m_channels),
-		pixels, static_cast<int>(m_width * m_channels)) };
+		static_cast<int>(m_width), static_cast<int>(m_height), static_cast<int>(outputChannels),
+		pixels, static_cast<int>(m_width * outputChannels)) };
 
 	if (!ok)
 	{

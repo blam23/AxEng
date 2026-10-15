@@ -12,6 +12,7 @@
 #include "tests/main/log_capture.h"
 
 #include "axeng/external/stb_image.h"
+#include "axeng/external/stb_image_write.h"
 
 #include <algorithm>
 #include <array>
@@ -1160,4 +1161,88 @@ TEST_F(WindowPendingDrawTest, TemporaryRenderTargetFlushesShapesAndSpritesAndSav
 		}
 	const auto renderedScreen{ saveAndLoad(*screenTarget, "screen_target") };
 	EXPECT_TRUE(renderedScreen == screenGolden);
+}
+
+TEST_F(WindowPendingDrawTest, SavesRgbLoadedRenderTargetWithRgbaReadback)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+
+	const auto suffix{ std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) };
+	std::vector<std::uint8_t> rgbPixels(static_cast<std::size_t>(s_size) * s_size * 3);
+	for (std::size_t i{ 0 }; i < rgbPixels.size(); i += 3)
+	{
+		rgbPixels[i] = 32;
+		rgbPixels[i + 1] = 64;
+		rgbPixels[i + 2] = 96;
+	}
+
+	std::vector<std::uint8_t> rgbPng{};
+	const auto appendPng = [](void* context, void* data, int size)
+		{
+			auto* output{ static_cast<std::vector<std::uint8_t>*>(context) };
+			const auto* bytes{ static_cast<const std::uint8_t*>(data) };
+			output->insert(output->end(), bytes, bytes + size);
+		};
+	ASSERT_NE(stbi_write_png_to_func(appendPng, &rgbPng, s_size, s_size, 3,
+		rgbPixels.data(), static_cast<int>(s_size * 3)), 0);
+	auto* target{ app.textures().load_from_raw("rgb_render_target_" + suffix, {}, rgbPng) };
+	ASSERT_NE(target, nullptr);
+	EXPECT_EQ(target->width(), s_size);
+	EXPECT_EQ(target->height(), s_size);
+
+	auto screenTarget{ app.textures().create_temporary("rgb_screen_target_" + suffix, {}, static_cast<float>(s_size), static_cast<float>(s_size)) };
+	ASSERT_NE(screenTarget, nullptr);
+
+	if (!ax::setup_glfw())
+		GTEST_SKIP() << "GLFW could not create a hidden test window";
+	struct GlfwGuard
+	{
+		~GlfwGuard() { ax::teardown_glfw(); }
+	} glfwGuard;
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+
+	ax::Window window({ .width = s_size, .height = s_size, .title = "AxEng RGB texture save test" });
+	ASSERT_NE(window.glfw_handle(), nullptr);
+	ax::WindowTestAccess::initialize(window, s_device);
+
+	ASSERT_TRUE(window.bind_texture(target));
+	ax::DebugShapes::add(ax::Rectangle{
+		.position = { 48.0f, 48.0f },
+		.size = { 16.0f, 16.0f },
+		.fill = s_red,
+		.screenSpace = true,
+	});
+	window.draw_pending();
+	ax::WindowTestAccess::execute(window, screenTarget->view());
+
+	const auto path{ std::filesystem::temp_directory_path() / ("AxEng_rgb_render_target_" + suffix + ".png") };
+	struct FileGuard
+	{
+		std::filesystem::path path;
+		~FileGuard()
+		{
+			std::error_code error{};
+			std::filesystem::remove(path, error);
+		}
+	} fileGuard{ path };
+	ASSERT_EQ(target->save_png(path), ax::Error::Success);
+
+	int width{ 0 };
+	int height{ 0 };
+	std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> decoded{
+		stbi_load(path.string().c_str(), &width, &height, nullptr, 4),
+		&stbi_image_free,
+	};
+	ASSERT_NE(decoded, nullptr);
+	EXPECT_EQ(width, static_cast<int>(s_size));
+	EXPECT_EQ(height, static_cast<int>(s_size));
+
+	const auto pixel{ [&](std::uint32_t x, std::uint32_t y)
+		{
+			const auto offset{ (static_cast<std::size_t>(y) * s_size + x) * 4 };
+			return Pixel{ decoded.get()[offset], decoded.get()[offset + 1], decoded.get()[offset + 2], decoded.get()[offset + 3] };
+		} };
+	EXPECT_EQ(pixel(52, 52), to_pixel(s_red));
+	EXPECT_EQ(pixel(16, 16), (Pixel{ 32, 64, 96, 255 }));
 }
