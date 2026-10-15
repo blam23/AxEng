@@ -8,6 +8,7 @@ namespace ax::lua::bindings
 {
 	bool window_predicate(ax::Application&, sol::state&);
 	void setup_window_bindings(ax::Application&, sol::state&);
+	void setup_window_main_thread_bindings(ax::Application&, sol::state&);
 
 	bool window_embed_predicate(ax::Application&, sol::state&);
 	void setup_window_embed_bindings(ax::Application&, sol::state&);

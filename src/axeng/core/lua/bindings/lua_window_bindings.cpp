@@ -386,12 +386,6 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 			return false;
 		};
 
-	window_table["draw_pending"] =
-		[&app]()
-		{
-			app.window()->draw_pending();
-		};
-
 	window_table["screen_contains_region"] =
 		[&app](float x, float y, float w, float h) -> bool
 		{
@@ -400,6 +394,23 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 
 	auto app_table{ state["app"] };
 	app_table["window"] = window_table;
+
+	setup_window_main_thread_bindings(app, state);
+}
+
+void ax::lua::bindings::setup_window_main_thread_bindings(Application& app, sol::state& state)
+{
+	auto app_table{ state["app"].get<sol::table>() };
+
+	if (app_table["thread"].get<std::string>() != "main")
+		return;
+
+	auto window_table{ app_table["window"].get<sol::table>() };
+	window_table["draw_pending"] =
+		[&app]()
+		{
+			app.window()->draw_pending();
+		};
 }
 
 bool ax::lua::bindings::window_embed_predicate(Application& app, sol::state&)
