@@ -12,7 +12,8 @@
       "class":"scripts/lib/class.lua",
       "runner":"scripts/runner.lua",
       "suite":"scripts/test_suite.lua",
-      "test_lua_user_io_access":"scripts/tests/lua_user_io_access.lua"
+      "test_lua_user_io_access":"scripts/tests/lua_user_io_access.lua",
+      "test_render_to":"scripts/tests/render_to.lua"
    },
    "textures":{
 

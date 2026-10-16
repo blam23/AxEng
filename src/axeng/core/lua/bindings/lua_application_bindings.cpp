@@ -31,6 +31,9 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 		"debug", ax::build::is_debug
 	);
 
+	if (mainThread && app.has_permission(lua::Permission::IO) && !app.project_source_directory().empty())
+		app_table["project_source_directory"] = app.project_source_directory().string();
+
 	setup_user_io_bindings(app, state);
 
 	if (app.has_window())
@@ -69,7 +72,7 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 
 	setup_shared_bindings(app, state, mainThread);
 
-	if (app.has_window())
+	if (app.has_window() && mainThread)
 	{
 		auto on_update_table{ state.create_table() };
 		on_update_table["subscribe"] =

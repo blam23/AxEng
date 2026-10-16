@@ -4,6 +4,7 @@
 
 void ax::lua::libs::register_embedded()
 {
+	load_all_embedded();
 	ax::Resource::register_embedded_resource<ax::lua::Script>("@init", get("@init"));
 	ax::Resource::register_embedded_resource<ax::lua::Script>("@std", get("@std"));
 	ax::Resource::register_embedded_resource<ax::lua::Script>("@compiler_core", get("@compiler_core"));

@@ -245,7 +245,7 @@ int main(int argc, char* argv[])
 		}
 		else
 		{
-			const auto err{ ax::run_from_directory(permissions, out_args, compile ? outDirectory : inDirectory, backendType) };
+			const auto err{ ax::run_from_directory(permissions, out_args, compile ? outDirectory : inDirectory, backendType, inDirectory) };
 			if (err != ax::Error::Success)
 				return RET(err);
 		}

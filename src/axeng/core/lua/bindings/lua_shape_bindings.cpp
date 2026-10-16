@@ -605,21 +605,22 @@ sol::table ax::lua::bindings::create_shape_table(sol::state& state)
 
 	// Draws immediately into the pass; everything passed in a single call is batched together.
 	// Accepts a shape_list, a single shape description or an array of shape descriptions.
-	shapes["draw"] = sol::overload
-	(
-		[](wgpu::RenderPassEncoder& pass, const LuaShapeList& list)
+	shapes["draw"] =
+		[](wgpu::RenderPassEncoder& pass, const sol::object& value)
 		{
-			ax::ShapeRenderer::draw(pass, list.shapes);
-		},
-		[](wgpu::RenderPassEncoder& pass, const sol::table& descriptions)
-		{
-			// Reused between calls to avoid reallocating every frame.
+			if (value.is<LuaShapeList>())
+			{
+				ax::ShapeRenderer::draw(pass, value.as<LuaShapeList>().shapes);
+				return;
+			}
+			if (value.get_type() != sol::type::table)
+				throw sol::error("shapes.draw expects a shape_list or shape description table.");
+
 			static ax::ShapeList scratch;
 			scratch.clear();
-			shapes_from_table(descriptions, scratch);
+			shapes_from_table(value.as<sol::table>(), scratch);
 			ax::ShapeRenderer::draw(pass, scratch);
-		}
-	);
+		};
 
 	shapes["stats"] = &stats_table;
 

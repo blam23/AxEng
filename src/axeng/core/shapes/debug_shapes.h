@@ -24,6 +24,7 @@ namespace ax
 		// Draws and clears the queued shapes.
 		static void flush(wgpu::RenderPassEncoder& pass);
 		static void clear();
-		static const ShapeList& queued();
+		static ShapeList take_queued();
+		static ShapeList queued();
 	};
 }

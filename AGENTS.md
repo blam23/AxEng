@@ -80,6 +80,7 @@ DO NOT Update the README for anything except build changes that are relevant to 
   - Public constants: plain `lower_case`, e.g. `ax::build::is_debug`.
   - **Do not use `kName` constants.** Third-party names like `wgpu::kDepthSliceUndefined` are fine.
 - Everything lives in namespace `ax`. Helpers go in an anonymous namespace in the `.cpp`, and inside it you must qualify `ax::` types.
+- Avoid `sol::overload` in Lua bindings; its overload resolution has significant runtime overhead. Prefer one callback with optional arguments, or explicit argument-count/type dispatch where multiple call forms must be preserved.
 - Only comment code that needs clarification.
 
 ## Gotchas learned the hard way

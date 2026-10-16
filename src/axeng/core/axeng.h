@@ -18,6 +18,13 @@ namespace ax
 	void teardown();
 
 	ax::Error run(const std::vector<std::string>& args, Application&&, wgpu::BackendType backendType);
-	ax::Error run_from_directory(flag_set<lua::Permission> permissions, const std::vector<std::string>& args, std::string_view rootDirectory, wgpu::BackendType backendType = wgpu::BackendType::Undefined);
+	ax::Error run_from_directory
+	(
+		flag_set<lua::Permission> permissions,
+		const std::vector<std::string>& args,
+		std::string_view rootDirectory,
+		wgpu::BackendType backendType = wgpu::BackendType::Undefined,
+		std::string_view sourceDirectory = {}
+	);
 	ax::Error run_from_zip(flag_set<lua::Permission> permissions, const std::vector<std::string>& args, std::string_view zipFile, wgpu::BackendType backendType = wgpu::BackendType::Undefined);
 }

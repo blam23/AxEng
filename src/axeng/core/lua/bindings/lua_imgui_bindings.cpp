@@ -24,7 +24,12 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 		[]() -> bool { return ImGui::GetIO().WantCaptureKeyboard; };
 
 	ui_table["begin_window"] = 
-		[](const char* name) { return ImGui::Begin(name); };
+		[](const char* name, sol::optional<float> width, sol::optional<float> height)
+		{
+			if (width && height)
+				ImGui::SetNextWindowSize(ImVec2(*width, *height), ImGuiCond_FirstUseEver);
+			return ImGui::Begin(name);
+		};
 
 	ui_table["end_window"] = // 'end' is a keyword in lua so these are now postfix'd with _window
 		[]() { ImGui::End(); };
@@ -39,9 +44,11 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 		[]() { return std::pair(ImGui::GetWindowContentRegionMin().x + ImGui::GetWindowPos().x, ImGui::GetWindowContentRegionMin().y + ImGui::GetWindowPos().y); };
 
 	ui_table["image"] = 
-		[](const sol::table& img)
+		[](const sol::table& img, sol::optional<float> width, sol::optional<float> height)
 		{
-			ImGui::Image((ImTextureID)(intptr_t)img["ui_view"], ImVec2(img["width"], img["height"]));
+			const auto imageWidth{ width.value_or(img["width"].get<float>()) };
+			const auto imageHeight{ height.value_or(img["height"].get<float>()) };
+			ImGui::Image((ImTextureID)(intptr_t)img["ui_view"], ImVec2(imageWidth, imageHeight));
 		};
 
 	ui_table["text"] = 
@@ -228,11 +235,10 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 		[]() { ImGui::EndCombo(); };
 
 	ui_table["push_font"] =
-		sol::overload
-		(
-			[](const std::string& name, float size) { ImGui::PushFont(ax::ImGuiHelper::get_font(name), size); },
-			[](const std::string& name) { ImGui::PushFont(ax::ImGuiHelper::get_font(name), 0.0f); }
-		);
+		[](const std::string& name, sol::optional<float> size)
+		{
+			ImGui::PushFont(ax::ImGuiHelper::get_font(name), size.value_or(0.0f));
+		};
 
 	ui_table["pop_font"] =
 		[]() { ImGui::PopFont(); };
@@ -250,17 +256,10 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 		[]() { ImGui::EndTabBar(); };
 
 	ui_table["begin_tab_item"] =
-		sol::overload
-		(
-			[](const char* label, int flags)
-			{
-				return ImGui::BeginTabItem(label, nullptr, flags);
-			},
-			[](const char* label)
-			{
-				return ImGui::BeginTabItem(label);
-			}
-		);
+		[](const char* label, sol::optional<int> flags)
+		{
+			return ImGui::BeginTabItem(label, nullptr, flags.value_or(0));
+		};
 
 	ui_table["end_tab_item"] =
 		[]() { ImGui::EndTabItem(); };
@@ -389,19 +388,43 @@ void ax::lua::bindings::setup_imgui_bindings(sol::state& state)
 		};
 
 	ui_table["draw_rect"] =
-		sol::overload
-		(
-			[](float x, float y, float width, float height, float r, float g, float b, float a)
+		[](float x, float y, float width, float height, sol::variadic_args args)
+		{
+			if (args.size() == 4)
 			{
-				ImDrawList* draw_list = ImGui::GetForegroundDrawList();
-				draw_list->AddRect(ImVec2(x, y), ImVec2(x + width, y + height), IM_COL32(r * 255.f, g * 255.f, b * 255.f, a * 255.f));
-			},
-			[](float x, float y, float width, float height, float rounding, float thickness, float r, float g, float b, float a)
-			{
-				ImDrawList* draw_list = ImGui::GetForegroundDrawList();
-				draw_list->AddRect(ImVec2(x, y), ImVec2(x + width, y + height), IM_COL32(r * 255.f, g * 255.f, b * 255.f, a * 255.f), rounding, 0, thickness);
+				const auto r{ args[0].get<float>() };
+				const auto g{ args[1].get<float>() };
+				const auto b{ args[2].get<float>() };
+				const auto a{ args[3].get<float>() };
+				ImGui::GetForegroundDrawList()->AddRect
+				(
+					ImVec2(x, y),
+					ImVec2(x + width, y + height),
+					IM_COL32(r * 255.f, g * 255.f, b * 255.f, a * 255.f)
+				);
+				return;
 			}
-		);
+			if (args.size() == 6)
+			{
+				const auto rounding{ args[0].get<float>() };
+				const auto thickness{ args[1].get<float>() };
+				const auto r{ args[2].get<float>() };
+				const auto g{ args[3].get<float>() };
+				const auto b{ args[4].get<float>() };
+				const auto a{ args[5].get<float>() };
+				ImGui::GetForegroundDrawList()->AddRect
+				(
+					ImVec2(x, y),
+					ImVec2(x + width, y + height),
+					IM_COL32(r * 255.f, g * 255.f, b * 255.f, a * 255.f),
+					rounding,
+					0,
+					thickness
+				);
+				return;
+			}
+			throw sol::error("ui.draw_rect expects RGBA, or rounding, thickness and RGBA.");
+		};
 
 	ui_table["draw_rect_filled"] =
 		[](float x, float y, float width, float height, float r, float g, float b, float a)

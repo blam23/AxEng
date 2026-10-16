@@ -93,7 +93,7 @@ local function check_and_copy_textures(project, in_directory, out_directory)
         end
         ax.print_table(textures)
         app.res.create_mega_texture("compiler_temp_texture_atlas", textures, 2.0)
-        app.res.save_texture("compiler_temp_texture_atlas", out_directory .. "/texture_atlas.png")
+        app.res.save_texture_io("compiler_temp_texture_atlas", out_directory .. "/texture_atlas.png")
 
         local res = app.res.get_texture_regions("compiler_temp_texture_atlas")
         project.atlas_regions = {}
@@ -249,6 +249,7 @@ local function create_manifest(project, dir, strip_debug_output)
         WINDOW_WIDTH = 1920,
         WINDOW_HEIGHT = 1080,
         WINDOW_VSYNC = project.vsync ~= nil and tostring(project.vsync) or true,
+        WINDOW_RESIZABLE = project.resizable ~= nil and tostring(project.resizable) or "true",
         SCRIPTS = gen_script_text(),
         TEXTURES = gen_textures_text(project),
         TYPES = gen_types_text(project),

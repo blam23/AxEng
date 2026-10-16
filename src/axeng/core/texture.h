@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -27,6 +28,26 @@ namespace ax
 {
 	class SpriteGroup;
 	using rectf = glm::vec4;
+
+	Error encode_png
+	(
+		uint32_t width,
+		uint32_t height,
+		uint32_t channels,
+		const void* pixels,
+		uint32_t bytesPerRow,
+		std::vector<uint8_t>& encoded
+	);
+
+	Error write_png
+	(
+		const std::filesystem::path& path,
+		uint32_t width,
+		uint32_t height,
+		uint32_t channels,
+		const void* pixels,
+		uint32_t bytesPerRow
+	);
 
 	struct SpriteGpuData
 	{
@@ -52,6 +73,7 @@ namespace ax
 		std::size_t activeIndex{};
 		bool allocated{ false };
 		std::uint64_t generation{};
+		std::shared_ptr<Texture> keepAlive{};
 	};
 
 	static_assert(sizeof(glm::vec2) == 2 * sizeof(float));
@@ -77,6 +99,7 @@ namespace ax
 
 		Texture(Badge<TextureManager>, const std::string& name, const std::vector<uint8_t> data, wgpu::Device* device);
 		Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, std::vector<uint8_t> rgbaPixels, wgpu::Device* device);
+		Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, wgpu::Device* device);
 		~Texture();
 
 		const wgpu::Texture& texture() const { return m_texture; }
@@ -99,11 +122,14 @@ namespace ax
 
 		wgpu::Texture m_texture;
 		wgpu::TextureView m_view;
+		wgpu::Device m_device;
 		void* m_stbiPtr{ nullptr };
 		std::vector<uint8_t> m_pixels{};
 		std::map<std::string, rectf> m_regions{};
+		bool m_gpuModified{ false };
 
 		friend class TextureManager;
+		friend class Window;
 
 		uint32_t m_width{ 0 };
 		uint32_t m_height{ 0 };
@@ -119,6 +145,7 @@ namespace ax
 		// Packs all given textures into a single texture stored under `name`.
 		// Sub-texture pixel regions can be queried with Texture::region(descriptor).
 		Error create_texture_atlas(const Texture::Descriptor& name, const std::vector<Texture::Descriptor>& textures, float minPadding = 2.0f);
+		std::unique_ptr<Texture> create_temporary(const std::string& name, std::vector<uint8_t> rgbaPixels, float width, float height);
 
 	private:
 		wgpu::Device* m_device{ nullptr };

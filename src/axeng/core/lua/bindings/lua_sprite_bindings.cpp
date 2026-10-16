@@ -76,44 +76,54 @@ void ax::lua::bindings::setup_sprite_bindings(ax::Application& app, sol::state& 
 			};
 
 		sprite_table["setup"] =
-			sol::overload
+			[useAtlas = app.m_atlasTexture != nullptr]
 			(
-				[useAtlas = app.m_atlasTexture != nullptr](const LuaSprite& handle, const sol::table& texture, float x, float y, float rx, float ry, float rw, float rh)
+				const LuaSprite& handle,
+				const sol::table& texture,
+				float x,
+				float y,
+				sol::variadic_args args
+			)
+			{
+				auto* const sprite{ &handle.get() };
+				if (!texture["valid"])
 				{
-					auto sprite{ &handle.get() };
-					if (texture["valid"])
-					{
-						sprite->tex = texture["ptr"].get<Texture*>();
-						sprite->gpuData.pos.x = x;
-						sprite->gpuData.pos.y = y;
-						sprite->gpuData.useRegion = 1;
-						sprite->gpuData.region = useAtlas
-							? get_texture_region(texture, { rx, ry, rw, rh })
-							: rectf{ rx, ry, rw, rh };
-					}
-					else
-					{
-						spdlog::error("Invalid texture, cannot setup sprite");
-					}
-				},
-				[useAtlas = app.m_atlasTexture != nullptr](const LuaSprite& handle, const sol::table& texture, float x, float y)
-				{
-					auto sprite{ &handle.get() };
-					if (texture["valid"])
-					{
-						sprite->tex = texture["ptr"].get<Texture*>();
-						sprite->gpuData.pos.x = x;
-						sprite->gpuData.pos.y = y;
-						sprite->gpuData.useRegion = useAtlas ? 1 : 0;
-						if (useAtlas)
-							sprite->gpuData.region = get_texture_region(texture);
-					}
-					else
-					{
-						spdlog::error("Invalid texture, cannot setup sprite");
-					}
+					spdlog::error("Invalid texture, cannot setup sprite");
+					return;
 				}
-			);
+
+				auto keepAlive{ get_texture_lease(texture) };
+				if (texture["temp"].get_or(false) && !keepAlive)
+				{
+					spdlog::error("Invalid temporary texture, cannot setup sprite");
+					return;
+				}
+
+				auto* const tex{ texture["ptr"].get<Texture*>() };
+				if (tex == nullptr)
+					return;
+				sprite->tex = tex;
+				sprite->keepAlive = std::move(keepAlive);
+				sprite->gpuData.pos = { x, y };
+				if (args.size() == 0)
+				{
+					sprite->gpuData.useRegion = useAtlas ? 1u : 0u;
+					if (useAtlas)
+						sprite->gpuData.region = get_texture_region(texture);
+					return;
+				}
+				if (args.size() != 4)
+					throw sol::error("sprites.setup expects either no region or four region coordinates.");
+
+				sprite->gpuData.useRegion = 1;
+				const rectf region{
+					args[0].get<float>(),
+					args[1].get<float>(),
+					args[2].get<float>(),
+					args[3].get<float>()
+				};
+				sprite->gpuData.region = useAtlas ? get_texture_region(texture, region) : region;
+			};
 
 		sprite_table["update_position"] =
 			[](const LuaSprite& handle, float x, float y, float z, float r)

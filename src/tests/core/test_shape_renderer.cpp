@@ -4,23 +4,36 @@
 
 #include "axeng/core/lua/bindings/lua_shape_bindings.h"
 #include "axeng/core/lua/bindings/lua_vector_bindings.h"
+#include "axeng/core/application.h"
 #include "axeng/core/shapes/debug_shapes.h"
 #include "axeng/core/shapes/shape_renderer.h"
+#include "axeng/core/texture.h"
+#include "axeng/core/window.h"
 #include "tests/main/log_capture.h"
+
+#include "axeng/external/stb_image.h"
+#include "axeng/external/stb_image_write.h"
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <functional>
+#include <memory>
 #include <numbers>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
 {
 	constexpr std::uint32_t s_size{ 128 };
 	constexpr float s_half_pi{ std::numbers::pi_v<float> * 0.5f };
+	constexpr unsigned char s_sprite_shader[]{
+		#embed "../../../shaders/basic_shader.wgsl"
+	};
 
 	constexpr glm::vec4 s_red{ 1.0f, 0.0f, 0.0f, 1.0f };
 	constexpr glm::vec4 s_green{ 0.0f, 1.0f, 0.0f, 1.0f };
@@ -75,6 +88,136 @@ namespace
 	{
 		return { .viewport = { static_cast<float>(s_size), static_cast<float>(s_size) } };
 	}
+}
+
+namespace ax
+{
+	struct WindowTestAccess
+	{
+		static void initialize(Window& window, const wgpu::Device& device)
+		{
+			window.m_device = device;
+			window.m_queue = device.GetQueue();
+			window.m_surfaceFormat = wgpu::TextureFormat::RGBA8Unorm;
+
+			wgpu::BufferDescriptor uniformDesc{};
+			uniformDesc.size = static_cast<uint64_t>(window.m_uniformStride) * window.m_uniformsCapacity;
+			uniformDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
+			window.m_uniforms = device.CreateBuffer(&uniformDesc);
+
+			wgpu::BufferDescriptor viewportDesc{};
+			viewportDesc.size = 8 * sizeof(float);
+			viewportDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
+			window.m_viewportBuffer = device.CreateBuffer(&viewportDesc);
+
+			std::array<wgpu::BindGroupLayoutEntry, 3> spriteEntries{};
+			spriteEntries[0].binding = 0;
+			spriteEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+			spriteEntries[0].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+			spriteEntries[0].buffer.minBindingSize = ax::SpriteGpuData::gpuDataSize;
+			spriteEntries[1].binding = 1;
+			spriteEntries[1].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+			spriteEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+			spriteEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+			spriteEntries[2].binding = 2;
+			spriteEntries[2].visibility = wgpu::ShaderStage::Fragment;
+			spriteEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+			wgpu::BindGroupLayoutDescriptor spriteLayoutDesc{};
+			spriteLayoutDesc.entryCount = spriteEntries.size();
+			spriteLayoutDesc.entries = spriteEntries.data();
+			window.m_groupLayout = device.CreateBindGroupLayout(&spriteLayoutDesc);
+
+			wgpu::BindGroupLayoutEntry viewportEntry{};
+			viewportEntry.binding = 0;
+			viewportEntry.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+			viewportEntry.buffer.type = wgpu::BufferBindingType::Uniform;
+			viewportEntry.buffer.minBindingSize = 8 * sizeof(float);
+			wgpu::BindGroupLayoutDescriptor viewportLayoutDesc{};
+			viewportLayoutDesc.entryCount = 1;
+			viewportLayoutDesc.entries = &viewportEntry;
+			window.m_globalLayout = device.CreateBindGroupLayout(&viewportLayoutDesc);
+
+			wgpu::BindGroupEntry viewportBinding{};
+			viewportBinding.binding = 0;
+			viewportBinding.buffer = window.m_viewportBuffer;
+			viewportBinding.size = viewportDesc.size;
+			wgpu::BindGroupDescriptor viewportBindDesc{};
+			viewportBindDesc.layout = window.m_globalLayout;
+			viewportBindDesc.entryCount = 1;
+			viewportBindDesc.entries = &viewportBinding;
+			window.m_viewportBindGroup = device.CreateBindGroup(&viewportBindDesc);
+
+			wgpu::SamplerDescriptor samplerDesc{};
+			samplerDesc.magFilter = wgpu::FilterMode::Linear;
+			samplerDesc.minFilter = wgpu::FilterMode::Linear;
+			window.m_linearSampler = device.CreateSampler(&samplerDesc);
+
+			wgpu::ShaderSourceWGSL shaderSource{};
+			shaderSource.code = {
+				reinterpret_cast<const char*>(s_sprite_shader),
+				sizeof(s_sprite_shader),
+			};
+			wgpu::ShaderModuleDescriptor shaderDesc{};
+			shaderDesc.nextInChain = &shaderSource;
+			window.m_shader = device.CreateShaderModule(&shaderDesc);
+		}
+
+		static std::size_t batch_count(const Window& window)
+		{
+			return window.m_pendingDrawBatches.size();
+		}
+
+		static std::size_t batch_shape_count(const Window& window, std::size_t index)
+		{
+			return window.m_pendingDrawBatches[index].shapes.size();
+		}
+
+		static std::size_t batch_texture_count(const Window& window, std::size_t index)
+		{
+			return window.m_pendingDrawBatches[index].textures.size();
+		}
+
+		static bool batch_targets(const Window& window, std::size_t index, const Texture* texture)
+		{
+			return window.m_pendingDrawBatches[index].target == texture;
+		}
+
+		static float batch_shape_x(const Window& window, std::size_t index)
+		{
+			return std::get<Rectangle>(window.m_pendingDrawBatches[index].shapes.front()).position.x;
+		}
+
+		static void execute(Window& window, const wgpu::TextureView& screenView)
+		{
+			for (const auto& batch : window.m_pendingDrawBatches)
+				window.draw_pending_batch(batch, screenView);
+			window.m_pendingDrawBatches.clear();
+		}
+
+		static WindowFrameImageEvent compare_texture(Window& window, Texture& reference)
+		{
+			const auto bytesPerRow{ window.m_width * 4 };
+			wgpu::BufferDescriptor readbackDesc{};
+			readbackDesc.size = static_cast<uint64_t>(bytesPerRow) * window.m_height;
+			readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+			auto readback{ window.m_device.CreateBuffer(&readbackDesc) };
+
+			auto encoder{ window.m_device.CreateCommandEncoder() };
+			wgpu::TexelCopyTextureInfo source{};
+			source.texture = reference.texture();
+			wgpu::TexelCopyBufferInfo destination{};
+			destination.buffer = readback;
+			destination.layout.bytesPerRow = bytesPerRow;
+			destination.layout.rowsPerImage = window.m_height;
+			const wgpu::Extent3D extent{ window.m_width, window.m_height, 1 };
+			encoder.CopyTextureToBuffer(&source, &destination, &extent);
+			const auto command{ encoder.Finish() };
+			window.m_queue.Submit(1, &command);
+
+			Window::FrameImageRequest request{ .reference = &reference };
+			return window.read_frame_image(request, readback, bytesPerRow);
+		}
+	};
 }
 
 #define EXPECT_PIXEL(image, x, y, colour) EXPECT_TRUE(pixel_near(image, { x, y }, to_pixel(colour), 1))
@@ -919,4 +1062,348 @@ TEST_F(ShapeRendererTest, LuaDebugShapesDrawOnFlush)
 	EXPECT_PIXEL(image, 88, 40, s_black);
 	EXPECT_PIXEL(image, 64, 100, s_blue);
 	EXPECT_PIXEL(image, 64, 90, s_black);
+}
+
+class WindowPendingDrawTest : public ShapeRendererTest
+{
+};
+
+TEST_F(WindowPendingDrawTest, ConcurrentTargetBatchesStayIsolated)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+
+	const auto suffix{ std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) };
+	std::vector<std::unique_ptr<ax::Texture>> targets{};
+	for (std::size_t i{}; i < 4; ++i)
+	{
+		targets.push_back(app.textures().create_temporary(
+			"concurrent_target_" + suffix + "_" + std::to_string(i), {},
+			static_cast<float>(s_size), static_cast<float>(s_size)));
+		ASSERT_NE(targets.back(), nullptr);
+	}
+
+	if (!ax::setup_glfw())
+		GTEST_SKIP() << "GLFW could not create a hidden test window";
+	struct GlfwGuard
+	{
+		~GlfwGuard() { ax::teardown_glfw(); }
+	} glfwGuard;
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+
+	ax::Window window({ .width = s_size, .height = s_size, .title = "AxEng concurrent render queue test" });
+	ASSERT_NE(window.glfw_handle(), nullptr);
+	ax::WindowTestAccess::initialize(window, s_device);
+
+	constexpr std::size_t s_batches_per_thread{ 16 };
+	std::array<std::thread, 4> workers{};
+	std::array<bool, 4> submitted{};
+	for (std::size_t worker{}; worker < workers.size(); ++worker)
+	{
+		workers[worker] = std::thread([&, worker]
+		{
+			for (std::size_t i{}; i < s_batches_per_thread; ++i)
+			{
+				ax::Window::PendingDrawBatch batch{};
+				batch.target = targets[worker].get();
+				batch.shapes.push_back(ax::Rectangle{
+					.position = { static_cast<float>(worker), static_cast<float>(i) },
+					.size = { 1.0f, 1.0f },
+					.fill = s_red,
+				});
+				if (!window.submit_pending_draw_batch(std::move(batch)))
+					return;
+			}
+			submitted[worker] = true;
+		});
+	}
+	for (auto& worker : workers)
+		worker.join();
+
+	for (const auto complete : submitted)
+		EXPECT_TRUE(complete);
+	ASSERT_EQ(ax::WindowTestAccess::batch_count(window), workers.size() * s_batches_per_thread);
+	for (std::size_t i{}; i < ax::WindowTestAccess::batch_count(window); ++i)
+	{
+		const auto targetIndex{ static_cast<std::size_t>(ax::WindowTestAccess::batch_shape_x(window, i)) };
+		ASSERT_LT(targetIndex, targets.size());
+		EXPECT_TRUE(ax::WindowTestAccess::batch_targets(window, i, targets[targetIndex].get()));
+		EXPECT_EQ(ax::WindowTestAccess::batch_shape_count(window, i), 1u);
+	}
+}
+
+TEST_F(WindowPendingDrawTest, TemporaryRenderTargetFlushesShapesAndSpritesAndSavesGoldenPng)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+
+	const auto suffix{ std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) };
+	auto target{ app.textures().create_temporary("pending_target_" + suffix, {}, static_cast<float>(s_size), static_cast<float>(s_size)) };
+	ASSERT_NE(target, nullptr);
+	EXPECT_EQ(target->width(), s_size);
+	EXPECT_EQ(target->height(), s_size);
+	EXPECT_NE(target->view(), nullptr);
+
+	std::vector<std::uint8_t> sourcePixels(4 * 4 * 4);
+	for (std::size_t i{ 0 }; i < sourcePixels.size(); i += 4)
+	{
+		sourcePixels[i + 1] = 255;
+		sourcePixels[i + 3] = 255;
+	}
+	auto source{ app.textures().create_temporary("pending_source_" + suffix, std::move(sourcePixels), 4.0f, 4.0f) };
+	ASSERT_NE(source, nullptr);
+
+	auto screenTarget{ app.textures().create_temporary("pending_screen_" + suffix, {}, static_cast<float>(s_size), static_cast<float>(s_size)) };
+	ASSERT_NE(screenTarget, nullptr);
+
+	if (!ax::setup_glfw())
+		GTEST_SKIP() << "GLFW could not create a hidden test window";
+	struct GlfwGuard
+	{
+		~GlfwGuard() { ax::teardown_glfw(); }
+	} glfwGuard;
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+
+	ax::Window window({ .width = s_size, .height = s_size, .title = "AxEng pending draw test" });
+	ASSERT_NE(window.glfw_handle(), nullptr);
+	ax::WindowTestAccess::initialize(window, s_device);
+
+	ax::Window::PendingDrawBatch targetBatch{};
+	targetBatch.target = target.get();
+	ax::SpriteDefinition sourceSprite{};
+	sourceSprite.tex = source.get();
+	sourceSprite.gpuData.pos = { 8.0f, 8.0f };
+	sourceSprite.gpuData.region = { 0.0f, 0.0f, 4.0f, 4.0f };
+	sourceSprite.gpuData.useRegion = 1;
+	sourceSprite.gpuData.screenSpace = 1;
+	targetBatch.textures.push_back(std::move(sourceSprite));
+	targetBatch.shapes.push_back(ax::Rectangle{
+		.position = { 32.0f, 32.0f },
+		.size = { 64.0f, 32.0f },
+		.fill = s_red,
+		.screenSpace = true,
+	});
+	ASSERT_TRUE(window.submit_pending_draw_batch(std::move(targetBatch)));
+
+	ASSERT_EQ(ax::WindowTestAccess::batch_count(window), 1u);
+	EXPECT_TRUE(ax::WindowTestAccess::batch_targets(window, 0, target.get()));
+	EXPECT_EQ(ax::WindowTestAccess::batch_shape_count(window, 0), 1u);
+	EXPECT_EQ(ax::WindowTestAccess::batch_texture_count(window, 0), 1u);
+	EXPECT_TRUE(ax::DebugShapes::queued().empty());
+	ax::WindowTestAccess::execute(window, screenTarget->view());
+
+	const auto saveAndLoad = [&suffix](const ax::Texture& texture, const std::string& name)
+	{
+		const auto path{ std::filesystem::temp_directory_path() / ("AxEng_" + name + "_" + suffix + ".png") };
+		struct FileGuard
+		{
+			std::filesystem::path path;
+			~FileGuard()
+			{
+				std::error_code error{};
+				std::filesystem::remove(path, error);
+			}
+		} fileGuard{ path };
+		EXPECT_EQ(texture.save_png(path), ax::Error::Success);
+
+		int width{ 0 };
+		int height{ 0 };
+		int channels{ 0 };
+		std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> decoded{
+			stbi_load(path.string().c_str(), &width, &height, &channels, 4),
+			&stbi_image_free,
+		};
+		EXPECT_NE(decoded, nullptr);
+		if (!decoded)
+			return std::vector<std::uint8_t>{};
+		EXPECT_EQ(width, static_cast<int>(s_size));
+		EXPECT_EQ(height, static_cast<int>(s_size));
+		auto loadedPixels{ std::vector<std::uint8_t>(decoded.get(), decoded.get() + static_cast<std::size_t>(width) * height * 4) };
+		return loadedPixels;
+	};
+
+	std::vector<std::uint8_t> targetGolden(static_cast<std::size_t>(s_size) * s_size * 4, 0);
+	const auto setGoldenPixel = [&targetGolden](std::uint32_t x, std::uint32_t y, const Pixel& colour)
+	{
+		const auto offset{ (static_cast<std::size_t>(y) * s_size + x) * 4 };
+		for (std::size_t channel{ 0 }; channel < 4; ++channel)
+			targetGolden[offset + channel] = static_cast<std::uint8_t>(colour[channel]);
+	};
+	for (std::uint32_t y{ 8 }; y < 12; ++y)
+		for (std::uint32_t x{ 8 }; x < 12; ++x)
+			setGoldenPixel(x, y, to_pixel(s_green));
+	for (std::uint32_t y{ 32 }; y < 64; ++y)
+		for (std::uint32_t x{ 32 }; x < 96; ++x)
+			setGoldenPixel(x, y, to_pixel(s_red));
+	const auto renderedTarget{ saveAndLoad(*target, "render_target") };
+	EXPECT_TRUE(renderedTarget == targetGolden);
+
+	ax::DebugShapes::add(ax::Rectangle{
+		.position = { 100.0f, 100.0f },
+		.size = { 8.0f, 8.0f },
+		.fill = s_blue,
+		.screenSpace = true,
+	});
+	window.draw_pending();
+	ASSERT_EQ(ax::WindowTestAccess::batch_count(window), 1u);
+	EXPECT_TRUE(ax::WindowTestAccess::batch_targets(window, 0, nullptr));
+	EXPECT_EQ(ax::WindowTestAccess::batch_shape_count(window, 0), 1u);
+	ax::WindowTestAccess::execute(window, screenTarget->view());
+
+	std::vector<std::uint8_t> screenGolden(static_cast<std::size_t>(s_size) * s_size * 4, 0);
+	for (std::uint32_t y{ 100 }; y < 108; ++y)
+		for (std::uint32_t x{ 100 }; x < 108; ++x)
+		{
+			const auto offset{ (static_cast<std::size_t>(y) * s_size + x) * 4 };
+			const auto blue{ to_pixel(s_blue) };
+			for (std::size_t channel{ 0 }; channel < 4; ++channel)
+				screenGolden[offset + channel] = static_cast<std::uint8_t>(blue[channel]);
+		}
+	const auto renderedScreen{ saveAndLoad(*screenTarget, "screen_target") };
+	EXPECT_TRUE(renderedScreen == screenGolden);
+}
+
+TEST_F(WindowPendingDrawTest, SavesRgbLoadedRenderTargetWithRgbaReadback)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+
+	const auto suffix{ std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) };
+	std::vector<std::uint8_t> rgbPixels(static_cast<std::size_t>(s_size) * s_size * 3);
+	for (std::size_t i{ 0 }; i < rgbPixels.size(); i += 3)
+	{
+		rgbPixels[i] = 32;
+		rgbPixels[i + 1] = 64;
+		rgbPixels[i + 2] = 96;
+	}
+
+	std::vector<std::uint8_t> rgbPng{};
+	const auto appendPng = [](void* context, void* data, int size)
+		{
+			auto* output{ static_cast<std::vector<std::uint8_t>*>(context) };
+			const auto* bytes{ static_cast<const std::uint8_t*>(data) };
+			output->insert(output->end(), bytes, bytes + size);
+		};
+	ASSERT_NE(stbi_write_png_to_func(appendPng, &rgbPng, s_size, s_size, 3,
+		rgbPixels.data(), static_cast<int>(s_size * 3)), 0);
+	auto* target{ app.textures().load_from_raw("rgb_render_target_" + suffix, {}, rgbPng) };
+	ASSERT_NE(target, nullptr);
+	EXPECT_EQ(target->width(), s_size);
+	EXPECT_EQ(target->height(), s_size);
+
+	auto screenTarget{ app.textures().create_temporary("rgb_screen_target_" + suffix, {}, static_cast<float>(s_size), static_cast<float>(s_size)) };
+	ASSERT_NE(screenTarget, nullptr);
+
+	if (!ax::setup_glfw())
+		GTEST_SKIP() << "GLFW could not create a hidden test window";
+	struct GlfwGuard
+	{
+		~GlfwGuard() { ax::teardown_glfw(); }
+	} glfwGuard;
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+
+	ax::Window window({ .width = s_size, .height = s_size, .title = "AxEng RGB texture save test" });
+	ASSERT_NE(window.glfw_handle(), nullptr);
+	ax::WindowTestAccess::initialize(window, s_device);
+
+	ax::Window::PendingDrawBatch batch{};
+	batch.target = target;
+	batch.shapes.push_back(ax::Rectangle{
+		.position = { 48.0f, 48.0f },
+		.size = { 16.0f, 16.0f },
+		.fill = s_red,
+		.screenSpace = true,
+	});
+	ASSERT_TRUE(window.submit_pending_draw_batch(std::move(batch)));
+	ax::WindowTestAccess::execute(window, screenTarget->view());
+
+	const auto path{ std::filesystem::temp_directory_path() / ("AxEng_rgb_render_target_" + suffix + ".png") };
+	struct FileGuard
+	{
+		std::filesystem::path path;
+		~FileGuard()
+		{
+			std::error_code error{};
+			std::filesystem::remove(path, error);
+		}
+	} fileGuard{ path };
+	ASSERT_EQ(target->save_png(path), ax::Error::Success);
+
+	int width{ 0 };
+	int height{ 0 };
+	std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> decoded{
+		stbi_load(path.string().c_str(), &width, &height, nullptr, 4),
+		&stbi_image_free,
+	};
+	ASSERT_NE(decoded, nullptr);
+	EXPECT_EQ(width, static_cast<int>(s_size));
+	EXPECT_EQ(height, static_cast<int>(s_size));
+
+	const auto pixel{ [&](std::uint32_t x, std::uint32_t y)
+		{
+			const auto offset{ (static_cast<std::size_t>(y) * s_size + x) * 4 };
+			return Pixel{ decoded.get()[offset], decoded.get()[offset + 1], decoded.get()[offset + 2], decoded.get()[offset + 3] };
+		} };
+	EXPECT_EQ(pixel(52, 52), to_pixel(s_red));
+	EXPECT_EQ(pixel(16, 16), (Pixel{ 32, 64, 96, 255 }));
+}
+
+TEST_F(WindowPendingDrawTest, ComparesTemporaryRenderTargetsUsingGpuReadback)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+
+	const auto suffix{ std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) };
+	auto target{ app.textures().create_temporary("compare_target_" + suffix, {}, static_cast<float>(s_size), static_cast<float>(s_size)) };
+	ASSERT_NE(target, nullptr);
+	auto cpuTarget{ app.textures().create_temporary("compare_cpu_target_" + suffix,
+		std::vector<std::uint8_t>(static_cast<std::size_t>(s_size) * s_size * 4, 0),
+		static_cast<float>(s_size), static_cast<float>(s_size)) };
+	ASSERT_NE(cpuTarget, nullptr);
+
+	if (!ax::setup_glfw())
+		GTEST_SKIP() << "GLFW could not create a hidden test window";
+	struct GlfwGuard
+	{
+		~GlfwGuard() { ax::teardown_glfw(); }
+	} glfwGuard;
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+
+	ax::Window window({ .width = s_size, .height = s_size, .title = "AxEng frame comparison test" });
+	ASSERT_NE(window.glfw_handle(), nullptr);
+	ax::WindowTestAccess::initialize(window, s_device);
+
+	auto comparison{ ax::WindowTestAccess::compare_texture(window, *target) };
+	EXPECT_TRUE(comparison.success);
+	EXPECT_TRUE(comparison.matches);
+
+	ax::Window::PendingDrawBatch batch{};
+	batch.target = target.get();
+	batch.shapes.push_back(ax::Rectangle{
+		.position = { 32.0f, 32.0f },
+		.size = { 32.0f, 32.0f },
+		.fill = s_red,
+		.screenSpace = true,
+	});
+	ASSERT_TRUE(window.submit_pending_draw_batch(std::move(batch)));
+	ax::WindowTestAccess::execute(window, target->view());
+
+	comparison = ax::WindowTestAccess::compare_texture(window, *target);
+	EXPECT_TRUE(comparison.success);
+	EXPECT_TRUE(comparison.matches);
+
+	ax::Window::PendingDrawBatch cpuBatch{};
+	cpuBatch.target = cpuTarget.get();
+	cpuBatch.shapes.push_back(ax::Rectangle{
+		.position = { 32.0f, 32.0f },
+		.size = { 32.0f, 32.0f },
+		.fill = s_red,
+		.screenSpace = true,
+	});
+	ASSERT_TRUE(window.submit_pending_draw_batch(std::move(cpuBatch)));
+	ax::WindowTestAccess::execute(window, cpuTarget->view());
+
+	comparison = ax::WindowTestAccess::compare_texture(window, *cpuTarget);
+	EXPECT_TRUE(comparison.success);
+	EXPECT_TRUE(comparison.matches);
 }

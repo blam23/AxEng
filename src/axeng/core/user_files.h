@@ -60,6 +60,8 @@ namespace ax
         UserFileHandle* open_file(const std::string& filename, const char* mode) noexcept;
         ax::Error close_file(UserFileHandle* handle) noexcept;
 
+        std::optional<std::filesystem::path> get_user_file_path(const std::string& filename) const noexcept;
+
     private:
         ax::Error setup_directory() noexcept;
 

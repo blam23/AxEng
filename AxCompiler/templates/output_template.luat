@@ -11,6 +11,7 @@ manifest = {
         height = %%WINDOW_HEIGHT%%,
         title = "%%NAME%%",
         vsync = %%WINDOW_VSYNC%%,
+        resizable = %%WINDOW_RESIZABLE%%,
         icon = "%%ICON%%",
     },
     %END%
