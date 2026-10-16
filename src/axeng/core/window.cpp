@@ -374,10 +374,96 @@ ax::WindowFrameImageEvent ax::Window::read_frame_image
 		return result;
 	}
 
-	const auto* const referencePixels{ reference.m_stbiPtr
+	std::vector<uint8_t> gpuReferencePixels{};
+	uint32_t referenceChannels{ reference.m_channels };
+	const bool hasCpuPixels{ reference.m_stbiPtr != nullptr || !reference.m_pixels.empty() };
+	const uint8_t* referencePixels{ reference.m_stbiPtr
 		? static_cast<const uint8_t*>(reference.m_stbiPtr)
 		: reference.m_pixels.data() };
-	if (referencePixels == nullptr || reference.m_channels == 0 || reference.m_channels > 4)
+	if (reference.m_gpuModified || !hasCpuPixels)
+	{
+		if (reference.m_device.Get() == nullptr || reference.m_texture.Get() == nullptr)
+		{
+			result.message = "Reference image has no readable GPU texture.";
+			return result;
+		}
+
+		const uint64_t rowBytes{ static_cast<uint64_t>(reference.m_width) * 4 };
+		const uint64_t paddedRowBytes{ (rowBytes + 255) & ~uint64_t{ 255 } };
+		if (paddedRowBytes > std::numeric_limits<uint32_t>::max())
+		{
+			result.message = "Reference image row size exceeds WebGPU limits.";
+			return result;
+		}
+		const uint64_t bufferSize{ paddedRowBytes * reference.m_height };
+
+		wgpu::BufferDescriptor readbackDesc{};
+		readbackDesc.size = bufferSize;
+		readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+		readbackDesc.label = "Frame comparison reference readback";
+		auto referenceReadback{ reference.m_device.CreateBuffer(&readbackDesc) };
+
+		wgpu::CommandEncoderDescriptor encoderDesc{};
+		encoderDesc.label = "Frame comparison reference readback encoder";
+		auto encoder{ reference.m_device.CreateCommandEncoder(&encoderDesc) };
+		wgpu::TexelCopyTextureInfo source{};
+		source.texture = reference.m_texture;
+		wgpu::TexelCopyBufferInfo destination{};
+		destination.buffer = referenceReadback;
+		destination.layout.bytesPerRow = static_cast<uint32_t>(paddedRowBytes);
+		destination.layout.rowsPerImage = reference.m_height;
+		const wgpu::Extent3D extent{ reference.m_width, reference.m_height, 1 };
+		encoder.CopyTextureToBuffer(&source, &destination, &extent);
+		auto command{ encoder.Finish() };
+		reference.m_device.GetQueue().Submit(1, &command);
+
+		struct ReferenceMapResult
+		{
+			std::atomic<bool> complete{ false };
+			std::atomic<bool> succeeded{ false };
+		};
+		const auto mapResult{ std::make_shared<ReferenceMapResult>() };
+		referenceReadback.MapAsync(wgpu::MapMode::Read, 0, bufferSize, wgpu::CallbackMode::AllowSpontaneous,
+			[mapResult](wgpu::MapAsyncStatus status, wgpu::StringView)
+			{
+				mapResult->succeeded.store(status == wgpu::MapAsyncStatus::Success, std::memory_order_relaxed);
+				mapResult->complete.store(true, std::memory_order_release);
+			});
+
+		const auto deadline{ std::chrono::steady_clock::now() + std::chrono::seconds{ 10 } };
+		while (!mapResult->complete.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+		{
+			reference.m_device.Tick();
+			std::this_thread::yield();
+		}
+		if (!mapResult->complete.load(std::memory_order_acquire))
+		{
+			result.message = "Timed out reading back the reference image.";
+			return result;
+		}
+		if (!mapResult->succeeded.load(std::memory_order_relaxed))
+		{
+			result.message = "Failed to map the reference image readback buffer.";
+			return result;
+		}
+
+		const auto* const mapped{ static_cast<const uint8_t*>(referenceReadback.GetConstMappedRange()) };
+		if (mapped == nullptr)
+		{
+			referenceReadback.Unmap();
+			result.message = "Failed to access the reference image readback data.";
+			return result;
+		}
+		gpuReferencePixels.resize(static_cast<size_t>(rowBytes) * reference.m_height);
+		for (uint32_t y{ 0 }; y < reference.m_height; ++y)
+			std::memcpy(gpuReferencePixels.data() + static_cast<size_t>(y) * rowBytes,
+				mapped + static_cast<size_t>(y) * paddedRowBytes, static_cast<size_t>(rowBytes));
+		referenceReadback.Unmap();
+		referencePixels = gpuReferencePixels.data();
+		referenceChannels = 4;
+	}
+
+	if (referencePixels == nullptr || referenceChannels == 0 || referenceChannels > 4)
 	{
 		result.message = "Reference image has no readable pixel data.";
 		return result;
@@ -389,13 +475,13 @@ ax::WindowFrameImageEvent ax::Window::read_frame_image
 	uint32_t maxChannelDifference{ 0 };
 	for (uint64_t i{ 0 }; i < pixelCount; ++i)
 	{
-		const auto* const source{ referencePixels + i * reference.m_channels };
+		const auto* const source{ referencePixels + i * referenceChannels };
 		const std::array<uint8_t, 4> expected
 		{
 			source[0],
-			reference.m_channels <= 2 ? source[0] : source[1],
-			reference.m_channels <= 2 ? source[0] : source[2],
-			reference.m_channels == 2 ? source[1] : reference.m_channels == 4 ? source[3] : uint8_t{ 255 },
+			referenceChannels <= 2 ? source[0] : source[1],
+			referenceChannels <= 2 ? source[0] : source[2],
+			referenceChannels == 2 ? source[1] : referenceChannels == 4 ? source[3] : uint8_t{ 255 },
 		};
 
 		bool pixelDiffers{ false };

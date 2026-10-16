@@ -193,6 +193,30 @@ namespace ax
 				window.draw_pending_batch(batch, screenView);
 			window.m_pendingDrawBatches.clear();
 		}
+
+		static WindowFrameImageEvent compare_texture(Window& window, Texture& reference)
+		{
+			const auto bytesPerRow{ window.m_width * 4 };
+			wgpu::BufferDescriptor readbackDesc{};
+			readbackDesc.size = static_cast<uint64_t>(bytesPerRow) * window.m_height;
+			readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+			const auto readback{ window.m_device.CreateBuffer(&readbackDesc) };
+
+			auto encoder{ window.m_device.CreateCommandEncoder() };
+			wgpu::TexelCopyTextureInfo source{};
+			source.texture = reference.texture();
+			wgpu::TexelCopyBufferInfo destination{};
+			destination.buffer = readback;
+			destination.layout.bytesPerRow = bytesPerRow;
+			destination.layout.rowsPerImage = window.m_height;
+			const wgpu::Extent3D extent{ window.m_width, window.m_height, 1 };
+			encoder.CopyTextureToBuffer(&source, &destination, &extent);
+			const auto command{ encoder.Finish() };
+			window.m_queue.Submit(1, &command);
+
+			Window::FrameImageRequest request{ .reference = &reference };
+			return window.read_frame_image(request, readback, bytesPerRow);
+		}
 	};
 }
 
@@ -1322,4 +1346,64 @@ TEST_F(WindowPendingDrawTest, SavesRgbLoadedRenderTargetWithRgbaReadback)
 		} };
 	EXPECT_EQ(pixel(52, 52), to_pixel(s_red));
 	EXPECT_EQ(pixel(16, 16), (Pixel{ 32, 64, 96, 255 }));
+}
+
+TEST_F(WindowPendingDrawTest, ComparesTemporaryRenderTargetsUsingGpuReadback)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+
+	const auto suffix{ std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) };
+	auto target{ app.textures().create_temporary("compare_target_" + suffix, {}, static_cast<float>(s_size), static_cast<float>(s_size)) };
+	ASSERT_NE(target, nullptr);
+	auto cpuTarget{ app.textures().create_temporary("compare_cpu_target_" + suffix,
+		std::vector<std::uint8_t>(static_cast<std::size_t>(s_size) * s_size * 4, 0),
+		static_cast<float>(s_size), static_cast<float>(s_size)) };
+	ASSERT_NE(cpuTarget, nullptr);
+
+	if (!ax::setup_glfw())
+		GTEST_SKIP() << "GLFW could not create a hidden test window";
+	struct GlfwGuard
+	{
+		~GlfwGuard() { ax::teardown_glfw(); }
+	} glfwGuard;
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+
+	ax::Window window({ .width = s_size, .height = s_size, .title = "AxEng frame comparison test" });
+	ASSERT_NE(window.glfw_handle(), nullptr);
+	ax::WindowTestAccess::initialize(window, s_device);
+
+	auto comparison{ ax::WindowTestAccess::compare_texture(window, *target) };
+	EXPECT_TRUE(comparison.success);
+	EXPECT_TRUE(comparison.matches);
+
+	ax::Window::PendingDrawBatch batch{};
+	batch.target = target.get();
+	batch.shapes.push_back(ax::Rectangle{
+		.position = { 32.0f, 32.0f },
+		.size = { 32.0f, 32.0f },
+		.fill = s_red,
+		.screenSpace = true,
+	});
+	ASSERT_TRUE(window.submit_pending_draw_batch(std::move(batch)));
+	ax::WindowTestAccess::execute(window, target->view());
+
+	comparison = ax::WindowTestAccess::compare_texture(window, *target);
+	EXPECT_TRUE(comparison.success);
+	EXPECT_TRUE(comparison.matches);
+
+	ax::Window::PendingDrawBatch cpuBatch{};
+	cpuBatch.target = cpuTarget.get();
+	cpuBatch.shapes.push_back(ax::Rectangle{
+		.position = { 32.0f, 32.0f },
+		.size = { 32.0f, 32.0f },
+		.fill = s_red,
+		.screenSpace = true,
+	});
+	ASSERT_TRUE(window.submit_pending_draw_batch(std::move(cpuBatch)));
+	ax::WindowTestAccess::execute(window, cpuTarget->view());
+
+	comparison = ax::WindowTestAccess::compare_texture(window, *cpuTarget);
+	EXPECT_TRUE(comparison.success);
+	EXPECT_TRUE(comparison.matches);
 }
