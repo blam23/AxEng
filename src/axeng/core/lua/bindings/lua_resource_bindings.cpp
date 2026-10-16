@@ -67,34 +67,52 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 				};
 		}
 
-		static std::mutex s_temp_textures_mutex;
-		static std::map<std::string, std::shared_ptr<ax::Texture>> s_temp_textures;
-
 		resource_lookup_table["create_temp_texture"] =
 			[&app, &state](const std::string& name, const float width, const float height) -> sol::table
 			{
-				std::lock_guard<std::mutex> lock(s_temp_textures_mutex);
-				auto* text{ s_temp_textures[name].get() };
-				
-				if (text == nullptr)
+				std::lock_guard lock{ app.m_tempTexturesMutex };
+				auto it{ app.m_tempTextures.find(name) };
+				if (it == app.m_tempTextures.end())
 				{
-					s_temp_textures[name] = app.m_textures.create_temporary(name, {}, width, height);
-					text = s_temp_textures[name].get();
+					auto texture{ std::shared_ptr<Texture>{ app.m_textures.create_temporary(name, {}, width, height) } };
+					if (texture)
+					{
+						auto lease{ std::make_shared<LuaTextureLease>(std::move(texture)) };
+						it = app.m_tempTextures.emplace(name, std::move(lease)).first;
+					}
 				}
 
 				auto ret = state.create_table();
+				const auto lease{ it != app.m_tempTextures.end() ? it->second : std::shared_ptr<LuaTextureLease>{} };
 
-				if (text)
+				if (lease)
 				{
+					const auto& text{ lease->texture };
 					ret["temp"] = true;
 					ret["name"] = name;
-					ret["valid"] = true;
-					ret["ptr"] = text;
 					ret["view"] = text->view();
 					ret["ui_view"] = text->imgui_view();
 					ret["width"] = text->width();
 					ret["height"] = text->height();
-					ret["_lease"] = std::make_shared<LuaTextureLease>(LuaTextureLease{ s_temp_textures[name] });
+					ret["_lease"] = lease;
+					auto metatable{ state.create_table() };
+					metatable["__index"] =
+						[lease](sol::table table, sol::object key) -> sol::object
+						{
+							if (key.get_type() != sol::type::string)
+								return sol::make_object(table.lua_state(), sol::nil);
+							const auto field{ key.as<std::string>() };
+							if (field == "valid")
+								return sol::make_object(table.lua_state(), lease->active.load(std::memory_order_relaxed));
+							if (field == "ptr")
+							{
+								if (lease->active.load(std::memory_order_relaxed))
+									return sol::make_object(table.lua_state(), lease->texture.get());
+								return sol::make_object(table.lua_state(), sol::nil);
+							}
+							return sol::make_object(table.lua_state(), sol::nil);
+						};
+					ret[sol::metatable_key] = metatable;
 				}
 				else
 				{
@@ -105,20 +123,23 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 			};
 
 		resource_lookup_table["release_temp_texture"] =
-			[](sol::table tbl) -> bool
+			[&app](sol::table tbl) -> bool
 			{
+				if (!tbl["temp"].get_or(false))
+				{
+					spdlog::warn("Attempted to release a non-temporary texture.");
+					return false;
+				}
 				if (!tbl["valid"])
 				{
 					spdlog::warn("Attempted to release an invalid temporary texture.");
 					return true;
 				}
-				std::lock_guard<std::mutex> lock(s_temp_textures_mutex);
-				if (auto it = s_temp_textures.find(tbl["name"]); it != s_temp_textures.end())
+				std::lock_guard lock{ app.m_tempTexturesMutex };
+				if (auto it = app.m_tempTextures.find(tbl["name"]); it != app.m_tempTextures.end())
 				{
-					s_temp_textures.erase(it);
-					tbl["ptr"] = nullptr;
-					tbl["valid"] = false;
-					tbl["_lease"] = sol::nil;
+					it->second->active.store(false, std::memory_order_relaxed);
+					app.m_tempTextures.erase(it);
 					return true;
 				}
 

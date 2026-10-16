@@ -1,6 +1,7 @@
 #include "axeng/core/application.h"
 
 #include "axeng/core/lua/bindings/lua_application_bindings.h"
+#include "axeng/core/lua/bindings/lua_texture_bindings.h"
 #include "axeng/core/lua/external/lua_lib_loader.h"
 
 ax::Application ax::Application::from_directory
@@ -305,6 +306,13 @@ void ax::Application::cleanup()
 	if (m_window)
 		m_window = nullptr;
 
+	{
+		std::lock_guard lock{ m_tempTexturesMutex };
+		for (const auto& entry : m_tempTextures)
+			entry.second->active.store(false, std::memory_order_relaxed);
+		m_tempTextures.clear();
+	}
+
 	ax::Resource::cleanup_loader(m_loader);
 }
 
@@ -315,7 +323,14 @@ ax::Application::~Application()
 	if (m_loaded)
 		cleanup();
 	else
+	{
 		cleanup_bindings();
+		m_window.reset();
+		std::lock_guard lock{ m_tempTexturesMutex };
+		for (const auto& entry : m_tempTextures)
+			entry.second->active.store(false, std::memory_order_relaxed);
+		m_tempTextures.clear();
+	}
 
 	m_scripts.cleanup({});
 }

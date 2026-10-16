@@ -36,7 +36,18 @@ void ax::lua::bindings::setup_sprite_bindings(ax::Application& app, sol::state& 
 					return;
 				}
 
-				sprite->tex = texture["ptr"].get<Texture*>();
+				auto keepAlive{ get_texture_lease(texture) };
+				if (texture["temp"].get_or(false) && !keepAlive)
+				{
+					spdlog::error("Invalid temporary texture, cannot setup sprite");
+					return;
+				}
+
+				auto* const tex{ texture["ptr"].get<Texture*>() };
+				if (tex == nullptr)
+					return;
+				sprite->tex = tex;
+				sprite->keepAlive = std::move(keepAlive);
 				sprite->gpuData.pos = { x, y };
 				if (args.size() == 0)
 				{

@@ -5,7 +5,9 @@
 std::shared_ptr<ax::Texture> ax::lua::bindings::get_texture_lease(const sol::table& texture)
 {
 	const sol::optional<std::shared_ptr<LuaTextureLease>> lease{ texture["_lease"] };
-	return lease ? (*lease)->texture : std::shared_ptr<ax::Texture>{};
+	return lease && (*lease)->active.load(std::memory_order_relaxed)
+		? (*lease)->texture
+		: std::shared_ptr<ax::Texture>{};
 }
 
 ax::rectf ax::lua::bindings::get_texture_region(const sol::table& texture)

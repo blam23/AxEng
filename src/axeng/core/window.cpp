@@ -252,7 +252,7 @@ bool ax::Window::capture_next_frame(const std::filesystem::path& path)
 	return true;
 }
 
-bool ax::Window::compare_next_frame(Texture& reference)
+bool ax::Window::compare_next_frame(Texture& reference, std::shared_ptr<Texture> referenceLease)
 {
 	if (!m_surfaceSupportsCopySource)
 		return false;
@@ -261,7 +261,7 @@ bool ax::Window::compare_next_frame(Texture& reference)
 	if (m_frameImageRequest.has_value())
 		return false;
 
-	m_frameImageRequest = FrameImageRequest{ .reference = &reference };
+	m_frameImageRequest = FrameImageRequest{ .reference = &reference, .referenceLease = std::move(referenceLease) };
 	return true;
 }
 
@@ -1796,20 +1796,6 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		}
 		uiPass.End();
 
-		if (frameImageRequest && frameImageReadback.Get() != nullptr)
-		{
-			wgpu::TexelCopyTextureInfo source{};
-			source.texture = surfaceTexture.texture;
-			source.aspect = wgpu::TextureAspect::All;
-			wgpu::TexelCopyBufferInfo destination{};
-			destination.buffer = frameImageReadback;
-			destination.layout.bytesPerRow = frameImageBytesPerRow;
-			destination.layout.rowsPerImage = m_height;
-			const wgpu::Extent3D extent{ m_width, m_height, 1 };
-			encoder.CopyTextureToBuffer(&source, &destination, &extent);
-			frameImageCopyQueued = true;
-		}
-
 		// Submit commands to GPU
 		{
 			PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, finalise);
@@ -1831,6 +1817,27 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			}
 			for (const auto& batch : pendingBatches)
 				draw_pending_batch(batch, surfaceView);
+
+			if (frameImageRequest && frameImageReadback.Get() != nullptr)
+			{
+				wgpu::TexelCopyTextureInfo source{};
+				source.texture = surfaceTexture.texture;
+				source.aspect = wgpu::TextureAspect::All;
+				wgpu::TexelCopyBufferInfo destination{};
+				destination.buffer = frameImageReadback;
+				destination.layout.bytesPerRow = frameImageBytesPerRow;
+				destination.layout.rowsPerImage = m_height;
+				const wgpu::Extent3D extent{ m_width, m_height, 1 };
+				wgpu::CommandEncoderDescriptor copyEncoderDesc{};
+				copyEncoderDesc.label = "frame image copy encoder";
+				auto copyEncoder{ m_device.CreateCommandEncoder(&copyEncoderDesc) };
+				copyEncoder.CopyTextureToBuffer(&source, &destination, &extent);
+				wgpu::CommandBufferDescriptor copyBufferDesc{};
+				copyBufferDesc.label = "frame image copy command";
+				auto copyCommand{ copyEncoder.Finish(&copyBufferDesc) };
+				m_queue.Submit(1, &copyCommand);
+				frameImageCopyQueued = true;
+			}
 
 			m_surface.Present();
 

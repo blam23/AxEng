@@ -44,6 +44,10 @@ namespace
 		if (!texture["valid"])
 			throw sol::error("Invalid texture, cannot render");
 
+		const auto keepAlive{ ax::lua::bindings::get_texture_lease(texture) };
+		if (texture["temp"].get_or(false) && !keepAlive)
+			throw sol::error("Invalid temporary texture, cannot render");
+
 		auto* const tex{ texture["ptr"].get<ax::Texture*>() };
 		if (tex == nullptr || tex->view().Get() == nullptr || tex->width() == 0 || tex->height() == 0
 			|| tex == canvas.batch.target)
@@ -100,7 +104,7 @@ namespace
 
 		ax::SpriteDefinition sprite{};
 		sprite.tex = tex;
-		sprite.keepAlive = ax::lua::bindings::get_texture_lease(texture);
+		sprite.keepAlive = keepAlive;
 		sprite.gpuData.pos = { x, y };
 		sprite.gpuData.region = region;
 		sprite.gpuData.useRegion = 1u;
@@ -146,8 +150,15 @@ namespace
 			return;
 		}
 
-		auto* const tex{ texture["ptr"].get<ax::Texture*>() };
 		const auto keepAlive{ ax::lua::bindings::get_texture_lease(texture) };
+		if (texture["temp"].get_or(false) && !keepAlive)
+		{
+			spdlog::error("Invalid temporary texture, cannot render");
+			return;
+		}
+		auto* const tex{ texture["ptr"].get<ax::Texture*>() };
+		if (tex == nullptr)
+			return;
 		auto region{ ax::rectf{} };
 		auto hasRegion{ useAtlas };
 		float rotation{};
@@ -316,8 +327,11 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 		{
 			if (!reference["valid"])
 				return false;
+			const auto keepAlive{ ax::lua::bindings::get_texture_lease(reference) };
+			if (reference["temp"].get_or(false) && !keepAlive)
+				return false;
 			auto* const texture{ reference["ptr"].get<Texture*>() };
-			return texture != nullptr && app.window()->compare_next_frame(*texture);
+			return texture != nullptr && app.window()->compare_next_frame(*texture, keepAlive);
 		};
 
 	if (app.has_permission(lua::Permission::IO))
@@ -487,6 +501,12 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 				return false;
 			}
 
+			const auto targetLease{ ax::lua::bindings::get_texture_lease(texture) };
+			if (texture["temp"].get_or(false) && !targetLease)
+			{
+				spdlog::error("Invalid temporary texture, cannot render to it");
+				return false;
+			}
 			auto* const target{ texture["ptr"].get<Texture*>() };
 			if (target == nullptr || target->texture().Get() == nullptr || target->view().Get() == nullptr
 				|| target->width() == 0 || target->height() == 0)
@@ -497,7 +517,7 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 
 			auto canvas{ std::make_shared<LuaRenderCanvas>() };
 			canvas->batch.target = target;
-			canvas->batch.targetLease = lua::bindings::get_texture_lease(texture);
+			canvas->batch.targetLease = targetLease;
 			const auto result{ callback(canvas) };
 			canvas->active = false;
 			if (!result.valid())

@@ -33,6 +33,11 @@
 
 namespace ax
 {
+	namespace lua::bindings
+	{
+		struct LuaTextureLease;
+	}
+
 	class Application final
 	{
 	public:
@@ -139,5 +144,7 @@ namespace ax
 		UserFileManager m_userFileManager;
 
 		std::map<std::string, ConditionalBinding> m_conditionalBindings;
+		std::mutex m_tempTexturesMutex{};
+		std::map<std::string, std::shared_ptr<lua::bindings::LuaTextureLease>> m_tempTextures{};
 	};
 }

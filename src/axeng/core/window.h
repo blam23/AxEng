@@ -133,7 +133,7 @@ namespace ax
 		}
 
 		bool capture_next_frame(const std::filesystem::path& path);
-		bool compare_next_frame(Texture& reference);
+		bool compare_next_frame(Texture& reference, std::shared_ptr<Texture> referenceLease = {});
 
 		wgpu::Device& device() noexcept { return m_device; }
 		const wgpu::Device& device() const noexcept { return m_device; }
@@ -283,6 +283,7 @@ namespace ax
 		struct FrameImageRequest
 		{
 			Texture* reference{ nullptr };
+			std::shared_ptr<Texture> referenceLease{};
 			std::filesystem::path outputPath{};
 		};
 		std::mutex m_frameImageRequestMutex{};
