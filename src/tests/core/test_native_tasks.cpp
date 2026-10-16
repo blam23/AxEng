@@ -1,8 +1,6 @@
 #include <gtest/gtest.h>
 
 #include "axeng/core/native_tasks.h"
-#include "axeng/core/lua/bindings/lua_noise_bindings.h"
-#include "axeng/core/lua/bindings/lua_vector_bindings.h"
 #include "tests/main/log_capture.h"
 
 #include <chrono>
@@ -13,9 +11,6 @@ namespace
 {
 	constexpr unsigned char s_std[]{
 		#embed "../../axeng/core/lua/external/std.lua"
-	};
-	constexpr unsigned char s_generator[]{
-		#embed "../../../tower_mancer/scripts/generate_chunk.lua"
 	};
 
 	std::string text(const unsigned char* data, std::size_t size)
@@ -156,19 +151,33 @@ TEST_F(NativeTaskTests, CachesTaskModulesAndImportsInWorkerState)
 	}
 }
 
-TEST_F(NativeTaskTests, ExecutesCompiledProjectBytecode)
+TEST_F(NativeTaskTests, ExecutesCompiledBytecodeInWorker)
 {
+	const std::string source{ R"(
+		return function(r, task)
+			assert(app.thread == "task")
+			local values = bg.number_buffer(2)
+			values:set(1, r.value)
+			values:set(2, r.value * 2)
+			return { values = values }
+		end
+	)" };
 	sol::state compiler;
 	compiler.open_libraries();
-	const auto loaded{ compiler.load(text(s_generator, sizeof(s_generator)), "generate_chunk") };
+	const auto loaded{ compiler.load(source, "compiled_task") };
 	ASSERT_TRUE(loaded.valid());
 	sol::protected_function dump{ compiler["string"]["dump"] };
 	const auto bytecode{ dump(loaded.get<sol::protected_function>()).get<std::string>() };
-	start({ { "generate_chunk", bytecode } });
-	auto task{ m_service->submit(m_worker, "generate_chunk", { { "cx", std::int64_t{ 0 } }, { "cy", std::int64_t{ 0 } } }) };
+	start({ { "compiled_task", bytecode } });
+	auto task{ m_service->submit(m_worker, "compiled_task", { { "value", std::int64_t{ 21 } } }) };
 	ASSERT_TRUE(await_task(task));
 	ASSERT_EQ(task->status(), "succeeded") << task->error();
-	EXPECT_EQ(std::get<std::shared_ptr<ax::SpriteBuffer>>(task->take_result().at("sprites"))->size(), 1024);
+	const auto result{ task->take_result() };
+	const auto values{ std::get<std::shared_ptr<ax::NumberBuffer>>(result.at("values")) };
+	EXPECT_TRUE(values->sealed());
+	EXPECT_EQ(values->size(), 2);
+	EXPECT_DOUBLE_EQ(values->get(1), 21);
+	EXPECT_DOUBLE_EQ(values->get(2), 42);
 }
 
 TEST_F(NativeTaskTests, CancellationQueueLimitsAndShutdownAreNonBlocking)
