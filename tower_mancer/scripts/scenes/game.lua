@@ -14,9 +14,19 @@ local grass_tiles = {}
 
 local chunks = {}
 local chunk_lookup = {}
-local chunk_size = 1024
+local chunk_size = chunk.size
 local max_resident_chunks = 160
 local next_order = 0
+
+local function tilemap_lod_for_zoom(zoom)
+    if zoom >= 2 then return 1024 end
+    if zoom >= 0.75 then return 512 end
+    return 256
+end
+
+local function enemy_detail_for_zoom(zoom)
+    return zoom >= 0.75
+end
 
 function game:stop()
     for _, c in ipairs(chunks) do c:release() end
@@ -84,18 +94,22 @@ function game:update_chunks()
     local min_y = math.floor((top - 30) / chunk_size)
     local max_x = math.floor((right + 30) / chunk_size)
     local max_y = math.floor((bottom + 30) / chunk_size)
+    local tilemap_lod = tilemap_lod_for_zoom(camera.zoom)
+    local enemy_high_detail = enemy_detail_for_zoom(camera.zoom)
     local cx = math.floor(camera.position.x / chunk_size)
     local cy = math.floor(camera.position.y / chunk_size)
 
     local retiring = {}
     for _, c in ipairs(chunks) do
-        c.retiring = c.x < min_x - 2 or c.x > max_x + 2 or c.y < min_y - 2 or c.y > max_y + 2
+        c.retiring = c.status == "releasing"
+            or c.x < min_x - 2 or c.x > max_x + 2
+            or c.y < min_y - 2 or c.y > max_y + 2
         if c.retiring then
             c:hide()
             retiring[#retiring + 1] = c
         end
     end
-    -- Release only one distant chunk per frame, amortizing enemy/resource teardown.
+    -- Advance one retiring chunk by a bounded enemy budget each frame.
     if #retiring > 0 then
         table.sort(retiring, function(a, b)
             local da = (a.x - cx) ^ 2 + (a.y - cy) ^ 2
@@ -104,10 +118,17 @@ function game:update_chunks()
             return a.order < b.order
         end)
         local expired = retiring[1]
-        expired:release()
-        chunk_lookup[expired.x .. ":" .. expired.y] = nil
-        for i, c in ipairs(chunks) do
-            if c == expired then table.remove(chunks, i); break end
+        local key = expired.x .. ":" .. expired.y
+        if chunk_lookup[key] == expired then
+            chunk_lookup[key] = nil
+        end
+        if expired:release(32) then
+            if chunk_lookup[key] == expired then
+                chunk_lookup[key] = nil
+            end
+            for i, c in ipairs(chunks) do
+                if c == expired then table.remove(chunks, i); break end
+            end
         end
     end
 
@@ -133,22 +154,36 @@ function game:update_chunks()
         local position = missing[i]
         next_order = next_order + 1
         local c = chunk:new(position.x, position.y, next_order)
-        c:setup(self, 250)
+        c:setup(self, 25)
         chunks[#chunks + 1] = c
         chunk_lookup[c.x .. ":" .. c.y] = c
     end
 
     local pending = {}
     local staging = {}
+    local tile_lod_candidates = {}
+    local lod_candidates = {}
     local outstanding = 0
     for _, c in ipairs(chunks) do
         c.desired_visible = not c.retiring and c:onscreen()
-        if not c.retiring then c:poll() end
+        if not c.retiring then
+            c:set_tilemap_lod(tilemap_lod)
+            if c.desired_visible then
+                c.enemies:set_detail(enemy_high_detail)
+            end
+            c:poll()
+        end
         c.priority = c.desired_visible and 0 or
-            (app.window.screen_contains_region(c.x * 1024 - 1024, c.y * 1024 - 1024, 3072, 3072) and 1 or 2)
+            (app.window.screen_contains_region(
+                c.x * chunk_size - chunk_size, c.y * chunk_size - chunk_size,
+                chunk_size * 3, chunk_size * 3
+            ) and 1 or 2)
         c.distance = (c.x - cx) ^ 2 + (c.y - cy) ^ 2
-        if c.status == "staging" then
-            c.terrain:set_staging(c.desired_visible, math.floor(c.distance))
+        if c.desired_visible and c:needs_tilemap_lod() then
+            tile_lod_candidates[#tile_lod_candidates + 1] = c
+        end
+        if c.desired_visible and c.enemies.lod_cursor then
+            lod_candidates[#lod_candidates + 1] = c
         end
         if not c.retiring and c.status == "pending" then
             pending[#pending + 1] = c
@@ -165,6 +200,33 @@ function game:update_chunks()
     end
     table.sort(pending, nearer)
     table.sort(staging, nearer)
+    table.sort(tile_lod_candidates, nearer)
+    table.sort(lod_candidates, nearer)
+
+    if #tile_lod_candidates > 0 then
+        tile_lod_candidates[1]:process_tilemap_lod()
+    end
+
+    local lod_budget = 8
+    local lod_deadline = app.clock() + 0.0005
+    local lod_cursor = self.lod_chunk_cursor or 1
+    local lod_idle = 0
+    while #lod_candidates > 0
+        and lod_budget > 0
+        and lod_idle < #lod_candidates
+        and app.clock() < lod_deadline do
+        if lod_cursor > #lod_candidates then lod_cursor = 1 end
+        local processed = lod_candidates[lod_cursor].enemies:process_lod_changes(1, lod_deadline)
+        if processed > 0 then
+            lod_budget = lod_budget - processed
+            lod_idle = 0
+        else
+            lod_idle = lod_idle + 1
+        end
+        lod_cursor = lod_cursor % #lod_candidates + 1
+    end
+    self.lod_chunk_cursor = lod_cursor
+
     -- Keep the submission window small so camera changes can reprioritize unsent work.
     local submissions = math.min(2 - outstanding, 2 - bg.outstanding())
     for i = 1, math.min(#pending, submissions) do pending[i]:request() end
