@@ -9,10 +9,48 @@ end
 
 math.randomseed(0574355)
 
+local spike_stddev_multiplier = 3.0
+
+local function parse_arguments()
+    local requested_tests = {}
+    local index = 1
+
+    while index <= #args do
+        local argument = args[index]
+        local test_value = argument:match("^%-%-test=(.+)$")
+        if argument == "--test" then
+            index = index + 1
+            local name = args[index]
+            if not name or name:sub(1, 2) == "--" then
+                return nil, "--test requires a test name."
+            end
+            table.insert(requested_tests, name)
+        elseif test_value then
+            table.insert(requested_tests, test_value)
+        elseif argument ~= "--" then
+            return nil, "Unknown stress runner argument '" .. argument .. "'."
+        end
+        index = index + 1
+    end
+
+    return requested_tests
+end
+
+local requested_tests, argument_error = parse_arguments()
+if argument_error then
+    log.error(argument_error)
+    log.info("Usage: --test <name> [--test <name> ...]")
+    return error_code.InvalidConfiguration
+end
+
 local tests = {}
 local test_names = {}
 local test_index = 0
 local start_time = 0
+local frame_times = {}
+local frame_capture_active = false
+local skip_first_frame = false
+local active_test = nil
 
 local scripts = manifest.scripts
 for test_name, _ in pairs(scripts) do
@@ -22,17 +60,128 @@ for test_name, _ in pairs(scripts) do
 end
 
 table.sort(test_names)
+local available_tests = {}
 for _, test_name in ipairs(test_names) do
-    table.insert(tests, ax.import(test_name))
-    tests[#tests].name = test_name
-    print("Found test: " .. test_name)
+    available_tests[test_name] = true
+end
+
+local selected_tests = {}
+for _, requested_name in ipairs(requested_tests) do
+    local test_name = requested_name:match("^test_") and requested_name or "test_" .. requested_name
+    if not available_tests[test_name] then
+        log.error("Unknown stress test '" .. requested_name .. "'.")
+        log.info("Available tests: " .. table.concat(test_names, ", "))
+        return error_code.InvalidConfiguration
+    end
+    selected_tests[test_name] = true
+end
+
+for _, test_name in ipairs(test_names) do
+    if #requested_tests == 0 or selected_tests[test_name] then
+        table.insert(tests, ax.import(test_name))
+        tests[#tests].name = test_name
+        print("Found test: " .. test_name)
+    end
 end
 local test_count = #tests
 
-print("Total tests found: " .. test_count)
+print(string.format("Total tests selected: %d of %d", test_count, #test_names))
+print(string.format("Statistical spike cutoff: mean + %.2f standard deviations", spike_stddev_multiplier))
 
 local image_failures = 0
 local pending_image_mismatch = nil
+
+app.on_update.subscribe(function(delta)
+    if not frame_capture_active then return end
+    if skip_first_frame then
+        skip_first_frame = false
+        return
+    end
+    if active_test and active_test.frame_sample_limit and #frame_times >= active_test.frame_sample_limit then
+        return
+    end
+    if type(delta) ~= "number" or not (delta >= 0 and delta < math.huge) then
+        log.error("Stress runner received an invalid frame delta.")
+        return
+    end
+    frame_times[#frame_times + 1] = delta
+end)
+
+local function report_frame_times(test_name)
+    local sample_count = #frame_times
+    if sample_count == 0 then
+        log.warn(string.format("Test (%s) produced no frame-time samples.", test_name))
+        return
+    end
+
+    local sorted_times = {}
+    local total_time = 0
+    for i, frame_time in ipairs(frame_times) do
+        sorted_times[i] = frame_time
+        total_time = total_time + frame_time
+    end
+    table.sort(sorted_times)
+
+    local mean = total_time / sample_count
+    local variance = 0
+    for _, frame_time in ipairs(frame_times) do
+        local difference = frame_time - mean
+        variance = variance + difference * difference
+    end
+    local standard_deviation = math.sqrt(variance / sample_count)
+    local median = sample_count % 2 == 1
+        and sorted_times[(sample_count + 1) / 2]
+        or (sorted_times[sample_count / 2] + sorted_times[sample_count / 2 + 1]) / 2
+
+    local absolute_deviations = {}
+    for i, frame_time in ipairs(frame_times) do
+        absolute_deviations[i] = math.abs(frame_time - median)
+    end
+    table.sort(absolute_deviations)
+    local mad = sample_count % 2 == 1
+        and absolute_deviations[(sample_count + 1) / 2]
+        or (absolute_deviations[sample_count / 2] + absolute_deviations[sample_count / 2 + 1]) / 2
+
+    local spike_threshold = mean + spike_stddev_multiplier * standard_deviation
+
+    local spike_samples = {}
+    for i, frame_time in ipairs(frame_times) do
+        local score = standard_deviation > 0 and (frame_time - mean) / standard_deviation or 0
+        if frame_time > spike_threshold then
+            spike_samples[#spike_samples + 1] = string.format(
+                "%d (%.2f ms, z=%.2f)",
+                i,
+                frame_time * 1000,
+                score
+            )
+        end
+    end
+
+    log.warn(string.format(
+        "Test (%s) frame times: %d samples, mean %.2f ms, std dev %.2f ms, median %.2f ms, "
+            .. "MAD %.2f ms, p95 %.2f ms, p99 %.2f ms, min %.2f ms, max %.2f ms",
+        test_name,
+        sample_count,
+        mean * 1000,
+        standard_deviation * 1000,
+        median * 1000,
+        mad * 1000,
+        sorted_times[math.ceil(sample_count * 0.95)] * 1000,
+        sorted_times[math.ceil(sample_count * 0.99)] * 1000,
+        sorted_times[1] * 1000,
+        sorted_times[sample_count] * 1000
+    ))
+    log.warn(string.format(
+        "Test (%s) spike rule: mean + %.2f x std dev; boundary %.2f ms; %d spike(s)",
+        test_name,
+        spike_stddev_multiplier,
+        spike_threshold * 1000,
+        #spike_samples
+    ))
+    if #spike_samples > 0 then
+        log.info("Spike samples: " .. table.concat(spike_samples, ", "))
+    end
+end
 
 app.window.on_frame_image.subscribe(function(success, compared, matches, differing_pixels, pixel_count, max_difference, message, image_data)
     local test_name = tests[test_index].name
@@ -135,18 +284,29 @@ function start_next()
     local test = tests[test_index]
 
     test.on_complete:subscribe(function(tick_time)
+        frame_capture_active = false
         local duration = os.clock() - start_time
+        report_frame_times(test.name)
         test:teardown()
 
         log.warn(string.format("Test %d (%s) os time: %.4f seconds", test_index, test.name, duration))
         log.warn(string.format("Test %d (%s) tick time: %.4f seconds", test_index, test.name, tick_time))
+
+        if test.skip_image_comparison then
+            log.info("Skipping frame image comparison for " .. test.name .. ".")
+            app.call_deferred(check_next)
+            return
+        end
 
         local reference = app.res.get_texture("reference_" .. test.name)
         local queued
         if reference.valid then
             queued = app.window.compare_next_frame(reference)
         elseif type(app.window.capture_next_frame_io) == "function" then
-            queued = app.window.capture_next_frame_io("assets/reference/" .. test.name .. ".png")
+            queued = app.project_source_directory
+                and app.window.capture_next_frame_io(
+                    app.project_source_directory .. "/assets/reference/" .. test.name .. ".png"
+                )
         else
             log.error("No reference image for " .. test.name .. " and frame capture requires IO permission.")
         end
@@ -159,8 +319,12 @@ function start_next()
 
     print("Starting test: " .. test.name)
 
+    frame_times = {}
+    active_test = test
     test:setup()
     start_time = os.clock()
+    skip_first_frame = true
+    frame_capture_active = true
     test:run()
 end
 
@@ -169,7 +333,7 @@ function check_next()
         start_next()
     else
         if image_failures == 0 then
-            log.info("All tests completed and reference images matched.")
+            log.info("All selected tests completed with no image-comparison failures.")
         else
             log.error("Stress tests completed with " .. image_failures .. " frame image failure(s).")
         end

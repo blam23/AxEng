@@ -17,16 +17,22 @@
       "test_shapes_retained":"scripts/tests/shapes_retained.lua",
       "test_shapes_immediate":"scripts/tests/shapes_immediate.lua",
       "test_render_to_many":"scripts/tests/render_to_many.lua",
-      "test_render_to_concurrent":"scripts/tests/render_to_concurrent.lua"
+      "test_render_to_concurrent":"scripts/tests/render_to_concurrent.lua",
+      "test_lod_transition":"scripts/tests/lod_transition.lua",
+      "test_tilemap_lod":"scripts/tests/tilemap_lod.lua",
+      "test_chunk_streaming":"scripts/tests/chunk_streaming.lua"
    },
    "textures":{
       "test":"assets/test.png",
       "reference_test_batch_update":"assets/reference/test_batch_update.png",
+      "reference_test_chunk_streaming":"assets/reference/test_chunk_streaming.png",
       "reference_test_render_to_concurrent":"assets/reference/test_render_to_concurrent.png",
+      "reference_test_lod_transition":"assets/reference/test_lod_transition.png",
       "reference_test_render_to_many":"assets/reference/test_render_to_many.png",
       "reference_test_shapes_immediate":"assets/reference/test_shapes_immediate.png",
       "reference_test_shapes_retained":"assets/reference/test_shapes_retained.png",
-      "reference_test_single_update":"assets/reference/test_single_update.png"
+      "reference_test_single_update":"assets/reference/test_single_update.png",
+      "reference_test_tilemap_lod":"assets/reference/test_tilemap_lod.png"
    },
    "vsync":false,
    "resizable":false

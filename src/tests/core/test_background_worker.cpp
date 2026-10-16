@@ -284,3 +284,32 @@ TEST(BackgroundWorkerTests, ProcessesMultipleQueuedTasks)
 	worker.stop();
 	EXPECT_EQ(taskRuns.load(), 2);
 }
+
+TEST(BackgroundWorkerTests, ResultOutlivesWorkerAndCallbackCanDropIt)
+{
+	std::unique_ptr<BackgroundTaskResult> retained;
+	{
+		BackgroundWorker worker{ false, {} };
+		std::promise<void> completed;
+		auto future{ completed.get_future() };
+		auto first{ worker.create() };
+		first->set_task([]() { return Error::Success; });
+		first->set_success([](ResultPtr) {});
+		auto second{ worker.create() };
+		second->set_task([]() { return Error::Success; });
+		second->set_success([&](ResultPtr result)
+		{
+			retained = std::move(result);
+			completed.set_value();
+		});
+		worker.start({});
+		worker.enqueue(first);
+		worker.enqueue(second);
+		ASSERT_EQ(future.wait_for(callbackTimeout), std::future_status::ready);
+		worker.stop();
+	}
+	ASSERT_NE(retained, nullptr);
+	EXPECT_TRUE(retained->is_valid());
+	EXPECT_EQ(retained->get_error(), Error::Success);
+	retained.reset();
+}

@@ -10,6 +10,7 @@
 #include "axeng/core/lua/bindings/lua_user_io_bindings.h"
 #include "axeng/core/lua/bindings/lua_window_bindings.h"
 #include "spdlog/spdlog.h"
+#include <chrono>
 
 void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::state& state, bool mainThread)
 {
@@ -18,6 +19,10 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 
 	app_table["thread"] = mainThread ? "main" : "background";
 	app_table["on_main_thread"] = [mainThread]() { return mainThread; };
+	app_table["clock"] = []()
+	{
+		return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	};
 
 	// Describes how the engine executable was built (not the project's build.json config).
 	app_table["engine_build"] = state.create_table_with

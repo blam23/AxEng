@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include "axeng/core/texture.h"
+#include "axeng/core/retained_sprites.h"
 
 #include <array>
 #include <cstring>
@@ -79,7 +80,8 @@ protected:
 	}
 
 	static std::vector<Pixel> render(const std::vector<Pixel>& pixels, std::uint32_t width,
-		std::uint32_t height, const std::vector<ax::SpriteGpuData>& sprites, const char* entry = "fs_main")
+		std::uint32_t height, const std::vector<ax::SpriteGpuData>& sprites, const char* entry = "fs_main",
+		wgpu::Buffer retained = nullptr)
 	{
 		wgpu::ShaderSourceWGSL source{};
 		source.code = { reinterpret_cast<const char*>(s_shader), sizeof(s_shader) };
@@ -148,8 +150,9 @@ protected:
 		wgpu::BufferDescriptor bufferDesc{};
 		bufferDesc.size = sprites.size() * sizeof(ax::SpriteGpuData);
 		bufferDesc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
-		const auto spriteBuffer{ s_device.CreateBuffer(&bufferDesc) };
-		s_device.GetQueue().WriteBuffer(spriteBuffer, 0, sprites.data(), bufferDesc.size);
+		const auto spriteBuffer{ retained ? retained : s_device.CreateBuffer(&bufferDesc) };
+		if (!retained)
+			s_device.GetQueue().WriteBuffer(spriteBuffer, 0, sprites.data(), bufferDesc.size);
 		const std::array<float, 8> camera{ s_size, s_size, 0, 0, 0, 0, 1, 0 };
 		bufferDesc.size = sizeof(camera);
 		bufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
@@ -229,6 +232,36 @@ protected:
 	static inline wgpu::Instance s_instance{};
 	static inline wgpu::Device s_device{};
 };
+
+TEST_F(SpriteShaderTest, RetainedUploadMatchesDynamicAtlasTintScaleAndLocalInstanceIndices)
+{
+	const std::vector<Pixel> atlas{
+		{ 0, 0, 255, 255 }, { 255, 255, 255, 255 }, { 0, 255, 0, 0 },
+		{ 0, 0, 255, 255 }, { 255, 255, 255, 255 }, { 0, 255, 0, 0 }
+	};
+	auto budget{ std::make_shared<ax::TaskBufferBudget>() };
+	auto records{ std::make_shared<ax::SpriteBuffer>(2, budget) };
+	ax::SpriteGpuData tile{};
+	tile.pos = { 8.25f, 8.25f };
+	tile.scale = { 17.5f, 17.5f };
+	tile.region = { 0, 0, 1, 2 };
+	tile.useRegion = 1;
+	tile.screenSpace = 1;
+	tile.tint = { 1, 0.25f, 0.5f, 1 };
+	records->set(1, tile);
+	auto neighbour{ tile };
+	neighbour.pos.x += 17.5f;
+	records->set(2, neighbour);
+	records->seal();
+	const auto retained{ ax::upload_static_sprites(s_device, *records, { 1, 0 }) };
+	tile.region.x = 1;
+	neighbour.region.x = 1;
+	const std::vector<ax::SpriteGpuData> dynamic{ tile, neighbour };
+	const auto expected{ render(atlas, 3, 2, dynamic, "fs_opaque") };
+	EXPECT_EQ(render(atlas, 3, 2, dynamic, "fs_opaque", retained), expected);
+	EXPECT_EQ(render(atlas, 3, 2, dynamic, "fs_opaque", retained), expected);
+	EXPECT_EQ(records->get(1).region.x, 0);
+}
 
 TEST_F(SpriteShaderTest, AtlasTileEdgesStayOpaqueAtFractionalScale)
 {

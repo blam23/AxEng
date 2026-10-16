@@ -26,6 +26,7 @@
 
 namespace ax
 {
+	class SpriteGroup;
 	using rectf = glm::vec4;
 
 	Error encode_png
@@ -67,6 +68,11 @@ namespace ax
 		SpriteGpuData gpuData{};
 		Texture* tex{ nullptr };
 		Texture* groupedTexture{ nullptr };
+		SpriteGroup* group{ nullptr };
+		std::size_t groupIndex{};
+		std::size_t activeIndex{};
+		bool allocated{ false };
+		std::uint64_t generation{};
 		std::shared_ptr<Texture> keepAlive{};
 	};
 
