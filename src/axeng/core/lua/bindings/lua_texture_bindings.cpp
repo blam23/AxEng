@@ -2,6 +2,14 @@
 
 #include "axeng/core/texture.h"
 
+std::shared_ptr<ax::Texture> ax::lua::bindings::get_texture_lease(const sol::table& texture)
+{
+	const sol::optional<std::shared_ptr<LuaTextureLease>> lease{ texture["_lease"] };
+	return lease && (*lease)->active.load(std::memory_order_relaxed)
+		? (*lease)->texture
+		: std::shared_ptr<ax::Texture>{};
+}
+
 ax::rectf ax::lua::bindings::get_texture_region(const sol::table& texture)
 {
 	const sol::optional<sol::table> atlasRegion{ texture["atlas_region"] };
@@ -27,8 +35,10 @@ ax::rectf ax::lua::bindings::get_texture_region(const sol::table& texture, rectf
 	return localRegion;
 }
 
-void ax::lua::bindings::setup_texture_bindings(sol::state&)
+void ax::lua::bindings::setup_texture_bindings(sol::state& state)
 {
+	state.new_usertype<LuaTextureLease>("texture_lease", sol::no_constructor);
+
 	// kinda buggy
 	//state.new_usertype<ax::Texture>
 	//(

@@ -14,7 +14,10 @@ function base_test:fail(msg)
 end
 
 function base_test:assert(condition, msg)
-    self.suite:assert(condition, msg)
+    if not condition then
+        self:fail(msg or "Assertion failed")
+    end
+    return condition
 end
 
 function base_test:setup()

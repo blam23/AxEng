@@ -4,7 +4,8 @@
    "icon":"test",
    "name":"Stress",
    "required_permissions":[
-
+      "threads",
+      "io"
    ],
    "scripts":{
       "base_test":"scripts/base_test.lua",
@@ -14,10 +15,19 @@
       "test_single_update":"scripts/tests/sprites_single_update.lua",
       "test_batch_update":"scripts/tests/sprites_batch_update.lua",
       "test_shapes_retained":"scripts/tests/shapes_retained.lua",
-      "test_shapes_immediate":"scripts/tests/shapes_immediate.lua"
+      "test_shapes_immediate":"scripts/tests/shapes_immediate.lua",
+      "test_render_to_many":"scripts/tests/render_to_many.lua",
+      "test_render_to_concurrent":"scripts/tests/render_to_concurrent.lua"
    },
    "textures":{
-      "test":"assets/test.png"
+      "test":"assets/test.png",
+      "reference_test_batch_update":"assets/reference/test_batch_update.png",
+      "reference_test_render_to_concurrent":"assets/reference/test_render_to_concurrent.png",
+      "reference_test_render_to_many":"assets/reference/test_render_to_many.png",
+      "reference_test_shapes_immediate":"assets/reference/test_shapes_immediate.png",
+      "reference_test_shapes_retained":"assets/reference/test_shapes_retained.png",
+      "reference_test_single_update":"assets/reference/test_single_update.png"
    },
-   "vsync":false
+   "vsync":false,
+   "resizable":false
 }

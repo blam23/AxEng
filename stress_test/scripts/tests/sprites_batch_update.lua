@@ -3,15 +3,20 @@ local test = base_test:new()
 
 local texture = app.res.get_texture("test")
 local sprites = {}
+local FIXED_DELTA = 1.0 / 60.0
+local time = 0
+local frame = 0
 
 function test:setup()
     math.randomseed(0574355)
+    time = 0
+    frame = 0
     sprites:setup(10000)
 end
 
 function test:run()
-    test.update_callback = app.on_update.subscribe(function(delta)
-        sprites:tick(delta)
+    test.update_callback = app.on_update.subscribe(function()
+        sprites:tick()
     end)
 end
 
@@ -61,9 +66,8 @@ function sprites:setup(num_sprites)
     end
 end
 
-local time = 0
-local frame = 0
-function sprites:tick(delta)
+function sprites:tick()
+    local delta = FIXED_DELTA
     time = time + delta
     frame = frame + 1
     for i = 1, #sprites do

@@ -24,15 +24,23 @@ TEST(LuaBindings, RepeatedSetupPreservesBindingsInFreshStates)
 				assert(a.x == 6)
 				local b = (a + vec2:new(2, 4)) * 2 / 4 - 1
 				assert(b.x == 3 and b.y == 3)
+				local c = 2 * vec2:new(3, 4)
+				assert(c.x == 6 and c.y == 8)
+				local d = 10 - vec2:new(3, 4)
+				assert(d.x == 7 and d.y == 6)
+				local e = 12 / vec2:new(3, 4)
+				assert(e.x == 4 and e.y == 3)
 				assert(vec2:new(3, 4):length() == 5)
 				assert(math.abs(vec2:new(3, 4):normalize().x - 0.6) < 0.00001)
 				assert(tostring(a):find('vec2', 1, true))
 
-				local c = (vec4:new(1, 2, 3, 4) + 1) * 2 / 4 - vec4:new(1, 1, 1, 1)
-				assert(c.x == 0 and c.y == 0.5 and c.z == 1 and c.w == 1.5)
-				c.w = 2
-				assert(c.w == 2)
-				assert(tostring(c):find('vec4', 1, true))
+				local f = (vec4:new(1, 2, 3, 4) + 1) * 2 / 4 - vec4:new(1, 1, 1, 1)
+				assert(f.x == 0 and f.y == 0.5 and f.z == 1 and f.w == 1.5)
+				local g = 2 * vec4:new(1, 2, 3, 4)
+				assert(g.x == 2 and g.y == 4 and g.z == 6 and g.w == 8)
+				f.w = 2
+				assert(f.w == 2)
+				assert(tostring(f):find('vec4', 1, true))
 
 				assert(type(error_code.Success) == 'number')
 				assert(type(log.info) == 'function')

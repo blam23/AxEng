@@ -5,7 +5,7 @@
    "icon":"icon",
    "name":"Tower Mancer",
    "required_permissions":[
-
+      "threads"
    ],
    "scripts":{
       "chunk":"scripts/chunk.lua",

@@ -18,11 +18,20 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <cstring>
 #include <fstream>
+#include <format>
 #include <iostream>
+#include <limits>
+#include <thread>
 
 std::map<GLFWwindow*, ax::Window*> s_windows{};
 std::mutex s_windows_mutex{};
+bool s_imgui_initialized{ false };
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -57,14 +66,19 @@ ax::Window::~Window()
 			if (s_windows.size() == 0)
 			{
 				ShapeRenderer::shutdown();
-				ImGui_ImplGlfw_Shutdown();
-				ImGui_ImplWGPU_Shutdown();
+				if (s_imgui_initialized)
+				{
+					ImGui_ImplGlfw_Shutdown();
+					ImGui_ImplWGPU_Shutdown();
+					s_imgui_initialized = false;
+				}
 			}
 		}
 		glfwDestroyWindow(m_window);
 	}
 
-	m_surface.Unconfigure();
+	if (m_surface.Get() != nullptr)
+		m_surface.Unconfigure();
 }
 
 void ax::Window::resize_event_handler(GLFWwindow* window, int width, int height)
@@ -122,13 +136,19 @@ bool ax::Window::create_surfaces()
 		spdlog::error("Failed to get surface capabilities..");
 		return false;
 	}
+	m_surfaceSupportsCopySource =
+		(static_cast<uint32_t>(capabilities.usages) & static_cast<uint32_t>(wgpu::TextureUsage::CopySrc)) != 0;
+
+	auto surfaceUsage{ wgpu::TextureUsage::RenderAttachment };
+	if (m_surfaceSupportsCopySource)
+		surfaceUsage |= wgpu::TextureUsage::CopySrc;
 
 	wgpu::SurfaceConfiguration config
 	{
 		.nextInChain = nullptr,
 		.device = m_device,
 		.format = m_surfaceFormat,
-		.usage = wgpu::TextureUsage::RenderAttachment,
+		.usage = surfaceUsage,
 		.width = m_width,
 		.height = m_height,
 		.viewFormatCount = 0,
@@ -217,6 +237,289 @@ bool ax::Window::create_surfaces()
 
 	reload_pipeline();
 	return true;
+}
+
+bool ax::Window::capture_next_frame(const std::filesystem::path& path)
+{
+	if (!m_surfaceSupportsCopySource || path.empty())
+		return false;
+
+	std::lock_guard lock{ m_frameImageRequestMutex };
+	if (m_frameImageRequest.has_value())
+		return false;
+
+	m_frameImageRequest = FrameImageRequest{ .outputPath = path };
+	return true;
+}
+
+bool ax::Window::compare_next_frame(Texture& reference, std::shared_ptr<Texture> referenceLease)
+{
+	if (!m_surfaceSupportsCopySource)
+		return false;
+
+	std::lock_guard lock{ m_frameImageRequestMutex };
+	if (m_frameImageRequest.has_value())
+		return false;
+
+	m_frameImageRequest = FrameImageRequest{ .reference = &reference, .referenceLease = std::move(referenceLease) };
+	return true;
+}
+
+ax::WindowFrameImageEvent ax::Window::read_frame_image
+(
+	const FrameImageRequest& request,
+	wgpu::Buffer& readback,
+	uint32_t bytesPerRow
+)
+{
+	WindowFrameImageEvent result
+	{
+		.compared = request.reference != nullptr,
+	};
+
+	struct MapResult
+	{
+		std::atomic<bool> complete{ false };
+		std::atomic<bool> succeeded{ false };
+	};
+	const auto mapResult{ std::make_shared<MapResult>() };
+	const auto bufferSize{ static_cast<uint64_t>(bytesPerRow) * m_height };
+	readback.MapAsync(wgpu::MapMode::Read, 0, bufferSize, wgpu::CallbackMode::AllowSpontaneous,
+		[mapResult](wgpu::MapAsyncStatus status, wgpu::StringView)
+		{
+			mapResult->succeeded.store(status == wgpu::MapAsyncStatus::Success, std::memory_order_relaxed);
+			mapResult->complete.store(true, std::memory_order_release);
+		});
+
+	const auto deadline{ std::chrono::steady_clock::now() + std::chrono::seconds{ 10 } };
+	while (!mapResult->complete.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+	{
+		m_device.Tick();
+		std::this_thread::yield();
+	}
+	if (!mapResult->complete.load(std::memory_order_acquire))
+	{
+		result.message = "Timed out reading back the rendered frame.";
+		return result;
+	}
+	if (!mapResult->succeeded.load(std::memory_order_relaxed))
+	{
+		result.message = "Failed to map the rendered frame readback buffer.";
+		return result;
+	}
+
+	const auto* const mapped{ static_cast<const uint8_t*>(readback.GetConstMappedRange()) };
+	if (mapped == nullptr)
+	{
+		readback.Unmap();
+		result.message = "Failed to access the rendered frame readback data.";
+		return result;
+	}
+
+	const auto rowBytes{ static_cast<size_t>(m_width) * 4 };
+	std::vector<uint8_t> rgbaPixels{};
+	rgbaPixels.resize(rowBytes * m_height);
+	const bool bgraFormat{
+		m_surfaceFormat == wgpu::TextureFormat::BGRA8Unorm
+			|| m_surfaceFormat == wgpu::TextureFormat::BGRA8UnormSrgb
+	};
+	const bool rgbaFormat{
+		m_surfaceFormat == wgpu::TextureFormat::RGBA8Unorm
+			|| m_surfaceFormat == wgpu::TextureFormat::RGBA8UnormSrgb
+	};
+	if (!bgraFormat && !rgbaFormat)
+	{
+		readback.Unmap();
+		result.message = "Unsupported surface format for frame image comparison.";
+		return result;
+	}
+
+	for (uint32_t y{ 0 }; y < m_height; ++y)
+	{
+		const auto* const source{ mapped + static_cast<size_t>(y) * bytesPerRow };
+		auto* const destination{ rgbaPixels.data() + static_cast<size_t>(y) * rowBytes };
+		if (bgraFormat)
+		{
+			for (uint32_t x{ 0 }; x < m_width; ++x)
+			{
+				destination[x * 4] = source[x * 4 + 2];
+				destination[x * 4 + 1] = source[x * 4 + 1];
+				destination[x * 4 + 2] = source[x * 4];
+				destination[x * 4 + 3] = source[x * 4 + 3];
+			}
+		}
+		else
+			std::memcpy(destination, source, rowBytes);
+	}
+	readback.Unmap();
+
+	if (request.reference == nullptr)
+	{
+		const auto saveResult{ write_png(request.outputPath, m_width, m_height, 4, rgbaPixels.data(), static_cast<uint32_t>(rowBytes)) };
+		result.success = saveResult == Error::Success;
+		result.matches = result.success;
+		if (!result.success)
+			result.message = "Failed to save captured frame to '" + request.outputPath.string() + "'.";
+		return result;
+	}
+
+	const auto& reference{ *request.reference };
+	if (reference.m_width != m_width || reference.m_height != m_height)
+	{
+		result.message = std::format
+		(
+			"Reference image is {}x{}, but the rendered frame is {}x{}.",
+			reference.m_width, reference.m_height, m_width, m_height
+		);
+		return result;
+	}
+
+	std::vector<uint8_t> gpuReferencePixels{};
+	uint32_t referenceChannels{ reference.m_channels };
+	const bool hasCpuPixels{ reference.m_stbiPtr != nullptr || !reference.m_pixels.empty() };
+	const uint8_t* referencePixels{ reference.m_stbiPtr
+		? static_cast<const uint8_t*>(reference.m_stbiPtr)
+		: reference.m_pixels.data() };
+	if (reference.m_gpuModified || !hasCpuPixels)
+	{
+		if (reference.m_device.Get() == nullptr || reference.m_texture.Get() == nullptr)
+		{
+			result.message = "Reference image has no readable GPU texture.";
+			return result;
+		}
+
+		const uint64_t rowBytes{ static_cast<uint64_t>(reference.m_width) * 4 };
+		const uint64_t paddedRowBytes{ (rowBytes + 255) & ~uint64_t{ 255 } };
+		if (paddedRowBytes > std::numeric_limits<uint32_t>::max())
+		{
+			result.message = "Reference image row size exceeds WebGPU limits.";
+			return result;
+		}
+		const uint64_t bufferSize{ paddedRowBytes * reference.m_height };
+
+		wgpu::BufferDescriptor readbackDesc{};
+		readbackDesc.size = bufferSize;
+		readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+		readbackDesc.label = "Frame comparison reference readback";
+		auto referenceReadback{ reference.m_device.CreateBuffer(&readbackDesc) };
+
+		wgpu::CommandEncoderDescriptor encoderDesc{};
+		encoderDesc.label = "Frame comparison reference readback encoder";
+		auto encoder{ reference.m_device.CreateCommandEncoder(&encoderDesc) };
+		wgpu::TexelCopyTextureInfo source{};
+		source.texture = reference.m_texture;
+		wgpu::TexelCopyBufferInfo destination{};
+		destination.buffer = referenceReadback;
+		destination.layout.bytesPerRow = static_cast<uint32_t>(paddedRowBytes);
+		destination.layout.rowsPerImage = reference.m_height;
+		const wgpu::Extent3D extent{ reference.m_width, reference.m_height, 1 };
+		encoder.CopyTextureToBuffer(&source, &destination, &extent);
+		auto command{ encoder.Finish() };
+		reference.m_device.GetQueue().Submit(1, &command);
+
+		struct ReferenceMapResult
+		{
+			std::atomic<bool> complete{ false };
+			std::atomic<bool> succeeded{ false };
+		};
+		const auto mapResult{ std::make_shared<ReferenceMapResult>() };
+		referenceReadback.MapAsync(wgpu::MapMode::Read, 0, bufferSize, wgpu::CallbackMode::AllowSpontaneous,
+			[mapResult](wgpu::MapAsyncStatus status, wgpu::StringView)
+			{
+				mapResult->succeeded.store(status == wgpu::MapAsyncStatus::Success, std::memory_order_relaxed);
+				mapResult->complete.store(true, std::memory_order_release);
+			});
+
+		const auto deadline{ std::chrono::steady_clock::now() + std::chrono::seconds{ 10 } };
+		while (!mapResult->complete.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+		{
+			reference.m_device.Tick();
+			std::this_thread::yield();
+		}
+		if (!mapResult->complete.load(std::memory_order_acquire))
+		{
+			result.message = "Timed out reading back the reference image.";
+			return result;
+		}
+		if (!mapResult->succeeded.load(std::memory_order_relaxed))
+		{
+			result.message = "Failed to map the reference image readback buffer.";
+			return result;
+		}
+
+		const auto* const mapped{ static_cast<const uint8_t*>(referenceReadback.GetConstMappedRange()) };
+		if (mapped == nullptr)
+		{
+			referenceReadback.Unmap();
+			result.message = "Failed to access the reference image readback data.";
+			return result;
+		}
+		gpuReferencePixels.resize(static_cast<size_t>(rowBytes) * reference.m_height);
+		for (uint32_t y{ 0 }; y < reference.m_height; ++y)
+			std::memcpy(gpuReferencePixels.data() + static_cast<size_t>(y) * rowBytes,
+				mapped + static_cast<size_t>(y) * paddedRowBytes, static_cast<size_t>(rowBytes));
+		referenceReadback.Unmap();
+		referencePixels = gpuReferencePixels.data();
+		referenceChannels = 4;
+	}
+
+	if (referencePixels == nullptr || referenceChannels == 0 || referenceChannels > 4)
+	{
+		result.message = "Reference image has no readable pixel data.";
+		return result;
+	}
+
+	const auto pixelCount{ static_cast<uint64_t>(m_width) * m_height };
+	constexpr uint8_t s_channelTolerance{ 2 };
+	uint64_t differingPixels{ 0 };
+	uint32_t maxChannelDifference{ 0 };
+	for (uint64_t i{ 0 }; i < pixelCount; ++i)
+	{
+		const auto* const source{ referencePixels + i * referenceChannels };
+		const std::array<uint8_t, 4> expected
+		{
+			source[0],
+			referenceChannels <= 2 ? source[0] : source[1],
+			referenceChannels <= 2 ? source[0] : source[2],
+			referenceChannels == 2 ? source[1] : referenceChannels == 4 ? source[3] : uint8_t{ 255 },
+		};
+
+		bool pixelDiffers{ false };
+		for (uint32_t channel{ 0 }; channel < 4; ++channel)
+		{
+			const auto actual{ rgbaPixels[i * 4 + channel] };
+			const auto difference{ static_cast<uint32_t>(std::abs(static_cast<int>(actual) - expected[channel])) };
+			maxChannelDifference = std::max(maxChannelDifference, difference);
+			pixelDiffers = pixelDiffers || difference > s_channelTolerance;
+		}
+		if (pixelDiffers)
+			++differingPixels;
+	}
+
+	result.success = true;
+	result.pixelCount = static_cast<uint32_t>(pixelCount);
+	result.differingPixels = static_cast<uint32_t>(differingPixels);
+	result.maxChannelDifference = maxChannelDifference;
+	result.matches = differingPixels <= std::max<uint64_t>(1, pixelCount / 1000);
+	if (!result.matches)
+	{
+		result.message = std::format
+		(
+			"{} of {} pixels differ by more than {} channel levels (maximum difference {}).",
+			result.differingPixels, result.pixelCount, s_channelTolerance, result.maxChannelDifference
+		);
+
+		std::vector<uint8_t> encodedImage{};
+		const auto encodeResult{ encode_png(m_width, m_height, 4, rgbaPixels.data(), static_cast<uint32_t>(rowBytes), encodedImage) };
+		if (encodeResult == Error::Success)
+			result.imageData.assign(reinterpret_cast<const char*>(encodedImage.data()), encodedImage.size());
+		else
+		{
+			result.message += std::format(" Failed to encode the actual frame preview ({})", get_error_name(encodeResult));
+			spdlog::error("Failed to encode the actual frame preview: {}", get_error_name(encodeResult));
+		}
+	}
+	return result;
 }
 
 bool ax::Window::init_webgpu(wgpu::BackendType backendType)
@@ -598,7 +901,11 @@ void ax::Window::reload_pipeline()
 	compositePipelineDesc.fragment = &compositeFragment;
 	m_compositePipeline = m_device.CreateRenderPipeline(&compositePipelineDesc);
 
-	m_textureBindGroups.clear();
+	{
+		std::lock_guard lock{ m_textureBindGroupsMutex };
+		m_textureBindGroups.clear();
+	}
+	m_pendingPipelines.clear();
 }
 
 void ax::Window::create_composite_bind_group()
@@ -658,25 +965,220 @@ std::size_t ax::Window::get_sprite_count() const
 	return m_activeSprites.size();
 }
 
-void ax::Window::render_texture(Texture* tex, glm::vec2 position)
+void ax::Window::invalidate_texture_bind_group(Texture* texture)
+{
+	if (texture == nullptr)
+		return;
+
+	std::lock_guard lock{ m_textureBindGroupsMutex };
+	m_textureBindGroups.erase(texture);
+}
+
+bool ax::Window::submit_pending_draw_batch(PendingDrawBatch batch)
+{
+	if (batch.target != nullptr && (batch.target->texture().Get() == nullptr || batch.target->view().Get() == nullptr
+		|| batch.target->width() == 0 || batch.target->height() == 0))
+	{
+		spdlog::error("Cannot submit pending draws to an invalid render texture.");
+		return false;
+	}
+
+	if (batch.shapes.empty() && batch.textures.empty())
+		return true;
+
+	std::lock_guard lock{ m_pendingDrawMutex };
+	m_pendingDrawBatches.push_back(std::move(batch));
+	return true;
+}
+
+void ax::Window::draw_pending()
+{
+	PendingDrawBatch batch{};
+	batch.shapes = DebugShapes::take_queued();
+	{
+		std::lock_guard lock{ m_pendingTextureMutex };
+		batch.textures = std::move(m_queuedTextures);
+		m_queuedTextures.clear();
+	}
+	submit_pending_draw_batch(std::move(batch));
+}
+
+wgpu::RenderPipeline ax::Window::setup_pending_pipeline(wgpu::TextureFormat format)
+{
+	const auto found{ m_pendingPipelines.find(format) };
+	if (found != m_pendingPipelines.end())
+		return found->second;
+
+	wgpu::BindGroupLayout layouts[2]{ m_groupLayout, m_globalLayout };
+	wgpu::PipelineLayoutDescriptor layoutDesc{};
+	layoutDesc.bindGroupLayoutCount = 2;
+	layoutDesc.bindGroupLayouts = layouts;
+	const auto layout{ m_device.CreatePipelineLayout(&layoutDesc) };
+
+	wgpu::BlendState blend{};
+	blend.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
+	blend.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+	blend.color.operation = wgpu::BlendOperation::Add;
+	blend.alpha.srcFactor = wgpu::BlendFactor::One;
+	blend.alpha.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+	blend.alpha.operation = wgpu::BlendOperation::Add;
+
+	wgpu::ColorTargetState target{};
+	target.format = format;
+	target.blend = &blend;
+	target.writeMask = wgpu::ColorWriteMask::All;
+	wgpu::FragmentState fragment{};
+	fragment.module = m_shader;
+	fragment.entryPoint = "fs_main";
+	fragment.targetCount = 1;
+	fragment.targets = &target;
+
+	wgpu::RenderPipelineDescriptor desc{};
+	desc.layout = layout;
+	desc.vertex.module = m_shader;
+	desc.vertex.entryPoint = "vs_main";
+	desc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+	desc.primitive.frontFace = wgpu::FrontFace::CCW;
+	desc.primitive.cullMode = wgpu::CullMode::None;
+	desc.multisample.count = 1;
+	desc.multisample.mask = ~0u;
+	desc.fragment = &fragment;
+
+	auto pipeline{ m_device.CreateRenderPipeline(&desc) };
+	if (pipeline.Get() == nullptr)
+	{
+		spdlog::error("Failed to create a pending-draw pipeline for texture format {}.", static_cast<uint32_t>(format));
+		return {};
+	}
+
+	m_pendingPipelines.emplace(format, pipeline);
+	return pipeline;
+}
+
+void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::TextureView& screenView)
+{
+	const auto targetView{ batch.target != nullptr ? batch.target->view() : screenView };
+	const auto format{ batch.target != nullptr ? batch.target->texture().GetFormat() : m_surfaceFormat };
+	const auto width{ batch.target != nullptr ? batch.target->width() : m_width };
+	const auto height{ batch.target != nullptr ? batch.target->height() : m_height };
+
+	std::vector<const SpriteDefinition*> sprites{};
+	sprites.reserve(batch.textures.size());
+	for (const auto& sprite : batch.textures)
+	{
+		if (sprite.tex == nullptr)
+			continue;
+		if (sprite.tex == batch.target)
+		{
+			spdlog::error("Cannot sample a texture while drawing pending content into that same texture.");
+			continue;
+		}
+		sprites.push_back(&sprite);
+	}
+
+	if (batch.shapes.empty() && sprites.empty())
+		return;
+
+	const auto pipeline{ sprites.empty() ? wgpu::RenderPipeline{} : setup_pending_pipeline(format) };
+	if (!sprites.empty() && pipeline.Get() == nullptr)
+		return;
+
+	if (!ShapeRenderer::init(m_device, {
+		.colourFormat = format,
+		.depthFormat = wgpu::TextureFormat::Undefined,
+		.sampleCount = 1,
+	}))
+		return;
+
+	const ShapeView shapeView
+	{
+		.viewport = { static_cast<float>(width), static_cast<float>(height) },
+		.cameraPosition = m_camera.position(),
+		.zoom = m_camera.zoom(),
+	};
+	ShapeRenderer::begin_frame(shapeView);
+
+	const float vp[8]{
+		static_cast<float>(width), static_cast<float>(height), 0.f, 0.f,
+		m_camera.position().x, m_camera.position().y, m_camera.zoom(), 0.f,
+	};
+	m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
+
+	wgpu::CommandEncoderDescriptor encoderDesc{};
+	encoderDesc.label = "pending draw encoder";
+	auto encoder{ m_device.CreateCommandEncoder(&encoderDesc) };
+	wgpu::RenderPassColorAttachment colorAttachment{};
+	colorAttachment.view = targetView;
+	colorAttachment.depthSlice = wgpu::kDepthSliceUndefined;
+	colorAttachment.loadOp = wgpu::LoadOp::Load;
+	colorAttachment.storeOp = wgpu::StoreOp::Store;
+	wgpu::RenderPassDescriptor passDesc{};
+	passDesc.colorAttachmentCount = 1;
+	passDesc.colorAttachments = &colorAttachment;
+	auto pass{ encoder.BeginRenderPass(&passDesc) };
+
+	if (!sprites.empty())
+	{
+		ensure_uniform_capacity(static_cast<uint32_t>(sprites.size()));
+		m_spriteUploadData.clear();
+		m_spriteUploadData.reserve(sprites.size());
+		for (const auto* sprite : sprites)
+			m_spriteUploadData.push_back(sprite->gpuData);
+		m_queue.WriteBuffer(m_uniforms, 0, m_spriteUploadData.data(), m_spriteUploadData.size() * m_uniformStride);
+
+		pass.SetPipeline(pipeline);
+		pass.SetBindGroup(1, m_viewportBindGroup);
+		for (uint32_t first = 0; first < sprites.size();)
+		{
+			uint32_t end{ first + 1 };
+			while (end < sprites.size() && sprites[end]->tex == sprites[first]->tex)
+				++end;
+
+			pass.SetBindGroup(0, get_texture_bind_group(sprites[first]->tex));
+			pass.Draw(6, end - first, 0, first);
+			first = end;
+		}
+	}
+
+	if (!batch.shapes.empty())
+		ShapeRenderer::draw(pass, batch.shapes);
+
+	pass.End();
+	wgpu::CommandBufferDescriptor commandDesc{};
+	commandDesc.label = "pending draw command buffer";
+	auto command{ encoder.Finish(&commandDesc) };
+	m_queue.Submit(1, &command);
+	if (batch.target != nullptr)
+		batch.target->m_gpuModified = true;
+}
+
+void ax::Window::queue_texture(SpriteDefinition sprite)
+{
+	std::lock_guard lock{ m_pendingTextureMutex };
+	m_queuedTextures.push_back(std::move(sprite));
+}
+
+void ax::Window::render_texture(Texture* tex, glm::vec2 position, std::shared_ptr<Texture> keepAlive)
 {
 	SpriteDefinition sprite{};
 	sprite.tex = tex;
 	sprite.gpuData.pos = position;
-	m_pendingTextures.push_back(sprite);
+	sprite.keepAlive = std::move(keepAlive);
+	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region)
+void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region, std::shared_ptr<Texture> keepAlive)
 {
 	SpriteDefinition sprite{};
 	sprite.tex = tex;
 	sprite.gpuData.pos = position;
 	sprite.gpuData.region = region;
 	sprite.gpuData.useRegion = 1;
-	m_pendingTextures.push_back(sprite);
+	sprite.keepAlive = std::move(keepAlive);
+	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale)
+void ax::Window::render_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale, std::shared_ptr<Texture> keepAlive)
 {
 	SpriteDefinition sprite{};
 	sprite.tex = tex;
@@ -687,19 +1189,21 @@ void ax::Window::render_texture(Texture* tex, glm::vec2 position, float r, rectf
 	sprite.gpuData.z = z;
 	sprite.gpuData.tint = color;
 	sprite.gpuData.scale = scale;
-	m_pendingTextures.push_back(sprite);
+	sprite.keepAlive = std::move(keepAlive);
+	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_texture(Texture* tex, glm::vec2 position, float z)
+void ax::Window::render_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive)
 {
 	SpriteDefinition sprite{};
 	sprite.tex = tex;
 	sprite.gpuData.pos = position;
 	sprite.gpuData.z = z;
-	m_pendingTextures.push_back(sprite);
+	sprite.keepAlive = std::move(keepAlive);
+	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region, float z)
+void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive)
 {
 	SpriteDefinition sprite{};
 	sprite.tex = tex;
@@ -707,37 +1211,70 @@ void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region, 
 	sprite.gpuData.region = region;
 	sprite.gpuData.useRegion = 1;
 	sprite.gpuData.z = z;
-	m_pendingTextures.push_back(sprite);
+	sprite.keepAlive = std::move(keepAlive);
+	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position)
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, std::shared_ptr<Texture> keepAlive)
 {
-	render_texture(tex, position);
-	m_pendingTextures.back().gpuData.screenSpace = 1;
+	SpriteDefinition sprite{};
+	sprite.tex = tex;
+	sprite.gpuData.pos = position;
+	sprite.gpuData.screenSpace = 1;
+	sprite.keepAlive = std::move(keepAlive);
+	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf region)
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf region, std::shared_ptr<Texture> keepAlive)
 {
-	render_texture(tex, position, region);
-	m_pendingTextures.back().gpuData.screenSpace = 1;
+	SpriteDefinition sprite{};
+	sprite.tex = tex;
+	sprite.gpuData.pos = position;
+	sprite.gpuData.region = region;
+	sprite.gpuData.useRegion = 1;
+	sprite.gpuData.screenSpace = 1;
+	sprite.keepAlive = std::move(keepAlive);
+	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale)
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale, std::shared_ptr<Texture> keepAlive)
 {
-	render_texture(tex, position, r, region, z, color, scale);
-	m_pendingTextures.back().gpuData.screenSpace = 1;
+	SpriteDefinition sprite{};
+	sprite.tex = tex;
+	sprite.gpuData.pos = position;
+	sprite.gpuData.rotation = r;
+	sprite.gpuData.region = region;
+	sprite.gpuData.useRegion = 1;
+	sprite.gpuData.z = z;
+	sprite.gpuData.tint = color;
+	sprite.gpuData.scale = scale;
+	sprite.gpuData.screenSpace = 1;
+	sprite.keepAlive = std::move(keepAlive);
+	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, float z)
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive)
 {
-	render_texture(tex, position, z);
-	m_pendingTextures.back().gpuData.screenSpace = 1;
+	SpriteDefinition sprite{};
+	sprite.tex = tex;
+	sprite.gpuData.pos = position;
+	sprite.gpuData.z = z;
+	sprite.gpuData.screenSpace = 1;
+	sprite.keepAlive = std::move(keepAlive);
+	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z)
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive)
 {
-	render_texture(tex, position, region, z);
-	m_pendingTextures.back().gpuData.screenSpace = 1;
+	SpriteDefinition sprite{};
+	sprite.tex = tex;
+	sprite.gpuData.pos = position;
+	sprite.gpuData.region = region;
+	sprite.gpuData.useRegion = 1;
+	sprite.gpuData.z = z;
+	sprite.gpuData.screenSpace = 1;
+	sprite.keepAlive = std::move(keepAlive);
+	queue_texture(std::move(sprite));
 }
 
 void ax::Window::call_deferred(std::function<void()> func)
@@ -920,7 +1457,10 @@ void ax::Window::ensure_uniform_capacity(uint32_t required)
 	bufferDesc.mappedAtCreation = false;
 	bufferDesc.label = "SpriteBatch";
 	m_uniforms = m_device.CreateBuffer(&bufferDesc);
-	m_textureBindGroups.clear();
+	{
+		std::lock_guard lock{ m_textureBindGroupsMutex };
+		m_textureBindGroups.clear();
+	}
 }
 
 glm::vec2 ax::Window::global_to_viewport(const glm::vec2& position) const
@@ -980,6 +1520,20 @@ wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view)
 	return binds;
 }
 
+wgpu::BindGroup ax::Window::get_texture_bind_group(Texture* texture)
+{
+	if (texture == nullptr)
+		return {};
+
+	std::lock_guard lock{ m_textureBindGroupsMutex };
+	if (const auto it{ m_textureBindGroups.find(texture) }; it != m_textureBindGroups.end())
+		return it->second;
+
+	auto bindGroup{ setup_bind_groups(texture->view()) };
+	m_textureBindGroups.emplace(texture, bindGroup);
+	return bindGroup;
+}
+
 void ax::Window::handle_tick(double delta)
 {
 	m_updateEventHandler.fire({ .delta = delta });
@@ -1009,6 +1563,7 @@ bool ax::Window::init_imgui()
 
 	ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 	ax::setup_imgui_style();
+	s_imgui_initialized = true;
 
 	// Default font
 	ImGuiIO& io = ImGui::GetIO();
@@ -1169,6 +1724,46 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		const auto surfaceTexture = surfaceFuture.get();
 		const auto surfaceView = surfaceTexture.texture.CreateView();
 
+		std::optional<FrameImageRequest> frameImageRequest{};
+		{
+			std::lock_guard lock{ m_frameImageRequestMutex };
+			frameImageRequest = std::move(m_frameImageRequest);
+			m_frameImageRequest.reset();
+		}
+
+		wgpu::Buffer frameImageReadback{};
+		uint32_t frameImageBytesPerRow{};
+		WindowFrameImageEvent frameImageError{};
+		bool frameImageCopyQueued{ false };
+		if (frameImageRequest)
+		{
+			const bool supportedFormat{
+				m_surfaceFormat == wgpu::TextureFormat::BGRA8Unorm
+					|| m_surfaceFormat == wgpu::TextureFormat::BGRA8UnormSrgb
+					|| m_surfaceFormat == wgpu::TextureFormat::RGBA8Unorm
+					|| m_surfaceFormat == wgpu::TextureFormat::RGBA8UnormSrgb
+			};
+			const auto rowBytes{ static_cast<uint64_t>(m_width) * 4 };
+			const auto paddedRowBytes{ (rowBytes + 255) & ~uint64_t{ 255 } };
+			if (!supportedFormat)
+				frameImageError.message = "Unsupported surface format for frame image capture.";
+			else if (surfaceTexture.texture.Get() == nullptr)
+				frameImageError.message = "Cannot capture an invalid surface texture.";
+			else if (paddedRowBytes > std::numeric_limits<uint32_t>::max())
+				frameImageError.message = "Rendered frame row size exceeds WebGPU limits.";
+			else
+			{
+				frameImageBytesPerRow = static_cast<uint32_t>(paddedRowBytes);
+				wgpu::BufferDescriptor readbackDesc{};
+				readbackDesc.size = paddedRowBytes * m_height;
+				readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+				readbackDesc.label = "Frame image readback";
+				frameImageReadback = m_device.CreateBuffer(&readbackDesc);
+				if (frameImageReadback.Get() == nullptr)
+					frameImageError.message = "Failed to create frame image readback buffer.";
+			}
+		}
+
 		wgpu::CommandEncoderDescriptor encoderDesc
 		{
 			.nextInChain = nullptr,
@@ -1181,6 +1776,11 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_camera.position().x, m_camera.position().y, m_camera.zoom(), 0.f,
 		};
 		m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
+		ShapeRenderer::init(m_device, {
+			.colourFormat = m_surfaceFormat,
+			.depthFormat = m_depthTextureFormat,
+			.sampleCount = 4,
+		});
 		ShapeRenderer::begin_frame({
 			.viewport = { static_cast<float>(m_width), static_cast<float>(m_height) },
 			.cameraPosition = m_camera.position(),
@@ -1213,6 +1813,11 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		scenePassDesc.colorAttachments = &sceneColorAttachment;
 		scenePassDesc.depthStencilAttachment = &sceneDepthAttachment;
 		auto scenePass = encoder.BeginRenderPass(&scenePassDesc);
+		{
+			std::lock_guard lock{ m_pendingTextureMutex };
+			m_pendingTextures = std::move(m_queuedTextures);
+			m_queuedTextures.clear();
+		}
 		handle_render_pass(scenePass, delta);
 		scenePass.End();
 
@@ -1316,10 +1921,51 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 
 			m_queue.Submit(1, &command);
 
+			std::vector<PendingDrawBatch> pendingBatches{};
+			{
+				std::lock_guard lock{ m_pendingDrawMutex };
+				pendingBatches = std::move(m_pendingDrawBatches);
+				m_pendingDrawBatches.clear();
+			}
+			for (const auto& batch : pendingBatches)
+				draw_pending_batch(batch, surfaceView);
+
+			if (frameImageRequest && frameImageReadback.Get() != nullptr)
+			{
+				wgpu::TexelCopyTextureInfo source{};
+				source.texture = surfaceTexture.texture;
+				source.aspect = wgpu::TextureAspect::All;
+				wgpu::TexelCopyBufferInfo destination{};
+				destination.buffer = frameImageReadback;
+				destination.layout.bytesPerRow = frameImageBytesPerRow;
+				destination.layout.rowsPerImage = m_height;
+				const wgpu::Extent3D extent{ m_width, m_height, 1 };
+				wgpu::CommandEncoderDescriptor copyEncoderDesc{};
+				copyEncoderDesc.label = "frame image copy encoder";
+				auto copyEncoder{ m_device.CreateCommandEncoder(&copyEncoderDesc) };
+				copyEncoder.CopyTextureToBuffer(&source, &destination, &extent);
+				wgpu::CommandBufferDescriptor copyBufferDesc{};
+				copyBufferDesc.label = "frame image copy command";
+				auto copyCommand{ copyEncoder.Finish(&copyBufferDesc) };
+				m_queue.Submit(1, &copyCommand);
+				frameImageCopyQueued = true;
+			}
+
 			m_surface.Present();
 
 			// Let the device progress
 			m_device.Tick();
+		}
+
+		if (frameImageRequest)
+		{
+			if (frameImageCopyQueued)
+				m_frameImageEventHandler.fire(read_frame_image(*frameImageRequest, frameImageReadback, frameImageBytesPerRow));
+			else
+			{
+				frameImageError.compared = frameImageRequest->reference != nullptr;
+				m_frameImageEventHandler.fire(std::move(frameImageError));
+			}
 		}
 	}
 }
@@ -1430,10 +2076,7 @@ void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::
 	pass.SetBindGroup(1, m_viewportBindGroup);
 	for (const auto& range : m_spriteGroupRanges)
 	{
-		auto it = m_textureBindGroups.find(range.tex);
-		if (it == m_textureBindGroups.end())
-			it = m_textureBindGroups.emplace(range.tex, setup_bind_groups(range.tex->view())).first;
-		pass.SetBindGroup(0, it->second);
+		pass.SetBindGroup(0, get_texture_bind_group(range.tex));
 		pass.Draw(6, range.count, 0, range.start);
 	}
 }

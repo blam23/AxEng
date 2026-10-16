@@ -12,7 +12,7 @@ end
 
 local function random_outline()
     if math.random() < 0.5 then
-        return { colour = { 0, 0, 0, 1 }, thickness = math.random(1, 3) }
+        return { colour = random_colour(), thickness = math.random(1, 3) }
     end
     return nil
 end

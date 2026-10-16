@@ -1,12 +1,16 @@
 #include "axeng/core/shapes/debug_shapes.h"
 
+#include <mutex>
+
 namespace
 {
 	ax::ShapeList s_shapes;
+	std::mutex s_shapes_mutex;
 }
 
 void ax::DebugShapes::add(Shape shape)
 {
+	std::lock_guard lock{ s_shapes_mutex };
 	s_shapes.push_back(std::move(shape));
 }
 
@@ -39,19 +43,29 @@ void ax::DebugShapes::line(glm::vec2 start, glm::vec2 end, const glm::vec4& colo
 
 void ax::DebugShapes::flush(wgpu::RenderPassEncoder& pass)
 {
-	if (s_shapes.empty())
+	auto shapes{ take_queued() };
+	if (shapes.empty())
 		return;
 
-	ShapeRenderer::draw(pass, s_shapes);
-	s_shapes.clear();
+	ShapeRenderer::draw(pass, shapes);
 }
 
 void ax::DebugShapes::clear()
 {
+	std::lock_guard lock{ s_shapes_mutex };
 	s_shapes.clear();
 }
 
-const ax::ShapeList& ax::DebugShapes::queued()
+ax::ShapeList ax::DebugShapes::take_queued()
 {
+	std::lock_guard lock{ s_shapes_mutex };
+	auto shapes{ std::move(s_shapes) };
+	s_shapes.clear();
+	return shapes;
+}
+
+ax::ShapeList ax::DebugShapes::queued()
+{
+	std::lock_guard lock{ s_shapes_mutex };
 	return s_shapes;
 }
