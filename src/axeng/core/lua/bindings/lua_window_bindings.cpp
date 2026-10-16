@@ -255,6 +255,127 @@ bool ax::lua::bindings::window_predicate(Application& app, sol::state&)
 	return app.window() != nullptr;
 }
 
+namespace
+{
+	void setup_window_event_bindings(ax::Application& app, sol::state& state, sol::table& window_table)
+	{
+		auto on_frame_image_table{ state.create_table() };
+		on_frame_image_table["subscribe"] =
+			[&app](sol::protected_function f) -> ax::EventID
+			{
+				return app.window()->get_frame_image_event_handler().subscribe([f](const ax::WindowFrameImageEvent& e)
+					{
+						const auto res{ f
+						(
+							e.success,
+							e.compared,
+							e.matches,
+							e.differingPixels,
+							e.pixelCount,
+							e.maxChannelDifference,
+							e.message,
+							e.imageData
+						) };
+						if (!res.valid())
+						{
+							const sol::error err = res;
+							spdlog::error("Failed to run on_frame_image callback: {}", err.what());
+						}
+					});
+			};
+		on_frame_image_table["unsubscribe"] =
+			[&app](ax::EventID id)
+			{
+				app.window()->get_frame_image_event_handler().unsubscribe(id);
+			};
+		window_table["on_frame_image"] = on_frame_image_table;
+
+		auto on_ui_table{ state.create_table() };
+		on_ui_table["subscribe"] =
+			[&app](sol::protected_function f) -> ax::EventID
+			{
+				return app.window()->get_ui_event_handler().subscribe([f](const ax::WindowUIEvent& e)
+					{
+						const auto res{ f(e.delta) };
+						if (!res.valid())
+						{
+							const sol::error err = res;
+							spdlog::error("Failed to run on_ui callback: {}", err.what());
+						}
+					});
+			};
+		on_ui_table["unsubscribe"] =
+			[&app](ax::EventID id)
+			{
+				app.window()->get_ui_event_handler().unsubscribe(id);
+			};
+		window_table["on_ui"] = on_ui_table;
+
+		auto on_render_table{ state.create_table() };
+		on_render_table["subscribe"] =
+			[&app](sol::protected_function f) -> ax::EventID
+			{
+				return app.window()->get_render_event_handler().subscribe([f](const ax::WindowRenderEvent& e)
+					{
+						const auto res{ f(e.delta, e.pass) };
+						if (!res.valid())
+						{
+							const sol::error err = res;
+							spdlog::error("Failed to run on_render callback: {}", err.what());
+						}
+					});
+			};
+		on_render_table["unsubscribe"] =
+			[&app](ax::EventID id)
+			{
+				app.window()->get_render_event_handler().unsubscribe(id);
+			};
+		window_table["on_render"] = on_render_table;
+
+		auto on_close_table{ state.create_table() };
+		on_close_table["subscribe"] =
+			[&app](sol::protected_function f) -> ax::EventID
+			{
+				return app.window()->get_request_close_event_handler().subscribe([f](const ax::WindowRequestCloseEvent&)
+					{
+						const auto res{ f() };
+						if (!res.valid())
+						{
+							const sol::error err = res;
+							spdlog::error("Failed to run on_close callback: {}", err.what());
+						}
+					});
+			};
+		on_close_table["unsubscribe"] =
+			[&app](ax::EventID id)
+			{
+				app.window()->get_request_close_event_handler().unsubscribe(id);
+			};
+		window_table["on_close"] = on_close_table;
+
+		auto on_resize_table{ state.create_table() };
+		on_resize_table["subscribe"] =
+			[&app](sol::protected_function f) -> ax::EventID
+			{
+				return app.window()->get_resize_event_handler().subscribe([f](const ax::WindowResizeEvent& e)
+					{
+						const auto res{ f(e.width, e.height) };
+						if (!res.valid())
+						{
+							const sol::error err = res;
+							spdlog::error("Failed to run on_resize callback: {}", err.what());
+						}
+					});
+			};
+		on_resize_table["unsubscribe"] =
+			[&app](ax::EventID id)
+			{
+				app.window()->get_resize_event_handler().unsubscribe(id);
+			};
+		window_table["on_resize"] = on_resize_table;
+	}
+}
+
 void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& state)
 {
 	state.new_usertype<LuaRenderCanvas>
@@ -362,120 +483,6 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 			return outputPath.has_value() && app.window()->capture_next_frame(*outputPath);
 		};
 
-	auto on_frame_image_table{ state.create_table() };
-	on_frame_image_table["subscribe"] =
-		[&app](sol::protected_function f) -> EventID
-		{
-			return app.window()->get_frame_image_event_handler().subscribe([f](const WindowFrameImageEvent& e)
-				{
-					const auto res{ f
-					(
-						e.success,
-						e.compared,
-						e.matches,
-						e.differingPixels,
-						e.pixelCount,
-						e.maxChannelDifference,
-						e.message,
-						e.imageData
-					) };
-					if (!res.valid())
-					{
-						const sol::error err = res;
-						spdlog::error("Failed to run on_frame_image callback: {}", err.what());
-					}
-				});
-		};
-	on_frame_image_table["unsubscribe"] =
-		[&app](EventID id)
-		{
-			app.window()->get_frame_image_event_handler().unsubscribe(id);
-		};
-	window_table["on_frame_image"] = on_frame_image_table;
-
-	auto on_ui_table{ state.create_table() };
-	on_ui_table["subscribe"] =
-		[&app](sol::protected_function f) -> EventID
-		{
-			return app.window()->get_ui_event_handler().subscribe([f](const WindowUIEvent& e)
-				{
-					const auto res{ f(e.delta) };
-					if (!res.valid())
-					{
-						const sol::error err = res;
-						spdlog::error("Failed to run on_ui callback: {}", err.what());
-					}
-				});
-		};
-	on_ui_table["unsubscribe"] =
-		[&app](EventID id)
-		{
-			app.window()->get_ui_event_handler().unsubscribe(id);
-		};
-	window_table["on_ui"] = on_ui_table;
-
-	auto on_render_table{ state.create_table() };
-	on_render_table["subscribe"] =
-		[&app](sol::protected_function f) -> EventID
-		{
-			return app.window()->get_render_event_handler().subscribe([f](const WindowRenderEvent& e)
-				{
-					const auto res{ f(e.delta, e.pass) };
-					if (!res.valid())
-					{
-						const sol::error err = res;
-						spdlog::error("Failed to run on_render callback: {}", err.what());
-					}
-				});
-		};
-	on_render_table["unsubscribe"] =
-		[&app](EventID id)
-		{
-			app.window()->get_render_event_handler().unsubscribe(id);
-		};
-	window_table["on_render"] = on_render_table;
-
-	auto on_close_table{ state.create_table() };
-	on_close_table["subscribe"] =
-		[&app](sol::protected_function f) -> EventID
-		{
-			return app.window()->get_request_close_event_handler().subscribe([f](const WindowRequestCloseEvent&) {
-				const auto res{ f() };
-				if (!res.valid())
-				{
-					const sol::error err = res;
-					spdlog::error("Failed to run on_close callback: {}", err.what());
-				}
-			});
-		};
-	on_close_table["unsubscribe"] =
-		[&app](EventID id)
-		{
-			app.window()->get_request_close_event_handler().unsubscribe(id);
-		};
-	window_table["on_close"] = on_close_table;
-
-	auto on_resize_table{ state.create_table() };
-	on_resize_table["subscribe"] =
-		[&app](sol::protected_function f) -> EventID
-		{
-			return app.window()->get_resize_event_handler().subscribe([f](const WindowResizeEvent& e)
-				{
-					const auto res{ f(e.width, e.height) };
-					if (!res.valid())
-					{
-						const sol::error err = res;
-						spdlog::error("Failed to run on_resize callback: {}", err.what());
-					}
-				});
-		};
-	on_resize_table["unsubscribe"] =
-		[&app](EventID id)
-		{
-			app.window()->get_resize_event_handler().unsubscribe(id);
-		};
-	window_table["on_resize"] = on_resize_table;
-
 	window_table["width"] = app.window()->width();
 	window_table["height"] = app.window()->height();
 
@@ -551,6 +558,7 @@ void ax::lua::bindings::setup_window_main_thread_bindings(Application& app, sol:
 		return;
 
 	auto window_table{ app_table["window"].get<sol::table>() };
+	setup_window_event_bindings(app, state, window_table);
 	window_table["draw_pending"] =
 		[&app]()
 		{

@@ -67,7 +67,7 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 
 	setup_shared_bindings(app, state, mainThread);
 
-	if (app.has_window())
+	if (app.has_window() && mainThread)
 	{
 		auto on_update_table{ state.create_table() };
 		on_update_table["subscribe"] =

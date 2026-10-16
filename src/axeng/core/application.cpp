@@ -37,7 +37,7 @@ bool ax::Application::init_window(wgpu::BackendType backendType)
 		.height = window["height"],
 		.title = window["title"],
 		.vsync = window["vsync"],
-		.resizable = window["resizable"],
+		.resizable = window["resizable"].get_or(true),
 	});
 
 	bool success{ true };

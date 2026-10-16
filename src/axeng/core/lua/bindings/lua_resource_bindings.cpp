@@ -138,6 +138,8 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 				std::lock_guard lock{ app.m_tempTexturesMutex };
 				if (auto it = app.m_tempTextures.find(tbl["name"]); it != app.m_tempTextures.end())
 				{
+					if (app.window())
+						app.window()->invalidate_texture_bind_group(it->second->texture.get());
 					it->second->active.store(false, std::memory_order_relaxed);
 					app.m_tempTextures.erase(it);
 					return true;

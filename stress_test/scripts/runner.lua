@@ -148,10 +148,11 @@ function start_next()
         elseif type(app.window.capture_next_frame_io) == "function" then
             queued = app.window.capture_next_frame_io("assets/reference/" .. test.name .. ".png")
         else
-            image_failures = image_failures + 1
             log.error("No reference image for " .. test.name .. " and frame capture requires IO permission.")
         end
         if queued == false or queued == nil then
+            image_failures = image_failures + 1
+            log.error("Failed to queue the frame image request for " .. test.name .. ".")
             app.call_deferred(check_next)
         end
     end)

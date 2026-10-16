@@ -815,7 +815,10 @@ void ax::Window::reload_pipeline()
 	compositePipelineDesc.fragment = &compositeFragment;
 	m_compositePipeline = m_device.CreateRenderPipeline(&compositePipelineDesc);
 
-	m_textureBindGroups.clear();
+	{
+		std::lock_guard lock{ m_textureBindGroupsMutex };
+		m_textureBindGroups.clear();
+	}
 	m_pendingPipelines.clear();
 }
 
@@ -874,6 +877,15 @@ void ax::Window::free_sprite(SpriteDefinition* sprite)
 std::size_t ax::Window::get_sprite_count() const
 {
 	return m_activeSprites.size();
+}
+
+void ax::Window::invalidate_texture_bind_group(Texture* texture)
+{
+	if (texture == nullptr)
+		return;
+
+	std::lock_guard lock{ m_textureBindGroupsMutex };
+	m_textureBindGroups.erase(texture);
 }
 
 bool ax::Window::submit_pending_draw_batch(PendingDrawBatch batch)
@@ -1036,10 +1048,7 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 			while (end < sprites.size() && sprites[end]->tex == sprites[first]->tex)
 				++end;
 
-			auto bindGroup{ m_textureBindGroups.find(sprites[first]->tex) };
-			if (bindGroup == m_textureBindGroups.end())
-				bindGroup = m_textureBindGroups.emplace(sprites[first]->tex, setup_bind_groups(sprites[first]->tex->view())).first;
-			pass.SetBindGroup(0, bindGroup->second);
+			pass.SetBindGroup(0, get_texture_bind_group(sprites[first]->tex));
 			pass.Draw(6, end - first, 0, first);
 			first = end;
 		}
@@ -1362,7 +1371,10 @@ void ax::Window::ensure_uniform_capacity(uint32_t required)
 	bufferDesc.mappedAtCreation = false;
 	bufferDesc.label = "SpriteBatch";
 	m_uniforms = m_device.CreateBuffer(&bufferDesc);
-	m_textureBindGroups.clear();
+	{
+		std::lock_guard lock{ m_textureBindGroupsMutex };
+		m_textureBindGroups.clear();
+	}
 }
 
 glm::vec2 ax::Window::global_to_viewport(const glm::vec2& position) const
@@ -1420,6 +1432,20 @@ wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view)
 	bindGroupDesc.entries = bindGroups.data();
 	wgpu::BindGroup binds = m_device.CreateBindGroup(&bindGroupDesc);
 	return binds;
+}
+
+wgpu::BindGroup ax::Window::get_texture_bind_group(Texture* texture)
+{
+	if (texture == nullptr)
+		return {};
+
+	std::lock_guard lock{ m_textureBindGroupsMutex };
+	if (const auto it{ m_textureBindGroups.find(texture) }; it != m_textureBindGroups.end())
+		return it->second;
+
+	auto bindGroup{ setup_bind_groups(texture->view()) };
+	m_textureBindGroups.emplace(texture, bindGroup);
+	return bindGroup;
 }
 
 void ax::Window::handle_tick(double delta)
@@ -1964,10 +1990,7 @@ void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::
 	pass.SetBindGroup(1, m_viewportBindGroup);
 	for (const auto& range : m_spriteGroupRanges)
 	{
-		auto it = m_textureBindGroups.find(range.tex);
-		if (it == m_textureBindGroups.end())
-			it = m_textureBindGroups.emplace(range.tex, setup_bind_groups(range.tex->view())).first;
-		pass.SetBindGroup(0, it->second);
+		pass.SetBindGroup(0, get_texture_bind_group(range.tex));
 		pass.Draw(6, range.count, 0, range.start);
 	}
 }

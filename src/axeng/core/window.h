@@ -169,6 +169,7 @@ namespace ax
 		SpriteDefinition* allocate_sprite();
 		void free_sprite(SpriteDefinition* sprite);
 		std::size_t get_sprite_count() const;
+		void invalidate_texture_bind_group(Texture* texture);
 
 		bool submit_pending_draw_batch(PendingDrawBatch batch);
 		// Snapshots queued sprites and debug shapes for execution after the active frame passes end.
@@ -206,6 +207,7 @@ namespace ax
 		void draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline);
 		void draw_transparent_sprites(wgpu::RenderPassEncoder& pass);
 		void draw_pending_batch(const PendingDrawBatch& batch, const wgpu::TextureView& screenView);
+		wgpu::BindGroup get_texture_bind_group(Texture* texture);
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
 		void run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture);
 		WindowFrameImageEvent read_frame_image
@@ -275,6 +277,7 @@ namespace ax
 		wgpu::Buffer m_viewportBuffer;
 		wgpu::BindGroup m_viewportBindGroup;
 		std::unordered_map<Texture*, wgpu::BindGroup> m_textureBindGroups;
+		std::mutex m_textureBindGroupsMutex{};
 		std::map<wgpu::TextureFormat, wgpu::RenderPipeline> m_pendingPipelines;
 
 		std::vector<PendingDrawBatch> m_pendingDrawBatches;
