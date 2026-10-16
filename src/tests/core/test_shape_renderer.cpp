@@ -200,7 +200,7 @@ namespace ax
 			wgpu::BufferDescriptor readbackDesc{};
 			readbackDesc.size = static_cast<uint64_t>(bytesPerRow) * window.m_height;
 			readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
-			const auto readback{ window.m_device.CreateBuffer(&readbackDesc) };
+			auto readback{ window.m_device.CreateBuffer(&readbackDesc) };
 
 			auto encoder{ window.m_device.CreateCommandEncoder() };
 			wgpu::TexelCopyTextureInfo source{};
