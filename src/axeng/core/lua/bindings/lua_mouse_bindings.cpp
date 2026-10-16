@@ -85,6 +85,25 @@ void ax::lua::bindings::setup_mouse_bindings(sol::state& state)
 			ax::input::set_cursor((GLFWwindow*)window, cursor);
 		};
 
+	mouse_table["hide_cursor"] =
+		[](void* window) -> void
+		{
+			glfwFocusWindow((GLFWwindow*)window);
+			glfwSetInputMode((GLFWwindow*)window, GLFW_CURSOR, GLFW_CURSOR_HIDDEN);
+		};
+
+	mouse_table["show_cursor"] =
+		[](void* window) -> void
+		{
+			glfwSetInputMode((GLFWwindow*)window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+		};
+
+	mouse_table["lock_cursor"] =
+		[](void* window) -> void
+		{
+			glfwSetInputMode((GLFWwindow*)window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+		};
+
 	state["mouse"] = mouse_table;
 }
 
