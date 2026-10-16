@@ -11,6 +11,12 @@ set_encodings("utf-8")
 set_warnings("all", "error")
 add_rules("mode.debug", "mode.release")
 
+option("vcpkg_full_check")
+    set_default(false)
+    set_showmenu(true)
+    set_description("Run vcpkg manifest installation and ABI checks")
+option_end()
+
 local vcpkg_debug = is_mode("debug")
 local vcpkg_triplet = "x64-windows-static-md"
 local vcpkg_triplet_dir = path.join(os.projectdir(), "triplets")
@@ -21,37 +27,37 @@ if is_mode("debug") then
     add_defines("AX_DEBUG_BUILD")
 end
 
--- Dependencies come from vcpkg.json (vcpkg manifest mode). The rule installs them into
--- build/vcpkg_installed with both configurations; each target links its matching CRT/STL ABI.
--- The vcpkg location is taken from VCPKG_ROOT (or vcpkg on PATH).
+-- Dependencies come from vcpkg.json (vcpkg manifest mode). Full checking installs them into
+-- build/vcpkg_installed; quick builds use the existing installation.
 rule("vcpkg.manifest")
     on_load(function (target)
         local installroot = path.join(os.projectdir(), "build", "vcpkg_installed")
         local prefix = path.join(installroot, vcpkg_triplet)
-        local toolchain = target:toolchain("clang")
-        assert(toolchain and toolchain:check(), "AxEng requires the Windows clang toolchain with an MSVC SDK")
-        local vcvars = toolchain:config("vcvars")
-        assert(vcvars and vcvars.VSInstallDir and vcvars.VCToolsVersion and vcvars.WindowsSDKVersion,
-               "Unable to determine the MSVC toolset and Windows SDK selected by clang")
-        local cc = toolchain:tool("cc")
-        assert(cc, "Unable to locate xmake's selected clang compiler")
-        local clang_cl = path.join(path.directory(cc), "clang-cl.exe")
-        assert(os.isfile(clang_cl), "Missing clang-cl beside xmake's selected compiler: " .. clang_cl)
-        local vcpkg = "vcpkg"
-        local vcpkg_root = os.getenv("VCPKG_ROOT")
-        if vcpkg_root and os.isfile(path.join(vcpkg_root, "vcpkg.exe")) then
-            vcpkg = path.join(vcpkg_root, "vcpkg.exe")
+        if has_config("vcpkg_full_check") then
+            local toolchain = target:toolchain("clang")
+            assert(toolchain and toolchain:check(), "AxEng requires the Windows clang toolchain with an MSVC SDK")
+            local vcvars = toolchain:config("vcvars")
+            assert(vcvars and vcvars.VSInstallDir and vcvars.VCToolsVersion and vcvars.WindowsSDKVersion,
+                   "Unable to determine the MSVC toolset and Windows SDK selected by clang")
+            local cc = toolchain:tool("cc")
+            assert(cc, "Unable to locate xmake's selected clang compiler")
+            local clang_cl = path.join(path.directory(cc), "clang-cl.exe")
+            assert(os.isfile(clang_cl), "Missing clang-cl beside xmake's selected compiler: " .. clang_cl)
+            local vcpkg = "vcpkg"
+            local vcpkg_root = os.getenv("VCPKG_ROOT")
+            if vcpkg_root and os.isfile(path.join(vcpkg_root, "vcpkg.exe")) then
+                vcpkg = path.join(vcpkg_root, "vcpkg.exe")
+            end
+            os.execv(vcpkg, {"install", "--triplet", vcpkg_triplet,
+                             "--overlay-triplets=" .. vcpkg_triplet_dir,
+                             "--x-manifest-root=" .. os.projectdir(),
+                             "--x-install-root=" .. installroot}, {envs = {
+                VCPKG_VISUAL_STUDIO_PATH = vcvars.VSInstallDir:gsub("[/\\]+$", ""),
+                AXENG_CLANG_CL = clang_cl,
+                AXENG_VS_TOOLSET_VERSION = vcvars.VCToolsVersion,
+                AXENG_WINDOWS_SDK_VERSION = vcvars.WindowsSDKVersion:gsub("[/\\]+$", "")
+            }})
         end
-        -- Let vcpkg validate its own ABI cache, including changes to the selected toolset.
-        os.execv(vcpkg, {"install", "--triplet", vcpkg_triplet,
-                         "--overlay-triplets=" .. vcpkg_triplet_dir,
-                         "--x-manifest-root=" .. os.projectdir(),
-                         "--x-install-root=" .. installroot}, {envs = {
-            VCPKG_VISUAL_STUDIO_PATH = vcvars.VSInstallDir:gsub("[/\\]+$", ""),
-            AXENG_CLANG_CL = clang_cl,
-            AXENG_VS_TOOLSET_VERSION = vcvars.VCToolsVersion,
-            AXENG_WINDOWS_SDK_VERSION = vcvars.WindowsSDKVersion:gsub("[/\\]+$", "")
-        }})
         local libdir = path.join(prefix, vcpkg_config_dir, "lib")
         assert(os.isdir(libdir), "Missing vcpkg libraries for the selected build mode: " .. libdir)
         target:add("sysincludedirs", path.join(prefix, "include"), {public = true})

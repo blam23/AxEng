@@ -6,13 +6,18 @@ Currently only Windows is supported.
 ## Building on Windows
 
 Install xmake, LLVM Clang, Visual Studio C++ build tools, and a Windows SDK.
-Set `VCPKG_ROOT` to your vcpkg checkout, then configure and build:
+Set `VCPKG_ROOT` to your vcpkg checkout. Normal builds use the existing
+`build/vcpkg_installed` dependencies without running vcpkg's manifest and ABI checks.
+To install or validate dependencies, enable the full check when configuring:
 
 ```powershell
-xmake f -y -p windows -a x64 -m debug --toolchain=clang
+xmake f -y -p windows -a x64 -m debug --toolchain=clang --vcpkg_full_check=y
 xmake -y
 xmake run Tests
 ```
+
+The full check can be skipped again with `--vcpkg_full_check=n`. The [build.ps1](build.ps1)
+wrapper also uses the quick path by default; pass `-FullVcpkgCheck` to run the manifest check.
 
 ## Compiling and running applications
 The AxEng CLI has a few important switches.
