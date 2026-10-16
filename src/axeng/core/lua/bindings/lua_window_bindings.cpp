@@ -438,9 +438,9 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 		};
 
 	window_table["set_clear_color"] =
-		[&app](float r, float g, float b, float a)
+		[&app](float r, float g, float b)
 		{
-			app.window()->set_clear_color({ r, g, b, a });
+			app.window()->set_clear_color({ r, g, b });
 		};
 
 	window_table["compare_next_frame"] =

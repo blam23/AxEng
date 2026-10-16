@@ -199,6 +199,6 @@ app.sprites.setup(player_sprite, texture, x, y, 49, 32, 13, 15)
 player_sprite.scale.x = 5.0
 player_sprite.scale.y = 5.0
 
-app.window.set_clear_color(0.0, 0.0, 0.0, 1.0)
+app.window.set_clear_color(0.0, 0.0, 0.0)
 
 return error_code.Success

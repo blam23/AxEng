@@ -41,7 +41,7 @@ end
 function game:start()
     self:stop()
     assert(bg and bg.submit, "Tower Mancer requires --allow-threads")
-    app.window.set_clear_color(0.36, 0.53, 0.22, 1.0)
+    app.window.set_clear_color(0.36, 0.53, 0.22)
 
     mouse.set_cursor(app.window.handle, mouse.cursors.arrow)
     tower:setup(app.window.width/2, app.window.height/2)

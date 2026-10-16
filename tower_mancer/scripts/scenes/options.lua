@@ -9,7 +9,7 @@ function options:stop()
 end
 
 function options:start()
-    app.window.set_clear_color(0.05, 0.05, 0.08, 1.0)
+    app.window.set_clear_color(0.05, 0.05, 0.08)
 end
 
 local pressed = false
