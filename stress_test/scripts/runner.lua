@@ -20,13 +20,14 @@ for test_name, _ in pairs(scripts) do
         table.insert(test_names, test_name)
     end
 end
-table.sort(test_names)
 
-local test_count = #test_names
-for i, test_name in ipairs(test_names) do
-    tests[i] = ax.import(test_name)
+table.sort(test_names)
+for _, test_name in ipairs(test_names) do
+    table.insert(tests, ax.import(test_name))
+    tests[#tests].name = test_name
     print("Found test: " .. test_name)
 end
+local test_count = #tests
 
 print("Total tests found: " .. test_count)
 
@@ -34,7 +35,7 @@ local image_failures = 0
 local pending_image_mismatch = nil
 
 app.window.on_frame_image.subscribe(function(success, compared, matches, differing_pixels, pixel_count, max_difference, message, image_data)
-    local test_name = test_names[test_index]
+    local test_name = tests[test_index].name
     if not success then
         image_failures = image_failures + 1
         log.error(string.format("Test %d (%s) frame image failed: %s", test_index, test_name, message))
@@ -137,25 +138,25 @@ function start_next()
         local duration = os.clock() - start_time
         test:teardown()
 
-        log.warn(string.format("Test %d (%s) os time: %.4f seconds", test_index, test_names[test_index], duration))
-        log.warn(string.format("Test %d (%s) tick time: %.4f seconds", test_index, test_names[test_index], tick_time))
+        log.warn(string.format("Test %d (%s) os time: %.4f seconds", test_index, test.name, duration))
+        log.warn(string.format("Test %d (%s) tick time: %.4f seconds", test_index, test.name, tick_time))
 
-        local reference = app.res.get_texture("reference_" .. test_names[test_index])
+        local reference = app.res.get_texture("reference_" .. test.name)
         local queued
         if reference.valid then
             queued = app.window.compare_next_frame(reference)
         elseif type(app.window.capture_next_frame_io) == "function" then
-            queued = app.window.capture_next_frame_io("assets/reference/" .. test_names[test_index] .. ".png")
+            queued = app.window.capture_next_frame_io("assets/reference/" .. test.name .. ".png")
         else
             image_failures = image_failures + 1
-            log.error("No reference image for " .. test_names[test_index] .. " and frame capture requires IO permission.")
+            log.error("No reference image for " .. test.name .. " and frame capture requires IO permission.")
         end
         if queued == false or queued == nil then
             app.call_deferred(check_next)
         end
     end)
 
-    print("Starting test: " .. test_names[test_index])
+    print("Starting test: " .. test.name)
 
     test:setup()
     start_time = os.clock()
