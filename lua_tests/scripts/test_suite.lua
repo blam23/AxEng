@@ -1,10 +1,15 @@
 local class = ax.import("class")
+local base_test = ax.import("base_test")
 
 local test_suite = {
 }
 local test_mt = class(test_suite)
 
 function test_suite:new(name)
+    if self ~= test_suite then
+        return base_test:new(self, name)
+    end
+
     return setmetatable({
         name = name,
         failed_tests = 0,
@@ -34,11 +39,26 @@ end
 function test_suite:run()
     for _, test_case in ipairs(self.tests) do
         local ok, err = pcall(test_case.setup, test_case)
-        if not ok then log.error("[" .. self.name .. "] Setup error: " .. err); goto continue end
+        if not ok then
+            test_case.failed = true
+            self.failed_tests = self.failed_tests + 1
+            log.error("[" .. self.name .. "] Setup error: " .. err)
+            goto continue
+        end
         ok, err = pcall(test_case.run, test_case)
-        if not ok then log.error("[" .. self.name .. "] Run error: " .. err); goto continue end
+        if not ok then
+            test_case.failed = true
+            self.failed_tests = self.failed_tests + 1
+            log.error("[" .. self.name .. "] Run error: " .. err)
+            goto continue
+        end
         ok, err = pcall(test_case.teardown, test_case)
-        if not ok then log.error("[" .. self.name .. "] Teardown error: " .. err); goto continue end
+        if not ok then
+            test_case.failed = true
+            self.failed_tests = self.failed_tests + 1
+            log.error("[" .. self.name .. "] Teardown error: " .. err)
+            goto continue
+        end
 
         if test_case.failed then
             self.failed_tests = self.failed_tests + 1

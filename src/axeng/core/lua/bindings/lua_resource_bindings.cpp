@@ -68,7 +68,7 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 		}
 
 		static std::mutex s_temp_textures_mutex;
-		static std::map<std::string, std::unique_ptr<ax::Texture>> s_temp_textures;
+		static std::map<std::string, std::shared_ptr<ax::Texture>> s_temp_textures;
 
 		resource_lookup_table["create_temp_texture"] =
 			[&app, &state](const std::string& name, const float width, const float height) -> sol::table
@@ -94,6 +94,7 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 					ret["ui_view"] = text->imgui_view();
 					ret["width"] = text->width();
 					ret["height"] = text->height();
+					ret["_lease"] = std::make_shared<LuaTextureLease>(LuaTextureLease{ s_temp_textures[name] });
 				}
 				else
 				{
@@ -117,6 +118,7 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 					s_temp_textures.erase(it);
 					tbl["ptr"] = nullptr;
 					tbl["valid"] = false;
+					tbl["_lease"] = sol::nil;
 					return true;
 				}
 

@@ -3,9 +3,15 @@
 #include "axeng/core/lua/bindings/lua_application_bindings.h"
 #include "axeng/core/lua/external/lua_lib_loader.h"
 
-ax::Application ax::Application::from_directory(flag_set<lua::Permission> permissions, std::string_view root)
+ax::Application ax::Application::from_directory
+(
+	flag_set<lua::Permission> permissions,
+	std::string_view root,
+	std::string_view sourceRoot
+)
 {
-	return { permissions, DirectoryResourceLoader{ root } };
+	const std::filesystem::path sourcePath{ sourceRoot.empty() ? root : sourceRoot };
+	return { permissions, DirectoryResourceLoader{ root }, std::filesystem::absolute(sourcePath) };
 }
 
 ax::Application ax::Application::from_embedded(flag_set<lua::Permission> permissions, EmbeddedResourceLayout&& layout)
@@ -30,6 +36,7 @@ bool ax::Application::init_window(wgpu::BackendType backendType)
 		.height = window["height"],
 		.title = window["title"],
 		.vsync = window["vsync"],
+		.resizable = window["resizable"],
 	});
 
 	bool success{ true };
@@ -342,8 +349,14 @@ void ax::Application::register_conditional_binding
 	m_conditionalBindings[name] = { std::forward<Predicate>(predicate), std::forward<BindingCallback>(binding) };
 }
 
-ax::Application::Application(flag_set<lua::Permission> permissions, ResourceLoader&& loader)
+ax::Application::Application
+(
+	flag_set<lua::Permission> permissions,
+	ResourceLoader&& loader,
+	std::filesystem::path projectSourceDirectory
+)
 	: m_loader{ std::move(loader) }
+	, m_projectSourceDirectory{ std::move(projectSourceDirectory) }
 	, m_scripts{ Badge<Application>{}, permissions, m_loader }
 	, m_textures{ Badge<Application>{}, m_loader }
 	, m_allowedPermissions{ permissions }

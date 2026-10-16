@@ -50,11 +50,18 @@ ax::Error ax::run(const std::vector<std::string>& args, Application&& app, wgpu:
 	return Error::Success;
 }
 
-ax::Error ax::run_from_directory(flag_set<lua::Permission> permissions, const std::vector<std::string>& args, std::string_view rootDirectory, wgpu::BackendType backendType)
+ax::Error ax::run_from_directory
+(
+	flag_set<lua::Permission> permissions,
+	const std::vector<std::string>& args,
+	std::string_view rootDirectory,
+	wgpu::BackendType backendType,
+	std::string_view sourceDirectory
+)
 {
 	std::filesystem::path rootPath{ rootDirectory };
 	spdlog::info("<Ax> Running from directory: '{}'", std::filesystem::absolute(rootPath).string());
-	return run(args, ax::Application::from_directory(permissions, rootPath.string()), backendType);
+	return run(args, ax::Application::from_directory(permissions, rootPath.string(), sourceDirectory), backendType);
 }
 
 ax::Error ax::run_from_zip(flag_set<lua::Permission> permissions, const std::vector<std::string>& args, std::string_view zip, wgpu::BackendType backendType)

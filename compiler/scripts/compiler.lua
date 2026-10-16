@@ -249,6 +249,7 @@ local function create_manifest(project, dir, strip_debug_output)
         WINDOW_WIDTH = 1920,
         WINDOW_HEIGHT = 1080,
         WINDOW_VSYNC = project.vsync ~= nil and tostring(project.vsync) or true,
+        WINDOW_RESIZABLE = project.resizable and tostring(project.resizable) or false,
         SCRIPTS = gen_script_text(),
         TEXTURES = gen_textures_text(project),
         TYPES = gen_types_text(project),

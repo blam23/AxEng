@@ -1,0 +1,19 @@
+{
+   "entry_point":"runner",
+   "name":"Lua Render To Tests",
+   "headless":false,
+   "required_permissions":[
+
+   ],
+   "scripts":{
+      "base_test":"scripts/base_test.lua",
+      "class":"scripts/lib/class.lua",
+      "runner":"scripts/runner.lua",
+      "suite":"scripts/test_suite.lua",
+      "test_render_to":"scripts/tests/render_to.lua"
+   },
+   "textures":{
+
+   },
+   "vsync":false
+}

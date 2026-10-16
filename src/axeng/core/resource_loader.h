@@ -31,6 +31,7 @@ namespace ax
 		DirectoryResourceLoader& operator=(DirectoryResourceLoader&& o) noexcept { m_root = o.m_root; return *this; }
 
 		DirectoryResourceLoader(std::filesystem::path rootDirectory);
+		const std::filesystem::path& root_directory() const noexcept { return m_root; }
 		std::expected<std::vector<uint8_t>, ResourceLoadError> load(ResourceID id) const;
 		std::optional<ResourceLoadError> setup() { return {}; }
 		std::optional<ResourceLoadError>  cleanup() { return {}; }

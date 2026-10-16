@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -27,6 +28,26 @@ namespace ax
 {
 	using rectf = glm::vec4;
 
+	Error encode_png
+	(
+		uint32_t width,
+		uint32_t height,
+		uint32_t channels,
+		const void* pixels,
+		uint32_t bytesPerRow,
+		std::vector<uint8_t>& encoded
+	);
+
+	Error write_png
+	(
+		const std::filesystem::path& path,
+		uint32_t width,
+		uint32_t height,
+		uint32_t channels,
+		const void* pixels,
+		uint32_t bytesPerRow
+	);
+
 	struct SpriteGpuData
 	{
 		glm::vec2 pos{ 0.0f, 0.0f };
@@ -46,6 +67,7 @@ namespace ax
 		SpriteGpuData gpuData{};
 		Texture* tex{ nullptr };
 		Texture* groupedTexture{ nullptr };
+		std::shared_ptr<Texture> keepAlive{};
 	};
 
 	static_assert(sizeof(glm::vec2) == 2 * sizeof(float));

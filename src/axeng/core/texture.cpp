@@ -25,6 +25,78 @@
 
 #include "spdlog/spdlog.h"
 
+ax::Error ax::encode_png
+(
+	uint32_t width,
+	uint32_t height,
+	uint32_t channels,
+	const void* pixels,
+	uint32_t bytesPerRow,
+	std::vector<uint8_t>& encoded
+)
+{
+	encoded.clear();
+	if (width == 0 || height == 0 || channels == 0 || channels > 4 || pixels == nullptr)
+		return Error::InvalidTexture;
+
+	const int ok{ stbi_write_png_to_func(
+		[](void* ctx, void* data, int size)
+		{
+			auto* out{ static_cast<std::vector<uint8_t>*>(ctx) };
+			const auto* bytes{ static_cast<const uint8_t*>(data) };
+			out->insert(out->end(), bytes, bytes + size);
+		},
+		&encoded,
+		static_cast<int>(width), static_cast<int>(height), static_cast<int>(channels),
+		pixels, static_cast<int>(bytesPerRow)) };
+
+	if (!ok)
+	{
+		encoded.clear();
+		return Error::GenericFailure;
+	}
+
+	return Error::Success;
+}
+
+ax::Error ax::write_png
+(
+	const std::filesystem::path& path,
+	uint32_t width,
+	uint32_t height,
+	uint32_t channels,
+	const void* pixels,
+	uint32_t bytesPerRow
+)
+{
+	if (width == 0 || height == 0 || channels == 0 || channels > 4 || pixels == nullptr)
+	{
+		spdlog::error("Cannot write PNG '{}', invalid image data.", path.string());
+		return Error::InvalidTexture;
+	}
+
+	std::vector<uint8_t> encoded{};
+	const auto encodeResult{ encode_png(width, height, channels, pixels, bytesPerRow, encoded) };
+	if (encodeResult != Error::Success)
+	{
+		spdlog::error("Failed to encode '{}' as PNG.", path.string());
+		return encodeResult;
+	}
+
+	std::error_code ec{};
+	if (path.has_parent_path())
+		std::filesystem::create_directories(path.parent_path(), ec);
+
+	std::ofstream file{ path, std::ios::binary | std::ios::trunc };
+	if (!file || !file.write(reinterpret_cast<const char*>(encoded.data()), static_cast<std::streamsize>(encoded.size())))
+	{
+		spdlog::error("Failed to write PNG to '{}'.", path.string());
+		return Error::IO;
+	}
+
+	return Error::Success;
+}
+
 ax::Texture::Texture(Badge<TextureManager>, const std::string& name, const std::vector<uint8_t> imageData, wgpu::Device* device)
 	: Asset{ name }
 {
@@ -272,37 +344,7 @@ ax::Error ax::Texture::save_png(const std::filesystem::path& path) const
 		return Error::InvalidTexture;
 	}
 
-	// Encode to memory then write ourselves so non-ASCII (wide) paths work on Windows
-	std::vector<uint8_t> encoded{};
-	const int ok{ stbi_write_png_to_func(
-		[](void* ctx, void* data, int size)
-		{
-			auto* out{ static_cast<std::vector<uint8_t>*>(ctx) };
-			const auto* bytes{ static_cast<const uint8_t*>(data) };
-			out->insert(out->end(), bytes, bytes + size);
-		},
-		&encoded,
-		static_cast<int>(m_width), static_cast<int>(m_height), static_cast<int>(outputChannels),
-		pixels, static_cast<int>(m_width * outputChannels)) };
-
-	if (!ok)
-	{
-		spdlog::error("Failed to encode texture '{}' as PNG.", m_name);
-		return Error::GenericFailure;
-	}
-
-	std::error_code ec{};
-	if (path.has_parent_path())
-		std::filesystem::create_directories(path.parent_path(), ec);
-
-	std::ofstream file{ path, std::ios::binary | std::ios::trunc };
-	if (!file || !file.write(reinterpret_cast<const char*>(encoded.data()), static_cast<std::streamsize>(encoded.size())))
-	{
-		spdlog::error("Failed to write texture '{}' to '{}'.", m_name, path.string());
-		return Error::IO;
-	}
-
-	return Error::Success;
+	return write_png(path, m_width, m_height, outputChannels, pixels, m_width * outputChannels);
 }
 
 std::optional<ax::rectf> ax::Texture::region(const std::string& subTexture) const

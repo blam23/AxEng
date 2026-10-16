@@ -5,7 +5,12 @@
 
 // STD
 #include <deque>
+#include <filesystem>
 #include <future>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -43,10 +48,30 @@ namespace ax
 		bool resizable{ true };
 	};
 
+	struct WindowFrameImageEvent
+	{
+		bool success{ false };
+		bool compared{ false };
+		bool matches{ false };
+		uint32_t differingPixels{ 0 };
+		uint32_t pixelCount{ 0 };
+		uint32_t maxChannelDifference{ 0 };
+		std::string message{};
+		std::string imageData{};
+	};
+
 	class Window
 	{
 	public:
 		DISABLE_COPY_AND_MOVE(Window);
+
+		struct PendingDrawBatch
+		{
+			Texture* target{ nullptr };
+			std::shared_ptr<Texture> targetLease{};
+			ShapeList shapes;
+			std::vector<SpriteDefinition> textures;
+		};
 
 		Window(const WindowDefinition&);
 		~Window();
@@ -101,6 +126,15 @@ namespace ax
 			return m_resizeEventHandler;
 		}
 
+		using FrameImageEventHandler = EventHandler<WindowFrameImageEvent>;
+		FrameImageEventHandler& get_frame_image_event_handler()
+		{
+			return m_frameImageEventHandler;
+		}
+
+		bool capture_next_frame(const std::filesystem::path& path);
+		bool compare_next_frame(Texture& reference);
+
 		wgpu::Device& device() noexcept { return m_device; }
 		const wgpu::Device& device() const noexcept { return m_device; }
 		wgpu::Queue& queue() noexcept { return m_queue; }
@@ -136,22 +170,22 @@ namespace ax
 		void free_sprite(SpriteDefinition* sprite);
 		std::size_t get_sprite_count() const;
 
-		bool bind_texture(Texture* view);
+		bool submit_pending_draw_batch(PendingDrawBatch batch);
 		// Snapshots queued sprites and debug shapes for execution after the active frame passes end.
 		void draw_pending();
 
-		void render_texture(Texture* tex, glm::vec2 position);
-		void render_texture(Texture* tex, glm::vec2 position, rectf region);
-		void render_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale);
-		void render_ui_texture(Texture* tex, glm::vec2 position);
-		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region);
-		void render_ui_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale);
+		void render_texture(Texture* tex, glm::vec2 position, std::shared_ptr<Texture> keepAlive = {});
+		void render_texture(Texture* tex, glm::vec2 position, rectf region, std::shared_ptr<Texture> keepAlive = {});
+		void render_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale, std::shared_ptr<Texture> keepAlive = {});
+		void render_ui_texture(Texture* tex, glm::vec2 position, std::shared_ptr<Texture> keepAlive = {});
+		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region, std::shared_ptr<Texture> keepAlive = {});
+		void render_ui_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale, std::shared_ptr<Texture> keepAlive = {});
 
 		// Optional overloads that accept a z-index for depth ordering
-		void render_texture(Texture* tex, glm::vec2 position, float z);
-		void render_texture(Texture* tex, glm::vec2 position, rectf region, float z);
-		void render_ui_texture(Texture* tex, glm::vec2 position, float z);
-		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z);
+		void render_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive = {});
+		void render_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive = {});
+		void render_ui_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive = {});
+		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive = {});
 
 		void call_deferred(std::function<void()> func);
 
@@ -165,7 +199,7 @@ namespace ax
 	private:
 		friend struct WindowTestAccess;
 
-		struct PendingDrawBatch;
+		struct FrameImageRequest;
 
 		// Rendering
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
@@ -174,9 +208,16 @@ namespace ax
 		void draw_pending_batch(const PendingDrawBatch& batch, const wgpu::TextureView& screenView);
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
 		void run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture);
+		WindowFrameImageEvent read_frame_image
+		(
+			const FrameImageRequest& request,
+			wgpu::Buffer& readback,
+			uint32_t bytesPerRow
+		);
 		void ensure_uniform_capacity(uint32_t required);
 		void create_composite_bind_group();
 		wgpu::RenderPipeline setup_pending_pipeline(wgpu::TextureFormat format);
+		void queue_texture(SpriteDefinition sprite);
 
 		// Logic
 		void handle_tick(double delta);
@@ -195,6 +236,7 @@ namespace ax
 		UIEventHandler m_uiEventHandler;
 		RequestCloseEventHandler m_requestCloseEventHandler;
 		ResizeEventHandler m_resizeEventHandler;
+		FrameImageEventHandler m_frameImageEventHandler;
 
 		// GLFW
 		GLFWwindow* m_window{ nullptr };
@@ -208,6 +250,7 @@ namespace ax
 		wgpu::Queue m_queue;
 		wgpu::Surface m_surface;
 		wgpu::TextureFormat m_surfaceFormat{};
+		bool m_surfaceSupportsCopySource{ false };
 		wgpu::Color m_clearColor{ 0.0, 0.0, 0.0, 1.0 };
 		wgpu::Texture m_depthTexture;
 		wgpu::TextureView m_depthTextureView;
@@ -234,14 +277,16 @@ namespace ax
 		std::unordered_map<Texture*, wgpu::BindGroup> m_textureBindGroups;
 		std::map<wgpu::TextureFormat, wgpu::RenderPipeline> m_pendingPipelines;
 
-		struct PendingDrawBatch
-		{
-			Texture* target{ nullptr };
-			ShapeList shapes;
-			std::vector<SpriteDefinition> textures;
-		};
-		Texture* m_boundTexture{ nullptr };
 		std::vector<PendingDrawBatch> m_pendingDrawBatches;
+		std::mutex m_pendingDrawMutex{};
+
+		struct FrameImageRequest
+		{
+			Texture* reference{ nullptr };
+			std::filesystem::path outputPath{};
+		};
+		std::mutex m_frameImageRequestMutex{};
+		std::optional<FrameImageRequest> m_frameImageRequest{};
 
 		struct SpriteGroupRange
 		{
@@ -253,6 +298,8 @@ namespace ax
 		std::deque<SpriteDefinition> m_spriteSlots;
 		std::vector<SpriteDefinition*> m_activeSprites;
 		std::vector<SpriteDefinition*> m_freeSpriteSlots;
+		std::mutex m_pendingTextureMutex{};
+		std::vector<SpriteDefinition> m_queuedTextures;
 		std::vector<SpriteDefinition> m_pendingTextures;
 		std::unordered_map<Texture*, std::vector<const SpriteDefinition*>> m_spriteGroups;
 		std::unordered_map<Texture*, std::vector<const SpriteDefinition*>> m_pendingSpriteGroups;

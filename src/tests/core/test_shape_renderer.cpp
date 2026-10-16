@@ -24,6 +24,7 @@
 #include <memory>
 #include <numbers>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -179,6 +180,11 @@ namespace ax
 		static bool batch_targets(const Window& window, std::size_t index, const Texture* texture)
 		{
 			return window.m_pendingDrawBatches[index].target == texture;
+		}
+
+		static float batch_shape_x(const Window& window, std::size_t index)
+		{
+			return std::get<Rectangle>(window.m_pendingDrawBatches[index].shapes.front()).position.x;
 		}
 
 		static void execute(Window& window, const wgpu::TextureView& screenView)
@@ -1038,6 +1044,70 @@ class WindowPendingDrawTest : public ShapeRendererTest
 {
 };
 
+TEST_F(WindowPendingDrawTest, ConcurrentTargetBatchesStayIsolated)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+
+	const auto suffix{ std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) };
+	std::vector<std::unique_ptr<ax::Texture>> targets{};
+	for (std::size_t i{}; i < 4; ++i)
+	{
+		targets.push_back(app.textures().create_temporary(
+			"concurrent_target_" + suffix + "_" + std::to_string(i), {},
+			static_cast<float>(s_size), static_cast<float>(s_size)));
+		ASSERT_NE(targets.back(), nullptr);
+	}
+
+	if (!ax::setup_glfw())
+		GTEST_SKIP() << "GLFW could not create a hidden test window";
+	struct GlfwGuard
+	{
+		~GlfwGuard() { ax::teardown_glfw(); }
+	} glfwGuard;
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+
+	ax::Window window({ .width = s_size, .height = s_size, .title = "AxEng concurrent render queue test" });
+	ASSERT_NE(window.glfw_handle(), nullptr);
+	ax::WindowTestAccess::initialize(window, s_device);
+
+	constexpr std::size_t s_batches_per_thread{ 16 };
+	std::array<std::thread, 4> workers{};
+	std::array<bool, 4> submitted{};
+	for (std::size_t worker{}; worker < workers.size(); ++worker)
+	{
+		workers[worker] = std::thread([&, worker]
+		{
+			for (std::size_t i{}; i < s_batches_per_thread; ++i)
+			{
+				ax::Window::PendingDrawBatch batch{};
+				batch.target = targets[worker].get();
+				batch.shapes.push_back(ax::Rectangle{
+					.position = { static_cast<float>(worker), static_cast<float>(i) },
+					.size = { 1.0f, 1.0f },
+					.fill = s_red,
+				});
+				if (!window.submit_pending_draw_batch(std::move(batch)))
+					return;
+			}
+			submitted[worker] = true;
+		});
+	}
+	for (auto& worker : workers)
+		worker.join();
+
+	for (const auto complete : submitted)
+		EXPECT_TRUE(complete);
+	ASSERT_EQ(ax::WindowTestAccess::batch_count(window), workers.size() * s_batches_per_thread);
+	for (std::size_t i{}; i < ax::WindowTestAccess::batch_count(window); ++i)
+	{
+		const auto targetIndex{ static_cast<std::size_t>(ax::WindowTestAccess::batch_shape_x(window, i)) };
+		ASSERT_LT(targetIndex, targets.size());
+		EXPECT_TRUE(ax::WindowTestAccess::batch_targets(window, i, targets[targetIndex].get()));
+		EXPECT_EQ(ax::WindowTestAccess::batch_shape_count(window, i), 1u);
+	}
+}
+
 TEST_F(WindowPendingDrawTest, TemporaryRenderTargetFlushesShapesAndSpritesAndSavesGoldenPng)
 {
 	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
@@ -1074,15 +1144,22 @@ TEST_F(WindowPendingDrawTest, TemporaryRenderTargetFlushesShapesAndSpritesAndSav
 	ASSERT_NE(window.glfw_handle(), nullptr);
 	ax::WindowTestAccess::initialize(window, s_device);
 
-	ASSERT_TRUE(window.bind_texture(target.get()));
-	window.render_ui_texture(source.get(), { 8.0f, 8.0f });
-	ax::DebugShapes::add(ax::Rectangle{
+	ax::Window::PendingDrawBatch targetBatch{};
+	targetBatch.target = target.get();
+	ax::SpriteDefinition sourceSprite{};
+	sourceSprite.tex = source.get();
+	sourceSprite.gpuData.pos = { 8.0f, 8.0f };
+	sourceSprite.gpuData.region = { 0.0f, 0.0f, 4.0f, 4.0f };
+	sourceSprite.gpuData.useRegion = 1;
+	sourceSprite.gpuData.screenSpace = 1;
+	targetBatch.textures.push_back(std::move(sourceSprite));
+	targetBatch.shapes.push_back(ax::Rectangle{
 		.position = { 32.0f, 32.0f },
 		.size = { 64.0f, 32.0f },
 		.fill = s_red,
 		.screenSpace = true,
 	});
-	window.draw_pending();
+	ASSERT_TRUE(window.submit_pending_draw_batch(std::move(targetBatch)));
 
 	ASSERT_EQ(ax::WindowTestAccess::batch_count(window), 1u);
 	EXPECT_TRUE(ax::WindowTestAccess::batch_targets(window, 0, target.get()));
@@ -1137,7 +1214,6 @@ TEST_F(WindowPendingDrawTest, TemporaryRenderTargetFlushesShapesAndSpritesAndSav
 	const auto renderedTarget{ saveAndLoad(*target, "render_target") };
 	EXPECT_TRUE(renderedTarget == targetGolden);
 
-	ASSERT_TRUE(window.bind_texture(nullptr));
 	ax::DebugShapes::add(ax::Rectangle{
 		.position = { 100.0f, 100.0f },
 		.size = { 8.0f, 8.0f },
@@ -1206,14 +1282,15 @@ TEST_F(WindowPendingDrawTest, SavesRgbLoadedRenderTargetWithRgbaReadback)
 	ASSERT_NE(window.glfw_handle(), nullptr);
 	ax::WindowTestAccess::initialize(window, s_device);
 
-	ASSERT_TRUE(window.bind_texture(target));
-	ax::DebugShapes::add(ax::Rectangle{
+	ax::Window::PendingDrawBatch batch{};
+	batch.target = target;
+	batch.shapes.push_back(ax::Rectangle{
 		.position = { 48.0f, 48.0f },
 		.size = { 16.0f, 16.0f },
 		.fill = s_red,
 		.screenSpace = true,
 	});
-	window.draw_pending();
+	ASSERT_TRUE(window.submit_pending_draw_batch(std::move(batch)));
 	ax::WindowTestAccess::execute(window, screenTarget->view());
 
 	const auto path{ std::filesystem::temp_directory_path() / ("AxEng_rgb_render_target_" + suffix + ".png") };

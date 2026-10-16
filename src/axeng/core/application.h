@@ -1,6 +1,7 @@
 #pragma once
 
 // stdlib
+#include <filesystem>
 #include <memory>
 #include <queue>
 #include <map>
@@ -37,7 +38,12 @@ namespace ax
 	public:
 		DISABLE_COPY_AND_MOVE(Application);
 
-		static Application from_directory(flag_set<lua::Permission> permissions, std::string_view root);
+		static Application from_directory
+		(
+			flag_set<lua::Permission> permissions,
+			std::string_view root,
+			std::string_view sourceRoot = {}
+		);
 		static Application from_embedded(flag_set<lua::Permission> permissions, EmbeddedResourceLayout&& layout);
 		static Application from_zip(flag_set<lua::Permission> permissions, std::string_view zipFile);
 
@@ -48,6 +54,7 @@ namespace ax
 		
 		ResourceLoader& loader() noexcept { return m_loader; }
 		const ResourceLoader& loader() const noexcept { return m_loader; }
+		const std::filesystem::path& project_source_directory() const noexcept { return m_projectSourceDirectory; }
 
 		bool has_window() const noexcept { return m_window != nullptr; }
 		Window* window() noexcept { return m_window.get(); }
@@ -91,7 +98,12 @@ namespace ax
 		friend void lua::bindings::setup_resource_bindings(Application&, sol::state&);
 		friend void lua::bindings::setup_sprite_bindings(Application&, sol::state&);
 
-		Application(flag_set<lua::Permission> permissions, ResourceLoader&& loader);
+		Application
+		(
+			flag_set<lua::Permission> permissions,
+			ResourceLoader&& loader,
+			std::filesystem::path projectSourceDirectory = {}
+		);
 
 		const std::vector<std::string> m_args;
 
@@ -101,6 +113,7 @@ namespace ax
 		std::unique_ptr<Window> m_window;
 
 		ResourceLoader m_loader;
+		std::filesystem::path m_projectSourceDirectory{};
 		lua::ScriptManager m_scripts;
 		TextureManager m_textures;
 		type::TypeGenerator m_typeGen{};

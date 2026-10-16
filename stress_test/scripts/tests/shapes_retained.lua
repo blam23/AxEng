@@ -5,6 +5,7 @@ local test = base_test:new()
 
 local SHAPE_COUNT = 10000
 local FRAME_COUNT = 1000
+local FIXED_DELTA = 1.0 / 60.0
 
 local list = nil
 local movers = {}
@@ -26,7 +27,8 @@ function test:setup()
 end
 
 function test:run()
-    test.update_callback = app.on_update.subscribe(function(delta)
+    test.update_callback = app.on_update.subscribe(function()
+        local delta = FIXED_DELTA
         time = time + delta
         frame = frame + 1
         for i = 1, SHAPE_COUNT do
