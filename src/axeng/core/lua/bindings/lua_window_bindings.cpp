@@ -413,6 +413,41 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 			glfwSetWindowTitle(app.window()->glfw_handle(), str.c_str());
 		};
 
+	// Borderless fullscreen only
+	static std::mutex s_fullscreen_mutex;
+	static std::tuple<uint32_t, uint32_t, uint32_t, uint32_t> s_old_size;
+	static bool s_fullscreen{ false };
+	window_table["set_fullscreen"] =
+		[&app](bool fullscreen) -> void
+		{
+			std::lock_guard<std::mutex> lock(s_fullscreen_mutex);
+
+			if (s_fullscreen == fullscreen)
+				return;
+
+			if (fullscreen)
+			{
+				s_fullscreen = true;
+				int x, y;
+				glfwGetWindowPos(app.window()->glfw_handle(), &x, &y);
+				s_old_size = { x, y, app.window()->width(), app.window()->height() };
+				
+				GLFWmonitor* monitor{ glfwGetPrimaryMonitor() };
+				const GLFWvidmode* mode{ glfwGetVideoMode(monitor) };
+
+				glfwSetWindowAttrib(app.window()->glfw_handle(), GLFW_DECORATED, GLFW_FALSE);
+				glfwSetWindowSize(app.window()->glfw_handle(), mode->width, mode->height);
+				glfwSetWindowPos(app.window()->glfw_handle(), 0, 0);
+			}
+			else
+			{
+				s_fullscreen = false;
+				glfwSetWindowAttrib(app.window()->glfw_handle(), GLFW_DECORATED, GLFW_TRUE);
+				glfwSetWindowPos(app.window()->glfw_handle(), std::get<0>(s_old_size), std::get<1>(s_old_size));
+				glfwSetWindowSize(app.window()->glfw_handle(), std::get<2>(s_old_size), std::get<3>(s_old_size));
+			}
+		};
+
 	window_table["handle"] = (void*)app.window()->glfw_handle();
 
 	window_table["camera"] = &app.window()->camera();
