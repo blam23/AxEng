@@ -68,4 +68,27 @@ namespace ax::input
 		inline static std::vector<bool> s_moverMap{};
 		inline static glm::vec2 s_position{};
 	};
+
+	struct MouseScrollEvent
+	{
+		float x;
+		float y;
+	};
+
+	class MouseScrollEventHandler final
+		: public ax::EventHandler<MouseScrollEvent>
+	{
+	public:
+		static void register_events(GLFWwindow* window);
+		static void cleanup_events(GLFWwindow* window);
+
+		MouseScrollEventHandler();
+		~MouseScrollEventHandler();
+
+	private:
+		static void glfw_callback(GLFWwindow* window, double xoffset, double yoffset);
+		inline static std::vector<MouseScrollEventHandler*> s_eventHandlers{};
+		inline static std::mutex s_handlerMutex{};
+		inline static std::vector<bool> s_scrollMap{};
+	};
 }

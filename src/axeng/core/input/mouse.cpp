@@ -120,3 +120,41 @@ void ax::input::set_cursor(GLFWwindow* window, int cursorShape)
 	s_lastCursor = newCursor;
 	s_lastCursorShape = cursorShape;
 }
+
+void ax::input::MouseScrollEventHandler::register_events(GLFWwindow *window)
+{
+	glfwSetScrollCallback(window, glfw_callback);
+}
+
+void ax::input::MouseScrollEventHandler::cleanup_events(GLFWwindow *window)
+{
+	glfwSetScrollCallback(window, nullptr);
+}
+
+ax::input::MouseScrollEventHandler::MouseScrollEventHandler()
+{
+	std::lock_guard lock{ s_handlerMutex };
+	s_eventHandlers.push_back(this);
+}
+
+ax::input::MouseScrollEventHandler::~MouseScrollEventHandler()
+{
+	std::lock_guard lock{ s_handlerMutex };
+	std::erase(s_eventHandlers, this);
+}
+
+void ax::input::MouseScrollEventHandler::glfw_callback(GLFWwindow* window, double xoffset, double yoffset)
+{
+	SPDLOG_TRACE("MouseScrollEventHandler: xoffset: {}, yoffset: {}", xoffset, yoffset);
+
+	for (const auto& handler : s_eventHandlers)
+	{
+		if (handler == nullptr)
+		{
+			spdlog::error("Null mouse scroll handler found in event handler list");
+			continue;
+		}
+
+		handler->fire({ .x = static_cast<float>(xoffset), .y = static_cast<float>(yoffset) });
+	}
+}
