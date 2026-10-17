@@ -812,6 +812,7 @@ void ax::Window::reload_pipeline()
 	});
 
 	depthStencilState.depthWriteEnabled = wgpu::OptionalBool::False;
+	depthStencilState.depthCompare = wgpu::CompareFunction::Greater;
 	wgpu::BlendState accumulationBlend{};
 	accumulationBlend.color.srcFactor = wgpu::BlendFactor::One;
 	accumulationBlend.color.dstFactor = wgpu::BlendFactor::One;

@@ -769,6 +769,20 @@ void ax::debug::ViewManager::debug_view_callback(Debugger& debugger, Application
 				}
 			);
 
+			for(const auto& [name, textureLease] : debugger.get_temp_textures())
+			{
+				if (ImGui::Selectable(name.c_str(), current == n))
+				{
+					texture = textureLease->texture.get();
+					current = n;
+					label = name;
+					zoomState = {};
+					zoomState.textureSize = ImVec2((float)texture->width(), (float)texture->height());
+					zoomState.maintainAspectRatio = true;
+				}
+				n++;
+			}
+
 			ImGui::EndCombo();
 
 		}
@@ -799,4 +813,14 @@ sol::state& ax::debug::Debugger::get_state() const
 sol::environment& ax::debug::Debugger::get_env() const
 {
     return m_app.debug_get_env({});
+}
+
+const ax::Application::TempTextureList& ax::debug::Debugger::get_temp_textures() const
+{
+    return m_app.debug_get_temp_textures({});
+}
+
+std::mutex& ax::debug::Debugger::get_temp_textures_mutex()
+{
+    return m_app.debug_get_temp_textures_mutex({});
 }

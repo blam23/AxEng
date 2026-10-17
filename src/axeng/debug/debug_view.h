@@ -4,6 +4,7 @@
 #include "axeng/core/window_events.h"
 #include "axeng/core/input/keyboard.h"
 #include "axeng/core/lua/lua_engine.h"
+#include "axeng/core/lua/bindings/lua_texture_bindings.h"
 
 namespace ax::debug
 {
@@ -16,6 +17,8 @@ namespace ax::debug
 
 		sol::state& get_state() const;
 		sol::environment& get_env() const;
+		const std::map<std::string, std::shared_ptr<lua::bindings::LuaTextureLease>>& get_temp_textures() const;
+		std::mutex& get_temp_textures_mutex();
 
 	private:
 		Application& m_app;

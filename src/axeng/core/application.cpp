@@ -3,6 +3,8 @@
 #include "axeng/core/lua/bindings/lua_application_bindings.h"
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
 #include "axeng/core/lua/external/lua_lib_loader.h"
+#include "axeng/core/font_data.h"
+#include "axeng/core/font_sheet.h"
 
 ax::Application ax::Application::from_directory
 (
@@ -192,6 +194,30 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 	if (m_create_window)
 	{
 		init_window(backendType);
+
+		std::vector<uint8_t> fontPixels{};
+		const auto fontData{ source_code_pro_font_data() };
+		const auto fontResult{ generate_source_code_pro_font_sheet(fontData, fontPixels) };
+		if (fontResult != Error::Success)
+		{
+			spdlog::error("Failed to generate the Source Code Pro font sheet.");
+			return false;
+		}
+
+		std::vector<uint8_t> encodedFont{};
+		const auto encodeResult{ encode_png(
+			font_sheet_width, font_sheet_height, 4, fontPixels.data(), font_sheet_width * 4, encodedFont) };
+		if (encodeResult != Error::Success)
+		{
+			spdlog::error("Failed to encode the generated Source Code Pro font sheet.");
+			return false;
+		}
+
+		if (m_textures.load_from_raw("__builtin_font", "SourceCodePro-Medium.ttf", encodedFont) == nullptr)
+		{
+			spdlog::error("Failed to load the generated Source Code Pro font sheet.");
+			return false;
+		}
 
 		const sol::table& textures{ manifest["textures"].get<sol::table>() };
 		for (const auto& entry : textures)

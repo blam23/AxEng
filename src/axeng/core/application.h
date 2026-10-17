@@ -78,6 +78,10 @@ namespace ax
 		const sol::environment& debug_get_env(Badge<debug::Debugger>) const noexcept { return m_env; }
 		sol::environment& debug_get_env(Badge<debug::Debugger>) noexcept { return m_env; }
 
+		using TempTextureList = std::map<std::string, std::shared_ptr<lua::bindings::LuaTextureLease>>;
+		const TempTextureList& debug_get_temp_textures(Badge<debug::Debugger>) const noexcept { return m_tempTextures; }
+		std::mutex& debug_get_temp_textures_mutex(Badge<debug::Debugger>) noexcept { return m_tempTexturesMutex; }
+
 		void set_headless() noexcept { m_create_window = false; }
 
 		void call_deferred(std::function<void()>);
@@ -147,6 +151,6 @@ namespace ax
 
 		std::map<std::string, ConditionalBinding> m_conditionalBindings;
 		std::mutex m_tempTexturesMutex{};
-		std::map<std::string, std::shared_ptr<lua::bindings::LuaTextureLease>> m_tempTextures{};
+		TempTextureList m_tempTextures{};
 	};
 }
