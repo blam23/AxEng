@@ -195,9 +195,8 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 	{
 		init_window(backendType);
 
-		std::vector<uint8_t> fontPixels{};
 		const auto fontData{ source_code_pro_font_data() };
-		const auto fontResult{ generate_source_code_pro_font_sheet(fontData, fontPixels) };
+		const auto fontResult{ generate_source_code_pro_font_sheet(fontData, m_fontSheet) };
 		if (fontResult != Error::Success)
 		{
 			spdlog::error("Failed to generate the Source Code Pro font sheet.");
@@ -206,7 +205,7 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 
 		std::vector<uint8_t> encodedFont{};
 		const auto encodeResult{ encode_png(
-			font_sheet_width, font_sheet_height, 4, fontPixels.data(), font_sheet_width * 4, encodedFont) };
+			font_sheet_width, font_sheet_height, 4, m_fontSheet.pixels.data(), font_sheet_width * 4, encodedFont) };
 		if (encodeResult != Error::Success)
 		{
 			spdlog::error("Failed to encode the generated Source Code Pro font sheet.");
@@ -221,7 +220,11 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 
 		const sol::table& textures{ manifest["textures"].get<sol::table>() };
 		for (const auto& entry : textures)
-			m_textures.load(entry.first.as<std::string>(), entry.second.as<std::string>());
+		{
+			const auto name{ entry.first.as<std::string>() };
+			if (!is_font_texture_name(name))
+				m_textures.load(name, entry.second.as<std::string>());
+		}
 	}
 
 	if (m_create_window)

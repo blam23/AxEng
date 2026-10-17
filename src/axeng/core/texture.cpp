@@ -384,7 +384,7 @@ ax::Error ax::TextureManager::create_texture_atlas(const Texture::Descriptor &na
 		std::string desc;
 		uint32_t width{ 0 };
 		uint32_t height{ 0 };
-		std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels{ nullptr, &stbi_image_free };
+		std::vector<stbi_uc> pixels{};
 		uint32_t x{ 0 };
 		uint32_t y{ 0 };
 	};
@@ -396,6 +396,41 @@ ax::Error ax::TextureManager::create_texture_atlas(const Texture::Descriptor &na
 	{
 		if (std::ranges::any_of(images, [&](const Image& img) { return img.desc == desc; }))
 			continue;
+
+		if (desc == "__builtin_font")
+		{
+			const auto font{ m_store.find(desc) };
+			if (font == m_store.end())
+			{
+				spdlog::error("Texture atlas '{}': generated font texture '{}' is not loaded.", name, desc);
+				return Error::AssetNotFound;
+			}
+
+			const auto& texture{ *font->second.asset };
+			const auto* source{ texture.m_stbiPtr
+				? static_cast<const stbi_uc*>(texture.m_stbiPtr)
+				: texture.m_pixels.data() };
+			if (source == nullptr || texture.m_width == 0 || texture.m_height == 0
+				|| texture.m_channels == 0 || texture.m_channels > 4)
+			{
+				spdlog::error("Texture atlas '{}': generated font texture '{}' has invalid pixels.", name, desc);
+				return Error::InvalidTexture;
+			}
+
+			Image img{ .desc = desc, .width = texture.m_width, .height = texture.m_height };
+			img.pixels.resize(static_cast<size_t>(img.width) * img.height * bpp);
+			for (size_t i{}; i < static_cast<size_t>(img.width) * img.height; ++i)
+			{
+				const auto* sourcePixel{ source + i * texture.m_channels };
+				auto* destination{ img.pixels.data() + i * bpp };
+				destination[0] = sourcePixel[0];
+				destination[1] = texture.m_channels <= 2 ? sourcePixel[0] : sourcePixel[1];
+				destination[2] = texture.m_channels <= 2 ? sourcePixel[0] : sourcePixel[2];
+				destination[3] = texture.m_channels == 2 ? sourcePixel[1] : 255;
+			}
+			images.push_back(std::move(img));
+			continue;
+		}
 
 		auto res{ Resource::load(m_loader, desc) };
 		if (!res.has_value())
@@ -415,7 +450,8 @@ ax::Error ax::TextureManager::create_texture_atlas(const Texture::Descriptor &na
 		}
 
 		Image img{ .desc = desc, .width = static_cast<uint32_t>(w), .height = static_cast<uint32_t>(h) };
-		img.pixels.reset(data);
+		img.pixels.assign(data, data + static_cast<size_t>(img.width) * img.height * bpp);
+		stbi_image_free(data);
 		images.push_back(std::move(img));
 	}
 
@@ -521,7 +557,7 @@ ax::Error ax::TextureManager::create_texture_atlas(const Texture::Descriptor &na
 			for (int64_t dx = x0; dx < x1; ++dx)
 			{
 				const int64_t sx{ std::clamp<int64_t>(dx - img.x, 0, img.width - 1) };
-				const auto* src{ img.pixels.get() + (sy * img.width + sx) * bpp };
+				const auto* src{ img.pixels.data() + (sy * img.width + sx) * bpp };
 				auto* dst{ atlas.data() + (dy * finalWidth + dx) * bpp };
 				std::memcpy(dst, src, bpp);
 			}

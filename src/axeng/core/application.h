@@ -13,6 +13,7 @@
 #include "axeng/core/custom_type.h"
 #include "axeng/core/helpers.h"
 #include "axeng/core/forward.h"
+#include "axeng/core/font_sheet.h"
 #include "axeng/core/log_timer.h"
 #include "axeng/core/lua/bindings/lua_application_bindings.h"
 #include "axeng/core/lua/bindings/lua_resource_bindings.h"
@@ -126,6 +127,7 @@ namespace ax
 		std::filesystem::path m_projectSourceDirectory{};
 		lua::ScriptManager m_scripts;
 		TextureManager m_textures;
+		FontSheet m_fontSheet{};
 		type::TypeGenerator m_typeGen{};
 		sol::environment m_env;
 		bool m_create_window{ true };

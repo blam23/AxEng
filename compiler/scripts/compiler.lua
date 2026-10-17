@@ -69,6 +69,10 @@ local function copy_file(file_in, file_out)
     return true
 end
 
+local function is_font_texture_name(name)
+    return name:lower():find("font", 1, true) ~= nil
+end
+
 local function check_and_copy_textures(project, in_directory, out_directory)
     if project.textures == nil then
         return true
@@ -83,14 +87,18 @@ local function check_and_copy_textures(project, in_directory, out_directory)
         local lookup = {}
         ax.print_table(project.textures)
         for k, v in pairs(project.textures) do
-            if k ~= project.icon then
-                table.insert(textures, in_directory .. "/" .. v)
-                lookup[in_directory .. "/" .. v] = k
-            else
+            if k == project.icon then
                 copy_icon = true
                 icon_texture = v
+            elseif is_font_texture_name(k) then
+                log.debug("Skipping project font texture; AxEng generates it: " .. k)
+            else
+                table.insert(textures, in_directory .. "/" .. v)
+                lookup[in_directory .. "/" .. v] = k
             end
         end
+        table.insert(textures, "__builtin_font")
+        lookup["__builtin_font"] = "__builtin_font"
         ax.print_table(textures)
         app.res.create_mega_texture("compiler_temp_texture_atlas", textures, 2.0)
         app.res.save_texture_io("compiler_temp_texture_atlas", out_directory .. "/texture_atlas.png")
@@ -113,21 +121,27 @@ local function check_and_copy_textures(project, in_directory, out_directory)
         log.debug("Compiled texture atlas.")
         project.atlas_texture = atlas_texture_name
     else
+        local copied_textures = {}
         for texture_name, texture_path in pairs(project.textures) do
-            if texture_path:sub(-4) ~= ".png" then
+            if is_font_texture_name(texture_name) then
+                log.debug("Skipping project font texture; AxEng generates it: " .. texture_name)
+            elseif texture_path:sub(-4) ~= ".png" then
                 log.error("All textures must have '.png' extension, '" .. texture_path .. "' does not.")
                 return false
+            else
+
+                local in_path = in_directory .. "/" .. texture_path
+                local out_path = out_directory .. "/" .. texture_path
+
+                if not check_and_copy_texture(in_path, out_path) then
+                    return false
+                end
+
+                copied_textures[texture_name] = texture_path
+                log.debug("Compiled texture: " .. texture_name)
             end
-
-            local in_path = in_directory .. "/" .. texture_path
-            local out_path = out_directory .. "/" .. texture_path
-
-            if not check_and_copy_texture(in_path, out_path) then
-                return false
-            end
-
-            log.debug("Compiled texture: " .. texture_name)
         end
+        project.textures = copied_textures
 
         project.atlas_mode = false
     end

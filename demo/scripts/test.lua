@@ -117,20 +117,25 @@ function draw_string(x, y, text, rotation, color, scale, bold)
         if c == 10 then
             y_offset = y_offset + 1
             x_offset = 0
-        elseif c >= 32 and c <= 126 then
-            local index = c - 32
-            local row = math.floor(index / 16) + (bold and 8 or 0)
-            local col = index % 16
-            app.window.render(
-                font_texture, x + x_offset, y + (18 * y_offset * scale.y),
-                16 * col + 1, 16 * row + 1, 15, 15,
-                math.sin(time * 3.0 + i) * 0.1, 0,
-                color.r, color.g, color.b, color.a,
-                scale.x, scale.y
-            )
-            x_offset = x_offset + (10 * scale.x)
         else
-            x_offset = x_offset + (10 * scale.x)
+            local glyph = font_texture.glyphs[c]
+            if glyph then
+                local bitmap = bold and glyph.bold or glyph.regular
+                if bitmap.width > 0 and bitmap.height > 0 then
+                    app.window.render(
+                        font_texture,
+                        x + x_offset + bitmap.x_offset * scale.x,
+                        y + (y_offset * font_texture.line_height + font_texture.baseline + bitmap.y_offset) * scale.y,
+                        bitmap.x, bitmap.y, bitmap.width, bitmap.height,
+                        math.sin(time * 3.0 + i) * 0.1, 0,
+                        color.r, color.g, color.b, color.a,
+                        scale.x, scale.y
+                    )
+                end
+                x_offset = x_offset + glyph.advance * scale.x
+            else
+                x_offset = x_offset + font_texture.space_advance * scale.x
+            end
         end
     end
 end

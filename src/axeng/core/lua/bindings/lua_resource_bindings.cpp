@@ -1,5 +1,6 @@
 #include "axeng/core/lua/bindings/lua_resource_bindings.h"
 #include "axeng/core/application.h"
+#include "axeng/core/font_sheet.h"
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
 
 void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state& state)
@@ -7,13 +8,46 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 	auto app_table{ state["app"].get<sol::table>() };
 	{
 		auto resource_lookup_table{ state.create_table() };
+		const auto addFontMetrics = [&app, &state](sol::table& texture)
+		{
+			auto glyphs{ state.create_table() };
+			const auto setBitmap = [](sol::table& table, const FontGlyphBitmap& bitmap)
+			{
+				table["x"] = bitmap.x;
+				table["y"] = bitmap.y;
+				table["width"] = bitmap.width;
+				table["height"] = bitmap.height;
+				table["x_offset"] = bitmap.xOffset;
+				table["y_offset"] = bitmap.yOffset;
+			};
+
+			for (size_t index{}; index < font_glyph_count; ++index)
+			{
+				const auto& glyph{ app.m_fontSheet.glyphs[index] };
+				auto glyphTable{ state.create_table() };
+				auto regular{ state.create_table() };
+				auto bold{ state.create_table() };
+				setBitmap(regular, glyph.regular);
+				setBitmap(bold, glyph.bold);
+				glyphTable["regular"] = regular;
+				glyphTable["bold"] = bold;
+				glyphTable["advance"] = glyph.advance;
+				glyphs[static_cast<int>(font_first_codepoint + index)] = glyphTable;
+			}
+
+			texture["glyphs"] = glyphs;
+			texture["baseline"] = app.m_fontSheet.baseline;
+			texture["line_height"] = app.m_fontSheet.lineHeight;
+			texture["space_advance"] = app.m_fontSheet.glyphs[0].advance;
+		};
 
 		if (app.m_atlasTexture == nullptr)
 		{
 			resource_lookup_table["get_texture"] =
-				[&app, &state](const std::string& name) -> sol::table
+				[&app, &state, addFontMetrics](const std::string& name) -> sol::table
 				{
-					auto text{ app.m_textures.get(name) };
+					const bool isFont{ is_font_texture_name(name) };
+					auto text{ app.m_textures.get(isFont ? "__builtin_font" : name) };
 
 					auto ret = state.create_table();
 
@@ -25,6 +59,8 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 						ret["ui_view"] = text->imgui_view();
 						ret["width"] = text->width();
 						ret["height"] = text->height();
+						if (isFont)
+							addFontMetrics(ret);
 					}
 					else
 					{
@@ -37,10 +73,17 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 		else
 		{
 			resource_lookup_table["get_texture"] =
-				[&app, &state](const std::string& name) -> sol::table
+				[&app, &state, addFontMetrics](const std::string& name) -> sol::table
 				{
+					const bool isFont{ is_font_texture_name(name) };
 					auto text{ app.m_atlasTexture };
-					auto region{ app.m_atlasTexture->region(name) };
+					auto region{ text->region(isFont ? "__builtin_font" : name) };
+					if (isFont && !region.has_value())
+					{
+						text = app.m_textures.get("__builtin_font");
+						if (text)
+							region = rectf{ 0.0f, 0.0f, static_cast<float>(text->width()), static_cast<float>(text->height()) };
+					}
 
 					auto ret = state.create_table();
 
@@ -57,6 +100,8 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 						ret["atlas_region"][2] = region->y;
 						ret["atlas_region"][3] = region->z;
 						ret["atlas_region"][4] = region->w;
+						if (isFont)
+							addFontMetrics(ret);
 					}
 					else
 					{
