@@ -8,6 +8,7 @@
 std::vector<std::unique_ptr<ax::input::MouseMoveEventHandler>> s_moveHandlers{};
 std::vector<std::unique_ptr<ax::input::MouseButtonEventHandler>> s_buttonHandlers{};
 std::mutex s_mouseHandlerMutex{};
+std::vector<std::unique_ptr<ax::input::MouseScrollEventHandler>> s_scrollHandlers{};
 
 void ax::lua::bindings::setup_mouse_bindings(sol::state& state)
 {
@@ -73,6 +74,22 @@ void ax::lua::bindings::setup_mouse_bindings(sol::state& state)
 			s_moveHandlers.push_back(std::move(ptr));
 		};
 
+	mouse_table["subscribe_scroll"] =
+		[](const std::function<void(float x, float y)>& callback)
+		{
+			std::lock_guard lock{ s_mouseHandlerMutex };
+			auto ptr{ std::make_unique<ax::input::MouseScrollEventHandler>() };
+			ptr->subscribe
+			(
+				[callback](const auto& e)
+				{
+					callback(e.x, e.y);
+				}
+			);
+
+			s_scrollHandlers.push_back(std::move(ptr));
+		};
+
 	mouse_table["is_pressed"] =
 		[](ax::input::MouseButton button) -> bool
 		{
@@ -112,4 +129,5 @@ void ax::lua::bindings::cleanup_mouse_bindings(sol::state&)
 	std::lock_guard lock{ s_mouseHandlerMutex };
 	s_moveHandlers.clear();
 	s_buttonHandlers.clear();
+	s_scrollHandlers.clear();
 }

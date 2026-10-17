@@ -1720,6 +1720,7 @@ void ax::Window::register_window_events()
 	ax::input::KeyEventHandler::register_events(m_window);
 	ax::input::MouseButtonEventHandler::register_events(m_window);
 	ax::input::MouseMoveEventHandler::register_events(m_window);
+	ax::input::MouseScrollEventHandler::register_events(m_window);
 }
 
 void ax::Window::window_close_handler(GLFWwindow* window)
