@@ -1,6 +1,6 @@
 local enemies = ax.import("enemy")
 local chunk = {}
-chunk.size = 128
+chunk.size = 1024
 chunk.tile_size = 32
 local chunk_size = chunk.size
 local tile_size = chunk.tile_size
