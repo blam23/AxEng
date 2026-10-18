@@ -13,9 +13,11 @@
                                           ]
                          },
                          "lua",
+                         "miniaudio",
                          "minizip-ng",
                          "sol2",
                          "spdlog",
+                         "stb",
                          "dawn",
                          "vulkan-headers",
                          "gtest"

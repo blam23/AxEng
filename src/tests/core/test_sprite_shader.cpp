@@ -311,6 +311,39 @@ TEST_F(SpriteShaderTest, TransparentTexelRgbDoesNotCreateFringes)
 	EXPECT_TRUE(foundTransition);
 }
 
+TEST_F(SpriteShaderTest, DistanceFieldSpritesHaveSharpAntialiasedEdges)
+{
+	// A horizontal distance ramp with the 0.5 edge in the middle, magnified 16 times.
+	std::vector<Pixel> ramp{};
+	for (std::uint8_t i{ 0 }; i < 4; ++i)
+		ramp.push_back({ 255, 255, 255, static_cast<std::uint8_t>(32 + i * 64) });
+	ax::SpriteGpuData sprite{};
+	sprite.pos = { 0, 16 };
+	sprite.scale = { 16, 16 };
+	sprite.screenSpace = 1;
+	const auto countPartial = [](const std::vector<Pixel>& image)
+	{
+		int partial{};
+		for (std::uint32_t x{ 0 }; x < s_size; ++x)
+		{
+			const auto alpha{ image[24 * s_size + x][3] };
+			if (alpha > 0 && alpha < 255)
+				++partial;
+		}
+		return partial;
+	};
+	const auto plain{ render(ramp, 4, 1, { sprite }) };
+	sprite.useRegion = ax::sprite_flag_sdf;
+	const auto sdf{ render(ramp, 4, 1, { sprite }) };
+	ASSERT_EQ(sdf.size(), s_size * s_size);
+	// Inside the edge is fully opaque, outside is empty, and only about a pixel in between is blended.
+	EXPECT_EQ(sdf[24 * s_size + 60][3], 255);
+	EXPECT_EQ(sdf[24 * s_size + 4][3], 0);
+	EXPECT_GE(countPartial(sdf), 1);
+	EXPECT_LE(countPartial(sdf), 3);
+	EXPECT_GT(countPartial(plain), 20);
+}
+
 TEST_F(SpriteShaderTest, RotatedScaledSpritePreservesColourAndTint)
 {
 	ax::SpriteGpuData sprite{};

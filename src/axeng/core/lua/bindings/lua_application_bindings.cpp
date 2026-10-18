@@ -3,6 +3,7 @@
 #include "axeng/core/application.h"
 #include "axeng/core/build_info.h"
 #include "axeng/core/event.h"
+#include "axeng/core/lua/bindings/lua_audio_bindings.h"
 #include "axeng/core/lua/bindings/lua_resource_bindings.h"
 #include "axeng/core/lua/bindings/lua_shape_bindings.h"
 #include "axeng/core/lua/bindings/lua_shared_bindings.h"
@@ -99,6 +100,8 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 	}
 
 	setup_resource_bindings(app, state);
+	if (mainThread)
+		setup_audio_bindings(app, state);
 	if (app.has_window())
 	{
 		setup_sprite_bindings(app, state);

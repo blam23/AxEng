@@ -64,7 +64,16 @@ ax::UserFileHandle* ax::UserFileManager::open_file(const std::string &filename, 
         return nullptr;
     }
 
-    handle.file.open(filePath, std::ios::binary | (std::string(mode).find('r') != std::string::npos ? std::ios::in : 0) | (std::string(mode).find('w') != std::string::npos ? std::ios::out : 0));
+    const std::string openMode{ mode };
+    const bool readMode{ openMode.find('r') != std::string::npos };
+    handle.file.open(filePath, std::ios::binary | (readMode ? std::ios::in : 0) | (openMode.find('w') != std::string::npos ? std::ios::out : 0));
+    if (!handle.file.is_open())
+    {
+        if (!readMode || std::filesystem::exists(filePath))
+            spdlog::error("Failed to open user file '{}'.", filePath.string());
+        m_open_files.pop_back();
+        return nullptr;
+    }
     return &handle;
 }
 
@@ -94,4 +103,20 @@ std::optional<std::filesystem::path> ax::UserFileManager::get_user_file_path(con
     }
 
     return ret;
+}
+
+bool ax::UserFileManager::remove_file(const std::string& filename) noexcept
+{
+    const auto path{ get_user_file_path(filename) };
+    if (!path.has_value())
+        return false;
+
+    std::error_code error{};
+    if (!std::filesystem::is_regular_file(*path, error))
+        return false;
+
+    const bool removed{ std::filesystem::remove(*path, error) };
+    if (error)
+        spdlog::error("Failed to remove user file '{}': {}", path->string(), error.message());
+    return removed && !error;
 }

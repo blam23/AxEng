@@ -3,6 +3,8 @@
 #include "axeng/core/lua/bindings/lua_application_bindings.h"
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
 #include "axeng/core/lua/external/lua_lib_loader.h"
+#include "axeng/core/font_data.h"
+#include "axeng/core/font_sheet.h"
 
 ax::Application ax::Application::from_directory
 (
@@ -108,6 +110,34 @@ void ax::Application::add_manifest_bindings(sol::state&)
 {
 }
 
+void ax::Application::init_audio(const sol::table& manifest)
+{
+	// Audio defaults to on for windowed apps; manifest.audio overrides that either way.
+	const sol::optional<bool> audioSetting{ manifest["audio"] };
+	if (!audioSetting.value_or(m_create_window))
+		return;
+
+	m_audio = std::make_unique<audio::AudioSystem>(audio::AudioSystem::config_from_environment());
+
+	const sol::optional<sol::table> musicTable{ manifest["music"] };
+	if (!musicTable)
+		return;
+
+	for (const auto& entry : *musicTable)
+	{
+		const auto name{ entry.first.as<std::string>() };
+		if (m_music.load(name, entry.second.as<std::string>()) == nullptr)
+			spdlog::error("Failed to load music '{}'", name);
+	}
+}
+
+void ax::Application::shutdown_audio()
+{
+	// The audio thread reads the music assets, so it must stop before they are released.
+	m_audio.reset();
+	m_music.unload_all({});
+}
+
 std::string make_safe_directory_name(const std::string& name)
 {
 	std::string safe_name = name;
@@ -193,9 +223,50 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 	{
 		init_window(backendType);
 
+		const auto fontData{ source_code_pro_font_data() };
+		const auto fontResult{ generate_source_code_pro_font_sheet(fontData, m_fontSheet) };
+		if (fontResult != Error::Success)
+		{
+			spdlog::error("Failed to generate the Source Code Pro font sheet.");
+			return false;
+		}
+
+		std::vector<uint8_t> encodedFont{};
+		const auto encodeResult{ encode_png(
+			font_sheet_width, font_sheet_height, 4, m_fontSheet.pixels.data(), font_sheet_width * 4, encodedFont) };
+		if (encodeResult != Error::Success)
+		{
+			spdlog::error("Failed to encode the generated Source Code Pro font sheet.");
+			return false;
+		}
+
+		if (m_textures.load_from_raw("__builtin_font", "SourceCodePro-Medium.ttf", encodedFont) == nullptr)
+		{
+			spdlog::error("Failed to load the generated Source Code Pro font sheet.");
+			return false;
+		}
+
+		if (generate_sdf_font(fontData, m_sdfFont) == Error::Success)
+		{
+			std::vector<uint8_t> encodedSdf{};
+			auto* sdfTexture{ encode_png(m_sdfFont.width, m_sdfFont.height, 4, m_sdfFont.pixels.data(), m_sdfFont.width * 4, encodedSdf) == Error::Success
+				? m_textures.load_from_raw(std::string{ sdf_font_texture_name }, "SourceCodePro-Medium.ttf", encodedSdf)
+				: nullptr };
+			if (sdfTexture != nullptr)
+				sdfTexture->set_sdf(true);
+			else
+				spdlog::error("Failed to load the generated SDF font.");
+		}
+		else
+			spdlog::error("Failed to generate the SDF font.");
+
 		const sol::table& textures{ manifest["textures"].get<sol::table>() };
 		for (const auto& entry : textures)
-			m_textures.load(entry.first.as<std::string>(), entry.second.as<std::string>());
+		{
+			const auto name{ entry.first.as<std::string>() };
+			if (!is_font_texture_name(name))
+				m_textures.load(name, entry.second.as<std::string>());
+		}
 	}
 
 	if (m_create_window)
@@ -207,6 +278,8 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 			glfwSetWindowIcon(m_window->glfw_handle(), 1, &img);
 		}
 	}
+
+	init_audio(manifest.get<sol::table>());
 
 	if (manifest["atlas_texture"].valid())
 	{
@@ -307,6 +380,7 @@ void ax::Application::cleanup()
 		m_nativeTasks->stop();
 	m_backgroundWorker.stop();
 	cleanup_bindings();
+	shutdown_audio();
 
 	{
 		std::lock_guard lock{ m_shared_mutex };
@@ -339,6 +413,7 @@ ax::Application::~Application()
 	else
 	{
 		cleanup_bindings();
+		shutdown_audio();
 		m_window.reset();
 		std::lock_guard lock{ m_tempTexturesMutex };
 		for (const auto& entry : m_tempTextures)
@@ -388,6 +463,7 @@ ax::Application::Application
 	, m_projectSourceDirectory{ std::move(projectSourceDirectory) }
 	, m_scripts{ Badge<Application>{}, permissions, m_loader }
 	, m_textures{ Badge<Application>{}, m_loader }
+	, m_music{ Badge<Application>{}, m_loader }
 	, m_allowedPermissions{ permissions }
 	, m_backgroundWorker{ true, permissions }
 {

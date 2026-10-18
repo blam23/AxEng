@@ -69,6 +69,10 @@ local function copy_file(file_in, file_out)
     return true
 end
 
+local function is_font_texture_name(name)
+    return name:lower():find("font", 1, true) ~= nil
+end
+
 local function check_and_copy_textures(project, in_directory, out_directory)
     if project.textures == nil then
         return true
@@ -83,14 +87,18 @@ local function check_and_copy_textures(project, in_directory, out_directory)
         local lookup = {}
         ax.print_table(project.textures)
         for k, v in pairs(project.textures) do
-            if k ~= project.icon then
-                table.insert(textures, in_directory .. "/" .. v)
-                lookup[in_directory .. "/" .. v] = k
-            else
+            if k == project.icon then
                 copy_icon = true
                 icon_texture = v
+            elseif is_font_texture_name(k) then
+                log.debug("Skipping project font texture; AxEng generates it: " .. k)
+            else
+                table.insert(textures, in_directory .. "/" .. v)
+                lookup[in_directory .. "/" .. v] = k
             end
         end
+        table.insert(textures, "__builtin_font")
+        lookup["__builtin_font"] = "__builtin_font"
         ax.print_table(textures)
         app.res.create_mega_texture("compiler_temp_texture_atlas", textures, 2.0)
         app.res.save_texture_io("compiler_temp_texture_atlas", out_directory .. "/texture_atlas.png")
@@ -113,21 +121,27 @@ local function check_and_copy_textures(project, in_directory, out_directory)
         log.debug("Compiled texture atlas.")
         project.atlas_texture = atlas_texture_name
     else
+        local copied_textures = {}
         for texture_name, texture_path in pairs(project.textures) do
-            if texture_path:sub(-4) ~= ".png" then
+            if is_font_texture_name(texture_name) then
+                log.debug("Skipping project font texture; AxEng generates it: " .. texture_name)
+            elseif texture_path:sub(-4) ~= ".png" then
                 log.error("All textures must have '.png' extension, '" .. texture_path .. "' does not.")
                 return false
+            else
+
+                local in_path = in_directory .. "/" .. texture_path
+                local out_path = out_directory .. "/" .. texture_path
+
+                if not check_and_copy_texture(in_path, out_path) then
+                    return false
+                end
+
+                copied_textures[texture_name] = texture_path
+                log.debug("Compiled texture: " .. texture_name)
             end
-
-            local in_path = in_directory .. "/" .. texture_path
-            local out_path = out_directory .. "/" .. texture_path
-
-            if not check_and_copy_texture(in_path, out_path) then
-                return false
-            end
-
-            log.debug("Compiled texture: " .. texture_name)
         end
+        project.textures = copied_textures
 
         project.atlas_mode = false
     end
@@ -143,6 +157,41 @@ local function check_and_copy_textures(project, in_directory, out_directory)
     end
 
     log.info("Compiled textures")
+
+    return true
+end
+
+local supported_music_extensions = { [".ogg"] = true, [".mp3"] = true, [".flac"] = true, [".wav"] = true }
+
+local function check_and_copy_music(project, in_directory, out_directory)
+    if project.music == nil then
+        return true
+    end
+
+    for music_name, music_path in pairs(project.music) do
+        local ext = (music_path:match("(%.[^%./\\]+)$") or ""):lower()
+        if not supported_music_extensions[ext] then
+            log.error("Music must be .ogg, .mp3, .flac or .wav, '" .. music_path .. "' is not.")
+            return false
+        end
+
+        local in_path = in_directory .. "/" .. music_path
+        local out_path = out_directory .. "/" .. music_path
+        local sfile = io.open(in_path, "rb")
+        if sfile == nil then
+            log.error("Cannot open music file '" .. in_path .. "'.")
+            return false
+        end
+        sfile:close()
+
+        if not copy_file(in_path, out_path) then
+            return false
+        end
+
+        log.debug("Compiled music: " .. music_name)
+    end
+
+    log.info("Compiled music.")
 
     return true
 end
@@ -188,6 +237,20 @@ local function gen_textures_text(project)
 
     for k,v in pairs(project.textures) do
         ret = ret .. "    " .. k .. " = \"" .. v .. "\",\n"
+    end
+
+    return ax.rstrip(ret)
+end
+
+local function gen_music_text(project)
+    local ret = ""
+
+    if project.music == nil then
+        return ret
+    end
+
+    for k,v in pairs(project.music) do
+        ret = ret .. "    [\"" .. k .. "\"] = \"" .. v .. "\",\n"
     end
 
     return ax.rstrip(ret)
@@ -252,6 +315,7 @@ local function create_manifest(project, dir, strip_debug_output)
         WINDOW_RESIZABLE = project.resizable ~= nil and tostring(project.resizable) or "true",
         SCRIPTS = gen_script_text(),
         TEXTURES = gen_textures_text(project),
+        MUSIC = gen_music_text(project),
         TYPES = gen_types_text(project),
         PERMISSIONS = gen_permissions_text(project),
         ATLAS_TEXTURE = project.atlas_texture or "null",
@@ -325,6 +389,12 @@ function compile(in_directory, out_directory)
     if not checked_textures then
         log.error("Failed to validate textures.")
         return error_code.InvalidTexture
+    end
+
+    local checked_music = check_and_copy_music(project, in_directory, out_directory)
+    if not checked_music then
+        log.error("Failed to validate music.")
+        return error_code.InvalidResource
     end
 
     local copied_resources = copy_custom_resources(project, in_directory, out_directory)

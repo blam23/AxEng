@@ -111,7 +111,45 @@ TEST_F(UserFileManagerTests, ReopeningClosedFileSucceeds)
     EXPECT_EQ(manager.close_file(reopened), ax::Error::Success);
 }
 
+TEST_F(UserFileManagerTests, OpeningMissingFileFails)
+{
+    EXPECT_EQ(manager.open_file("missing.txt", "r"), nullptr);
+}
+
+TEST_F(UserFileManagerTests, WritingReportsSuccess)
+{
+    auto* handle = manager.open_file(filename, "w");
+    ASSERT_NE(handle, nullptr);
+    EXPECT_TRUE(handle->write("updated contents"));
+    handle->close();
+
+    std::ifstream file(filepath, std::ios::binary);
+    ASSERT_TRUE(file.is_open());
+    std::string contents((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(contents, "updated contents");
+}
+
+TEST_F(UserFileManagerTests, RemovingFileDeletesIt)
+{
+    EXPECT_TRUE(manager.remove_file(filename));
+    EXPECT_FALSE(std::filesystem::exists(filepath));
+    EXPECT_FALSE(manager.remove_file(filename));
+}
+
+TEST_F(UserFileManagerTests, RemovingMissingFileFails)
+{
+    EXPECT_FALSE(manager.remove_file("missing.txt"));
+}
+
 #include "tests/main/log_capture.h"
+TEST_F(UserFileManagerTests, CannotRemoveFilesOutsideAllowedDirectory)
+{
+    testlog::LogCapture::instance().expect_total_error_count(1);
+
+    EXPECT_FALSE(manager.remove_file("../outside.txt"));
+    EXPECT_TRUE(std::filesystem::exists(filepath));
+}
+
 TEST_F(UserFileManagerTests, CannotOpenFilesOutsideAllowedDirectory)
 {
     testlog::LogCapture::instance().expect_total_error_count(3);

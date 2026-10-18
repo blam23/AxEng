@@ -154,7 +154,7 @@ function game:update_chunks()
         local position = missing[i]
         next_order = next_order + 1
         local c = chunk:new(position.x, position.y, next_order)
-        c:setup(self, 25)
+        c:setup(self, 250)
         chunks[#chunks + 1] = c
         chunk_lookup[c.x .. ":" .. c.y] = c
     end

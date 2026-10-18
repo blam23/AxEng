@@ -384,7 +384,7 @@ ax::Error ax::TextureManager::create_texture_atlas(const Texture::Descriptor &na
 		std::string desc;
 		uint32_t width{ 0 };
 		uint32_t height{ 0 };
-		std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels{ nullptr, &stbi_image_free };
+		std::vector<stbi_uc> pixels{};
 		uint32_t x{ 0 };
 		uint32_t y{ 0 };
 	};
@@ -396,6 +396,41 @@ ax::Error ax::TextureManager::create_texture_atlas(const Texture::Descriptor &na
 	{
 		if (std::ranges::any_of(images, [&](const Image& img) { return img.desc == desc; }))
 			continue;
+
+		if (desc == "__builtin_font")
+		{
+			const auto font{ m_store.find(desc) };
+			if (font == m_store.end())
+			{
+				spdlog::error("Texture atlas '{}': generated font texture '{}' is not loaded.", name, desc);
+				return Error::AssetNotFound;
+			}
+
+			const auto& texture{ *font->second.asset };
+			const auto* source{ texture.m_stbiPtr
+				? static_cast<const stbi_uc*>(texture.m_stbiPtr)
+				: texture.m_pixels.data() };
+			if (source == nullptr || texture.m_width == 0 || texture.m_height == 0
+				|| texture.m_channels == 0 || texture.m_channels > 4)
+			{
+				spdlog::error("Texture atlas '{}': generated font texture '{}' has invalid pixels.", name, desc);
+				return Error::InvalidTexture;
+			}
+
+			Image img{ .desc = desc, .width = texture.m_width, .height = texture.m_height };
+			img.pixels.resize(static_cast<size_t>(img.width) * img.height * bpp);
+			for (size_t i{}; i < static_cast<size_t>(img.width) * img.height; ++i)
+			{
+				const auto* sourcePixel{ source + i * texture.m_channels };
+				auto* destination{ img.pixels.data() + i * bpp };
+				destination[0] = sourcePixel[0];
+				destination[1] = texture.m_channels <= 2 ? sourcePixel[0] : sourcePixel[1];
+				destination[2] = texture.m_channels <= 2 ? sourcePixel[0] : sourcePixel[2];
+				destination[3] = texture.m_channels == 2 ? sourcePixel[1] : 255;
+			}
+			images.push_back(std::move(img));
+			continue;
+		}
 
 		auto res{ Resource::load(m_loader, desc) };
 		if (!res.has_value())
@@ -415,7 +450,8 @@ ax::Error ax::TextureManager::create_texture_atlas(const Texture::Descriptor &na
 		}
 
 		Image img{ .desc = desc, .width = static_cast<uint32_t>(w), .height = static_cast<uint32_t>(h) };
-		img.pixels.reset(data);
+		img.pixels.assign(data, data + static_cast<size_t>(img.width) * img.height * bpp);
+		stbi_image_free(data);
 		images.push_back(std::move(img));
 	}
 
@@ -521,7 +557,7 @@ ax::Error ax::TextureManager::create_texture_atlas(const Texture::Descriptor &na
 			for (int64_t dx = x0; dx < x1; ++dx)
 			{
 				const int64_t sx{ std::clamp<int64_t>(dx - img.x, 0, img.width - 1) };
-				const auto* src{ img.pixels.get() + (sy * img.width + sx) * bpp };
+				const auto* src{ img.pixels.data() + (sy * img.width + sx) * bpp };
 				auto* dst{ atlas.data() + (dy * finalWidth + dx) * bpp };
 				std::memcpy(dst, src, bpp);
 			}
@@ -594,4 +630,78 @@ std::unique_ptr<ax::Texture> ax::TextureManager::create_temporary(const std::str
 	if (!texture->is_loaded())
 		return nullptr;
 	return texture;
+}
+
+std::unique_ptr<ax::Texture> ax::TextureManager::create_temporary_from_image
+(
+	const std::string& name,
+	const std::vector<uint8_t>& encoded,
+	uint32_t maxWidth,
+	uint32_t maxHeight
+)
+{
+	if (encoded.empty() || encoded.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+	{
+		spdlog::error("Failed to create temporary texture '{}', no image data.", name);
+		return nullptr;
+	}
+
+	int width{};
+	int height{};
+	int channels{};
+	stbi_uc* const pixels{ stbi_load_from_memory(encoded.data(), static_cast<int>(encoded.size()), &width, &height, &channels, 4) };
+	if (pixels == nullptr || width <= 0 || height <= 0)
+	{
+		if (pixels != nullptr)
+			stbi_image_free(pixels);
+		const char* const reason{ stbi_failure_reason() };
+		spdlog::error("Failed to decode the image for temporary texture '{}': {}", name, reason ? reason : "unknown error");
+		return nullptr;
+	}
+
+	const auto sourceWidth{ static_cast<uint32_t>(width) };
+	const auto sourceHeight{ static_cast<uint32_t>(height) };
+	uint32_t factor{ 1 };
+	if (maxWidth > 0)
+		factor = std::max(factor, (sourceWidth + maxWidth - 1) / maxWidth);
+	if (maxHeight > 0)
+		factor = std::max(factor, (sourceHeight + maxHeight - 1) / maxHeight);
+
+	const auto targetWidth{ std::max(1u, sourceWidth / factor) };
+	const auto targetHeight{ std::max(1u, sourceHeight / factor) };
+	std::vector<uint8_t> rgba(static_cast<size_t>(targetWidth) * targetHeight * 4);
+	if (factor == 1)
+		std::memcpy(rgba.data(), pixels, rgba.size());
+	else
+	{
+		for (uint32_t ty{ 0 }; ty < targetHeight; ++ty)
+		{
+			const auto y0{ ty * factor };
+			const auto y1{ std::min(y0 + factor, sourceHeight) };
+			for (uint32_t tx{ 0 }; tx < targetWidth; ++tx)
+			{
+				const auto x0{ tx * factor };
+				const auto x1{ std::min(x0 + factor, sourceWidth) };
+				uint32_t sum[4]{};
+				for (auto y{ y0 }; y < y1; ++y)
+				{
+					const auto* row{ pixels + (static_cast<size_t>(y) * sourceWidth + x0) * 4 };
+					for (auto x{ x0 }; x < x1; ++x, row += 4)
+					{
+						sum[0] += row[0];
+						sum[1] += row[1];
+						sum[2] += row[2];
+						sum[3] += row[3];
+					}
+				}
+				const auto count{ (y1 - y0) * (x1 - x0) };
+				auto* const out{ rgba.data() + (static_cast<size_t>(ty) * targetWidth + tx) * 4 };
+				for (int c{ 0 }; c < 4; ++c)
+					out[c] = static_cast<uint8_t>((sum[c] + count / 2) / count);
+			}
+		}
+	}
+	stbi_image_free(pixels);
+
+	return create_temporary(name, std::move(rgba), static_cast<float>(targetWidth), static_cast<float>(targetHeight));
 }

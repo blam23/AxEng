@@ -355,6 +355,9 @@ ax::WindowFrameImageEvent ax::Window::read_frame_image
 
 	if (request.reference == nullptr)
 	{
+		// The window is opaque, so saved frames should be too (the clear colour has zero alpha).
+		for (size_t i{ 3 }; i < rgbaPixels.size(); i += 4)
+			rgbaPixels[i] = 255;
 		const auto saveResult{ write_png(request.outputPath, m_width, m_height, 4, rgbaPixels.data(), static_cast<uint32_t>(rowBytes)) };
 		result.success = saveResult == Error::Success;
 		result.matches = result.success;
@@ -812,6 +815,7 @@ void ax::Window::reload_pipeline()
 	});
 
 	depthStencilState.depthWriteEnabled = wgpu::OptionalBool::False;
+	depthStencilState.depthCompare = wgpu::CompareFunction::Greater;
 	wgpu::BlendState accumulationBlend{};
 	accumulationBlend.color.srcFactor = wgpu::BlendFactor::One;
 	accumulationBlend.color.dstFactor = wgpu::BlendFactor::One;
@@ -1234,7 +1238,7 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 		m_spriteUploadData.clear();
 		m_spriteUploadData.reserve(sprites.size());
 		for (const auto* sprite : sprites)
-			m_spriteUploadData.push_back(sprite->gpuData);
+			m_spriteUploadData.push_back(sprite->tex->gpu_data_for(sprite->gpuData));
 		m_queue.WriteBuffer(m_uniforms, 0, m_spriteUploadData.data(), m_spriteUploadData.size() * m_uniformStride);
 
 		pass.SetPipeline(pipeline);
@@ -2148,10 +2152,10 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 			m_spriteUploadData.clear();
 			if (pendingSprites != nullptr)
 				for (const auto* sprite : *pendingSprites)
-					m_spriteUploadData.push_back(sprite->gpuData);
+					m_spriteUploadData.push_back(tex->gpu_data_for(sprite->gpuData));
 			for (const auto* sprite : activeSprites)
 				if (!sprite->group || sprite->group->visible())
-					m_spriteUploadData.push_back(sprite->gpuData);
+					m_spriteUploadData.push_back(tex->gpu_data_for(sprite->gpuData));
 
 			const uint32_t count = static_cast<uint32_t>(m_spriteUploadData.size());
 			if (count == 0)
