@@ -25,6 +25,10 @@ manifest.textures = {
 %%TEXTURES%%
 }
 
+manifest.music = {
+%%MUSIC%%
+}
+
 manifest.custom_types = {
 %%TYPES%%
 }

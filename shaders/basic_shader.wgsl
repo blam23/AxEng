@@ -5,7 +5,7 @@ struct Uniforms {
 	tint: vec4<f32>, // r, g, b, a
 	z_idx: f32,
 	rotation: f32,
-	use_region: u32,
+	use_region: u32, // flags: 1 = use region, 2 = signed distance field (alpha 0.5 = edge)
 	screen_space: u32,
 };
 
@@ -24,6 +24,7 @@ struct VSOut {
 	@location(0) uv : vec2<f32>,
 	@location(1) tint : vec4<f32>,
 	@location(2) @interpolate(flat) texelBounds : vec4<f32>,
+	@location(3) @interpolate(flat) sdf : u32,
 };
 
 @vertex
@@ -32,7 +33,7 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	let u = sprites[instance];
 	let i = i32(in_idx);
 	let textureSize = vec2<f32>(textureDimensions(tex, 0));
-	let useRegion = u.use_region != 0u;
+	let useRegion = (u.use_region & 1u) != 0u;
 	let pixelSize = select(textureSize, u.region.zw, useRegion);
 	let size = pixelSize * u.scale;
 	let uv0 = select(vec2<f32>(0.0, 0.0), u.region.xy / textureSize, useRegion);
@@ -75,6 +76,7 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	out.pos = vec4<f32>(ndcX, ndcY, depth, 1.0);
 	out.uv = uv;
 	out.tint = u.tint;
+	out.sdf = (u.use_region >> 1u) & 1u;
 	let texelMin = select(vec2<f32>(0.0), u.region.xy, useRegion);
 	let texelMax = select(textureSize, u.region.xy + u.region.zw, useRegion) - vec2<f32>(1.0);
 	out.texelBounds = clamp(vec4<f32>(texelMin, texelMax),
@@ -82,36 +84,46 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	return out;
 }
 
-fn premultiplied_texel(coord: vec2<i32>, bounds: vec4<f32>) -> vec4<f32> {
+fn texel(coord: vec2<i32>, bounds: vec4<f32>, premultiply: bool) -> vec4<f32> {
 	let pixel = textureLoad(tex, clamp(coord, vec2<i32>(bounds.xy), vec2<i32>(bounds.zw)), 0);
-	return vec4<f32>(pixel.rgb * pixel.a, pixel.a);
+	return select(pixel, vec4<f32>(pixel.rgb * pixel.a, pixel.a), premultiply);
 }
 
 fn sprite_color(in_: VSOut) -> vec4<f32> {
+	let sdf = in_.sdf != 0u;
 	let texturePixelSize = vec2<f32>(1.0) / vec2<f32>(textureDimensions(tex, 0));
 	let spriteScreenResolution = vec2<f32>(1.0) / fwidth(in_.uv);
 	let uvPixelSrc = floor(in_.uv / texturePixelSize + vec2<f32>(0.499));
 	let edge = uvPixelSrc * texturePixelSize * spriteScreenResolution;
 	let uvPixel = in_.uv * spriteScreenResolution;
 	let uvFactor = clamp(uvPixel - edge + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
-	let uv = (mix(uvPixelSrc - vec2<f32>(1.0), uvPixelSrc, uvFactor) + vec2<f32>(0.5)) * texturePixelSize;
+	// Pixel art keeps texels sharp; distance fields are sampled smoothly.
+	let snappedUv = (mix(uvPixelSrc - vec2<f32>(1.0), uvPixelSrc, uvFactor) + vec2<f32>(0.5)) * texturePixelSize;
+	let uv = select(snappedUv, in_.uv, sdf);
 	let texelPos = uv / texturePixelSize - vec2<f32>(0.5);
 	let base = vec2<i32>(floor(texelPos));
 	let fraction = fract(texelPos);
-	// Clamp each tap to the sprite region, not just the full atlas.
+	// Clamp each tap to the sprite region, not just the full atlas. Distance fields aren't premultiplied:
+	// their alpha is a distance, not coverage.
+	let premultiply = !sdf;
 	let top = mix(
-		premultiplied_texel(base, in_.texelBounds),
-		premultiplied_texel(base + vec2<i32>(1, 0), in_.texelBounds), fraction.x);
+		texel(base, in_.texelBounds, premultiply),
+		texel(base + vec2<i32>(1, 0), in_.texelBounds, premultiply), fraction.x);
 	let bottom = mix(
-		premultiplied_texel(base + vec2<i32>(0, 1), in_.texelBounds),
-		premultiplied_texel(base + vec2<i32>(1, 1), in_.texelBounds), fraction.x);
+		texel(base + vec2<i32>(0, 1), in_.texelBounds, premultiply),
+		texel(base + vec2<i32>(1, 1), in_.texelBounds, premultiply), fraction.x);
 	let pixel = mix(top, bottom, fraction.y);
+	// Anti-alias the distance field edge over about one screen pixel at any scale.
+	let distanceWidth = max(fwidth(pixel.a) * 0.5, 0.0001);
+	let sdfAlpha = smoothstep(0.5 - distanceWidth, 0.5 + distanceWidth, pixel.a);
 	// The render passes expect straight alpha; unpremultiply only after filtering.
-	var rgb = vec3<f32>(0.0);
-	if (pixel.a > 0.0) {
+	var rgb = pixel.rgb;
+	if (!sdf && pixel.a > 0.0) {
 		rgb = pixel.rgb / pixel.a;
+	} else if (!sdf) {
+		rgb = vec3<f32>(0.0);
 	}
-	return vec4<f32>(rgb, pixel.a) * in_.tint;
+	return vec4<f32>(rgb, select(pixel.a, sdfAlpha, sdf)) * in_.tint;
 }
 
 @fragment

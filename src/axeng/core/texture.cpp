@@ -631,3 +631,77 @@ std::unique_ptr<ax::Texture> ax::TextureManager::create_temporary(const std::str
 		return nullptr;
 	return texture;
 }
+
+std::unique_ptr<ax::Texture> ax::TextureManager::create_temporary_from_image
+(
+	const std::string& name,
+	const std::vector<uint8_t>& encoded,
+	uint32_t maxWidth,
+	uint32_t maxHeight
+)
+{
+	if (encoded.empty() || encoded.size() > static_cast<size_t>(std::numeric_limits<int>::max()))
+	{
+		spdlog::error("Failed to create temporary texture '{}', no image data.", name);
+		return nullptr;
+	}
+
+	int width{};
+	int height{};
+	int channels{};
+	stbi_uc* const pixels{ stbi_load_from_memory(encoded.data(), static_cast<int>(encoded.size()), &width, &height, &channels, 4) };
+	if (pixels == nullptr || width <= 0 || height <= 0)
+	{
+		if (pixels != nullptr)
+			stbi_image_free(pixels);
+		const char* const reason{ stbi_failure_reason() };
+		spdlog::error("Failed to decode the image for temporary texture '{}': {}", name, reason ? reason : "unknown error");
+		return nullptr;
+	}
+
+	const auto sourceWidth{ static_cast<uint32_t>(width) };
+	const auto sourceHeight{ static_cast<uint32_t>(height) };
+	uint32_t factor{ 1 };
+	if (maxWidth > 0)
+		factor = std::max(factor, (sourceWidth + maxWidth - 1) / maxWidth);
+	if (maxHeight > 0)
+		factor = std::max(factor, (sourceHeight + maxHeight - 1) / maxHeight);
+
+	const auto targetWidth{ std::max(1u, sourceWidth / factor) };
+	const auto targetHeight{ std::max(1u, sourceHeight / factor) };
+	std::vector<uint8_t> rgba(static_cast<size_t>(targetWidth) * targetHeight * 4);
+	if (factor == 1)
+		std::memcpy(rgba.data(), pixels, rgba.size());
+	else
+	{
+		for (uint32_t ty{ 0 }; ty < targetHeight; ++ty)
+		{
+			const auto y0{ ty * factor };
+			const auto y1{ std::min(y0 + factor, sourceHeight) };
+			for (uint32_t tx{ 0 }; tx < targetWidth; ++tx)
+			{
+				const auto x0{ tx * factor };
+				const auto x1{ std::min(x0 + factor, sourceWidth) };
+				uint32_t sum[4]{};
+				for (auto y{ y0 }; y < y1; ++y)
+				{
+					const auto* row{ pixels + (static_cast<size_t>(y) * sourceWidth + x0) * 4 };
+					for (auto x{ x0 }; x < x1; ++x, row += 4)
+					{
+						sum[0] += row[0];
+						sum[1] += row[1];
+						sum[2] += row[2];
+						sum[3] += row[3];
+					}
+				}
+				const auto count{ (y1 - y0) * (x1 - x0) };
+				auto* const out{ rgba.data() + (static_cast<size_t>(ty) * targetWidth + tx) * 4 };
+				for (int c{ 0 }; c < 4; ++c)
+					out[c] = static_cast<uint8_t>((sum[c] + count / 2) / count);
+			}
+		}
+	}
+	stbi_image_free(pixels);
+
+	return create_temporary(name, std::move(rgba), static_cast<float>(targetWidth), static_cast<float>(targetHeight));
+}

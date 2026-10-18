@@ -65,6 +65,7 @@ DO NOT Update the README for anything except build changes that are relevant to 
   - Window-dependent bindings (sprites, shapes) are set up in `lua_application_bindings.cpp` only when the app has a window.
   - Shapes are exposed as `app.shapes` (`list()`, `draw(pass, ...)`, `cap`, `stats()`).
 - `src/axeng/core/lua/external/`: Lua libraries embedded with `#embed` (`lua_libs.cpp`).
+- `src/axeng/core/audio/`: miniaudio based audio (sfxr-style synth, mixer, music assets), bound as `app.audio` on the main thread. See [docs/audio.md](docs/audio.md). Set `AXENG_AUDIO_BACKEND=null` (or `none`) to run apps or tests without making noise.
 - `src/axeng/external/`: third-party code. Don't restyle it.
 
 ## Code style

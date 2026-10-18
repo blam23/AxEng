@@ -8,12 +8,15 @@
 #include <mutex>
 
 // AxEng
+#include "axeng/core/audio/audio_system.h"
+#include "axeng/core/audio/music.h"
 #include "axeng/core/background_worker.h"
 #include "axeng/core/native_tasks.h"
 #include "axeng/core/custom_type.h"
 #include "axeng/core/helpers.h"
 #include "axeng/core/forward.h"
 #include "axeng/core/font_sheet.h"
+#include "axeng/core/sdf_font.h"
 #include "axeng/core/log_timer.h"
 #include "axeng/core/lua/bindings/lua_application_bindings.h"
 #include "axeng/core/lua/bindings/lua_resource_bindings.h"
@@ -73,6 +76,13 @@ namespace ax
 		const lua::ScriptManager& scripts() const noexcept { return m_scripts; }
 		lua::ScriptManager& scripts() noexcept { return m_scripts; }
 
+		const MusicManager& music() const noexcept { return m_music; }
+		MusicManager& music() noexcept { return m_music; }
+
+		// Null when audio is disabled (headless apps, or manifest.audio = false).
+		audio::AudioSystem* audio() noexcept { return m_audio.get(); }
+		const audio::AudioSystem* audio() const noexcept { return m_audio.get(); }
+
 		const UserFileManager& user_files() const noexcept { return m_userFileManager; }
 		UserFileManager& user_files() noexcept { return m_userFileManager; }
 
@@ -119,6 +129,8 @@ namespace ax
 		const std::vector<std::string> m_args;
 
 		bool init_window(wgpu::BackendType backendType);
+		void init_audio(const sol::table& manifest);
+		void shutdown_audio();
 		void add_manifest_bindings(sol::state&);
 		ax::Error add_thread_bindings(sol::state&, const std::vector<std::string>& args);
 		std::unique_ptr<Window> m_window;
@@ -127,7 +139,10 @@ namespace ax
 		std::filesystem::path m_projectSourceDirectory{};
 		lua::ScriptManager m_scripts;
 		TextureManager m_textures;
+		MusicManager m_music;
+		std::unique_ptr<audio::AudioSystem> m_audio;
 		FontSheet m_fontSheet{};
+		SdfFont m_sdfFont{};
 		type::TypeGenerator m_typeGen{};
 		sol::environment m_env;
 		bool m_create_window{ true };

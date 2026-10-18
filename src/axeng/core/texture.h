@@ -57,11 +57,16 @@ namespace ax
 		glm::vec4 tint{ 1.0f, 1.0f, 1.0f, 1.0f };
 		float z{ 0.0f };
 		float rotation{ 0.0f };
+		// Bit flags: sprite_flag_region uses `region`, sprite_flag_sdf renders the texture's alpha as a
+		// signed distance field (0.5 = edge).
 		std::uint32_t useRegion{ 0 };
 		std::uint32_t screenSpace{ 0 };
 
 		static constexpr std::size_t gpuDataSize{ 64 };
 	};
+
+	inline constexpr std::uint32_t sprite_flag_region{ 1u };
+	inline constexpr std::uint32_t sprite_flag_sdf{ 2u };
 
 	struct SpriteDefinition
 	{
@@ -117,6 +122,19 @@ namespace ax
 
 		void add_region(const std::string& subTexture, const rectf& region);
 
+		// Distance field textures (e.g. the SDF font) are drawn with sprite_flag_sdf.
+		bool sdf() const { return m_sdf; }
+		void set_sdf(bool sdf) { m_sdf = sdf; }
+
+		// Sprite data for drawing with this texture, with texture dependent flags applied.
+		SpriteGpuData gpu_data_for(const SpriteGpuData& data) const
+		{
+			auto result{ data };
+			if (m_sdf)
+				result.useRegion |= sprite_flag_sdf;
+			return result;
+		}
+
 	private:
 		void upload(const std::string& name, const void* rgbaPixels, uint32_t bytesPerRow, wgpu::Device& device);
 
@@ -127,6 +145,7 @@ namespace ax
 		std::vector<uint8_t> m_pixels{};
 		std::map<std::string, rectf> m_regions{};
 		bool m_gpuModified{ false };
+		bool m_sdf{ false };
 
 		friend class TextureManager;
 		friend class Window;
@@ -146,6 +165,9 @@ namespace ax
 		// Sub-texture pixel regions can be queried with Texture::region(descriptor).
 		Error create_texture_atlas(const Texture::Descriptor& name, const std::vector<Texture::Descriptor>& textures, float minPadding = 2.0f);
 		std::unique_ptr<Texture> create_temporary(const std::string& name, std::vector<uint8_t> rgbaPixels, float width, float height);
+		// Decodes a PNG into a temporary texture. When the image is larger than maxWidth x maxHeight (0 = no limit)
+		// it is box-filtered down by the smallest whole factor that makes it fit.
+		std::unique_ptr<Texture> create_temporary_from_image(const std::string& name, const std::vector<uint8_t>& encoded, uint32_t maxWidth, uint32_t maxHeight);
 
 	private:
 		wgpu::Device* m_device{ nullptr };

@@ -79,4 +79,41 @@ do
     suite:add_test(test)
 end
 
+do
+    -- A 4x2 opaque red PNG.
+    local PNG = "\137\80\78\71\13\10\26\10\0\0\0\13\73\72\68\82\0\0\0\4\0\0\0\2\8\6\0\0\0\127\168\125\99\0\0\0\18\73\68\65\84\120\156\99\248\207\192\240\31\25\51\160\11\0\0\15\33\15\241\4\55\198\159\0\0\0\0\73\69\78\68\174\66\96\130"
+
+    local test = suite:new("Creates releasable textures from encoded images")
+    function test:run()
+        self:assert(type(app.res.create_temp_texture_from_image) == "function", "create_temp_texture_from_image is not available")
+
+        local full = app.res.create_temp_texture_from_image("lua_image_full", PNG)
+        if not self:assert(full.valid and full.temp, "Failed to create a texture from a PNG") then
+            return
+        end
+        self:assert(full.width == 4 and full.height == 2, "Full size image has the wrong dimensions")
+
+        local small = app.res.create_temp_texture_from_image("lua_image_small", PNG, 2, 2)
+        if not self:assert(small.valid, "Failed to create a downscaled texture from a PNG") then
+            return
+        end
+        self:assert(small.width == 2 and small.height == 1, "Downscaled image should be halved to fit 2x2")
+
+        local invalid = app.res.create_temp_texture_from_image("lua_image_invalid", "not a png")
+        self:assert(not invalid.valid, "Invalid image data should not create a texture")
+
+        local target = app.res.create_temp_texture("lua_image_target", 8, 8)
+        self:assert(app.window.render_to(target, function(canvas)
+            canvas:draw_ui_texture(full, 0, 0)
+        end), "Image textures should be drawable")
+
+        self:assert(app.res.release_temp_texture(target), "Failed to release the image render target")
+        self:assert(app.res.release_temp_texture(full), "Failed to release the full size image")
+        self:assert(app.res.release_temp_texture(small), "Failed to release the downscaled image")
+        self:assert(not full.valid and not small.valid, "Released image textures should be invalid")
+    end
+
+    suite:add_test(test)
+end
+
 return suite

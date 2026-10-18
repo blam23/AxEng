@@ -161,6 +161,41 @@ local function check_and_copy_textures(project, in_directory, out_directory)
     return true
 end
 
+local supported_music_extensions = { [".ogg"] = true, [".mp3"] = true, [".flac"] = true, [".wav"] = true }
+
+local function check_and_copy_music(project, in_directory, out_directory)
+    if project.music == nil then
+        return true
+    end
+
+    for music_name, music_path in pairs(project.music) do
+        local ext = (music_path:match("(%.[^%./\\]+)$") or ""):lower()
+        if not supported_music_extensions[ext] then
+            log.error("Music must be .ogg, .mp3, .flac or .wav, '" .. music_path .. "' is not.")
+            return false
+        end
+
+        local in_path = in_directory .. "/" .. music_path
+        local out_path = out_directory .. "/" .. music_path
+        local sfile = io.open(in_path, "rb")
+        if sfile == nil then
+            log.error("Cannot open music file '" .. in_path .. "'.")
+            return false
+        end
+        sfile:close()
+
+        if not copy_file(in_path, out_path) then
+            return false
+        end
+
+        log.debug("Compiled music: " .. music_name)
+    end
+
+    log.info("Compiled music.")
+
+    return true
+end
+
 local function copy_custom_resources(project, in_directory, out_directory)
     if project.custom_resources == nil then
         return true
@@ -202,6 +237,20 @@ local function gen_textures_text(project)
 
     for k,v in pairs(project.textures) do
         ret = ret .. "    " .. k .. " = \"" .. v .. "\",\n"
+    end
+
+    return ax.rstrip(ret)
+end
+
+local function gen_music_text(project)
+    local ret = ""
+
+    if project.music == nil then
+        return ret
+    end
+
+    for k,v in pairs(project.music) do
+        ret = ret .. "    [\"" .. k .. "\"] = \"" .. v .. "\",\n"
     end
 
     return ax.rstrip(ret)
@@ -266,6 +315,7 @@ local function create_manifest(project, dir, strip_debug_output)
         WINDOW_RESIZABLE = project.resizable ~= nil and tostring(project.resizable) or "true",
         SCRIPTS = gen_script_text(),
         TEXTURES = gen_textures_text(project),
+        MUSIC = gen_music_text(project),
         TYPES = gen_types_text(project),
         PERMISSIONS = gen_permissions_text(project),
         ATLAS_TEXTURE = project.atlas_texture or "null",
@@ -339,6 +389,12 @@ function compile(in_directory, out_directory)
     if not checked_textures then
         log.error("Failed to validate textures.")
         return error_code.InvalidTexture
+    end
+
+    local checked_music = check_and_copy_music(project, in_directory, out_directory)
+    if not checked_music then
+        log.error("Failed to validate music.")
+        return error_code.InvalidResource
     end
 
     local copied_resources = copy_custom_resources(project, in_directory, out_directory)

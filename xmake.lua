@@ -103,6 +103,8 @@ target("AxEngLib")
     add_files(src .. "/axeng/core/shapes/shape_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     -- stb_image.h defines helpers that are only used on some code paths
     add_files(src .. "/axeng/core/texture.cpp", {force = {cxxflags = "-Wno-unused-function"}})
+    -- Third-party single file implementations (miniaudio + stb_vorbis)
+    add_files(src .. "/axeng/core/audio/miniaudio_impl.c", {force = {cflags = "-w"}})
     add_includedirs(src, {public = true})
     add_defines("ENABLE_PROFILER", "IMGUI_IMPL_WEBGPU_BACKEND_DAWN", {public = true})
     add_cxflags("-Wa,-mbig-obj", {tools = {"clang"}})

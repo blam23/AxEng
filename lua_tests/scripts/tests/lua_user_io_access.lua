@@ -43,4 +43,23 @@ do
     suite:add_test(test)
 end
 
+do
+    local test = suite:new("Can Remove Files In User IO Directory")
+    function test:run()
+        local file = app.user_io.open("remove_me.txt", "w")
+        if not file then
+            self:fail("Failed to open remove_me.txt file for writing")
+            return
+        end
+        file:write("delete me")
+        file:close()
+
+        self:assert(app.user_io.remove("remove_me.txt"), "Failed to remove remove_me.txt")
+        self:assert(app.user_io.open("remove_me.txt", "r") == nil, "remove_me.txt still exists after removal")
+        self:assert(not app.user_io.remove("remove_me.txt"), "Removing a missing file should fail")
+    end
+
+    suite:add_test(test)
+end
+
 return suite

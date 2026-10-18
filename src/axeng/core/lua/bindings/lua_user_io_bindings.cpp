@@ -10,6 +10,11 @@ void ax::lua::bindings::setup_user_io_bindings(ax::Application& app, sol::state&
 		{
 			return app.m_userFileManager.open_file(filename, mode);
 		};
+	user_io_table["remove"] =
+		[&app](const std::string& filename) -> bool
+		{
+			return app.m_userFileManager.remove_file(filename);
+		};
 	app_table["user_io"] = user_io_table;
 
 	state.new_usertype<UserFileHandle>

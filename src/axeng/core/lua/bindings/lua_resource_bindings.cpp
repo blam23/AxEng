@@ -3,6 +3,12 @@
 #include "axeng/core/font_sheet.h"
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
 
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <limits>
+#include <vector>
+
 void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state& state)
 {
 	auto app_table{ state["app"].get<sol::table>() };
@@ -112,8 +118,84 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 				};
 		}
 
+		const auto make_temp_texture_table =
+			[&state](const std::string& name, const std::shared_ptr<LuaTextureLease>& lease) -> sol::table
+			{
+				auto ret = state.create_table();
+				if (!lease)
+				{
+					ret["valid"] = false;
+					return ret;
+				}
+
+				const auto& text{ lease->texture };
+				ret["temp"] = true;
+				ret["name"] = name;
+				ret["view"] = text->view();
+				ret["ui_view"] = text->imgui_view();
+				ret["width"] = text->width();
+				ret["height"] = text->height();
+				ret["_lease"] = lease;
+				auto metatable{ state.create_table() };
+				metatable["__index"] =
+					[lease](sol::table table, sol::object key) -> sol::object
+					{
+						if (key.get_type() != sol::type::string)
+							return sol::make_object(table.lua_state(), sol::nil);
+						const auto field{ key.as<std::string>() };
+						if (field == "valid")
+							return sol::make_object(table.lua_state(), lease->active.load(std::memory_order_relaxed));
+						if (field == "ptr")
+						{
+							if (lease->active.load(std::memory_order_relaxed))
+								return sol::make_object(table.lua_state(), lease->texture.get());
+							return sol::make_object(table.lua_state(), sol::nil);
+						}
+						return sol::make_object(table.lua_state(), sol::nil);
+					};
+				ret[sol::metatable_key] = metatable;
+				return ret;
+			};
+
+		resource_lookup_table["get_sdf_font"] =
+			[&app, &state]() -> sol::table
+			{
+				auto ret{ state.create_table() };
+				auto* const text{ app.m_textures.get(std::string{ sdf_font_texture_name }) };
+				if (text == nullptr)
+				{
+					ret["valid"] = false;
+					return ret;
+				}
+
+				const auto& font{ app.m_sdfFont };
+				auto glyphs{ state.create_table() };
+				for (size_t index{}; index < font_glyph_count; ++index)
+				{
+					const auto& glyph{ font.glyphs[index] };
+					glyphs[static_cast<int>(font_first_codepoint + index)] = state.create_table_with(
+						"x", glyph.x, "y", glyph.y, "width", glyph.width, "height", glyph.height,
+						"x_offset", glyph.xOffset, "y_offset", glyph.yOffset, "advance", glyph.advance);
+				}
+				ret["valid"] = true;
+				ret["sdf"] = true;
+				ret["ptr"] = text;
+				ret["view"] = text->view();
+				ret["ui_view"] = text->imgui_view();
+				ret["width"] = text->width();
+				ret["height"] = text->height();
+				ret["glyphs"] = glyphs;
+				ret["baseline"] = font.baseline;
+				ret["line_height"] = font.lineHeight;
+				ret["space_advance"] = font.glyphs[0].advance;
+				ret["texel_scale"] = font.texelScale;
+				// Glyph rectangles include the distance field's spread on every side, in reference pixels.
+				ret["glyph_padding"] = static_cast<float>(sdf_font_spread) * font.texelScale;
+				return ret;
+			};
+
 		resource_lookup_table["create_temp_texture"] =
-			[&app, &state](const std::string& name, const float width, const float height) -> sol::table
+			[&app, make_temp_texture_table](const std::string& name, const float width, const float height) -> sol::table
 			{
 				std::lock_guard lock{ app.m_tempTexturesMutex };
 				auto it{ app.m_tempTextures.find(name) };
@@ -127,44 +209,34 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 					}
 				}
 
-				auto ret = state.create_table();
-				const auto lease{ it != app.m_tempTextures.end() ? it->second : std::shared_ptr<LuaTextureLease>{} };
+				return make_temp_texture_table(name, it != app.m_tempTextures.end() ? it->second : std::shared_ptr<LuaTextureLease>{});
+			};
 
-				if (lease)
+		resource_lookup_table["create_temp_texture_from_image"] =
+			[&app, make_temp_texture_table]
+			(const std::string& name, const std::string& data, sol::optional<float> maxWidth, sol::optional<float> maxHeight) -> sol::table
+			{
+				const auto limit{ [](const sol::optional<float>& value) -> uint32_t
 				{
-					const auto& text{ lease->texture };
-					ret["temp"] = true;
-					ret["name"] = name;
-					ret["view"] = text->view();
-					ret["ui_view"] = text->imgui_view();
-					ret["width"] = text->width();
-					ret["height"] = text->height();
-					ret["_lease"] = lease;
-					auto metatable{ state.create_table() };
-					metatable["__index"] =
-						[lease](sol::table table, sol::object key) -> sol::object
-						{
-							if (key.get_type() != sol::type::string)
-								return sol::make_object(table.lua_state(), sol::nil);
-							const auto field{ key.as<std::string>() };
-							if (field == "valid")
-								return sol::make_object(table.lua_state(), lease->active.load(std::memory_order_relaxed));
-							if (field == "ptr")
-							{
-								if (lease->active.load(std::memory_order_relaxed))
-									return sol::make_object(table.lua_state(), lease->texture.get());
-								return sol::make_object(table.lua_state(), sol::nil);
-							}
-							return sol::make_object(table.lua_state(), sol::nil);
-						};
-					ret[sol::metatable_key] = metatable;
-				}
-				else
+					if (!value || !std::isfinite(*value) || *value < 1.0f)
+						return 0;
+					return static_cast<uint32_t>(std::min(*value, static_cast<float>(std::numeric_limits<uint32_t>::max())));
+				} };
+
+				std::lock_guard lock{ app.m_tempTexturesMutex };
+				auto it{ app.m_tempTextures.find(name) };
+				if (it == app.m_tempTextures.end())
 				{
-					ret["valid"] = false;
+					auto texture{ std::shared_ptr<Texture>{ app.m_textures.create_temporary_from_image(
+						name, std::vector<uint8_t>{ data.begin(), data.end() }, limit(maxWidth), limit(maxHeight)) } };
+					if (texture)
+					{
+						auto lease{ std::make_shared<LuaTextureLease>(std::move(texture)) };
+						it = app.m_tempTextures.emplace(name, std::move(lease)).first;
+					}
 				}
 
-				return ret;
+				return make_temp_texture_table(name, it != app.m_tempTextures.end() ? it->second : std::shared_ptr<LuaTextureLease>{});
 			};
 
 		resource_lookup_table["release_temp_texture"] =

@@ -74,6 +74,9 @@ TEST(LuaTests, RunLuaRenderToSuite)
 	if (!has_d3d12_adapter())
 		GTEST_SKIP() << "No D3D12 WebGPU adapter is available";
 
+	// The image texture test decodes invalid data on purpose.
+	testlog::LogCapture::instance().expect_total_error_count(1);
+
 	const auto sourceProjectPath
 	{
 		std::filesystem::temp_directory_path()
