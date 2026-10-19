@@ -6,11 +6,11 @@
 
 TEST(SdfFont, GeneratesDistanceFieldGlyphsWithBitmapFontMetrics)
 {
-	const auto fontData{ ax::source_code_pro_font_data() };
+	const auto fontData{ ax::main_font_data() };
 	ax::SdfFont font{};
 	ax::FontSheet sheet{};
 	ASSERT_EQ(ax::generate_sdf_font(fontData, font), ax::Error::Success);
-	ASSERT_EQ(ax::generate_source_code_pro_font_sheet(fontData, sheet), ax::Error::Success);
+	ASSERT_EQ(ax::generate_main_font_sheet(fontData, sheet), ax::Error::Success);
 	ASSERT_EQ(font.pixels.size(), static_cast<size_t>(font.width) * font.height * 4);
 	EXPECT_FLOAT_EQ(font.texelScale, ax::sdf_font_reference_height / ax::sdf_font_pixel_height);
 	EXPECT_NEAR(font.baseline, sheet.baseline, 1e-3f);
@@ -47,10 +47,10 @@ TEST(SdfFont, GeneratesDistanceFieldGlyphsWithBitmapFontMetrics)
 
 TEST(FontSheet, GeneratesRegularAndBoldAsciiGlyphs)
 {
-	const auto fontData{ ax::source_code_pro_font_data() };
+	const auto fontData{ ax::main_font_data() };
 	ax::FontSheet sheet{};
 
-	ASSERT_EQ(ax::generate_source_code_pro_font_sheet(fontData, sheet), ax::Error::Success);
+	ASSERT_EQ(ax::generate_main_font_sheet(fontData, sheet), ax::Error::Success);
 	ASSERT_EQ(sheet.pixels.size(), static_cast<size_t>(ax::font_sheet_width) * ax::font_sheet_height * 4);
 
 	const auto countAlpha = [&sheet](const ax::FontGlyphBitmap& bitmap)

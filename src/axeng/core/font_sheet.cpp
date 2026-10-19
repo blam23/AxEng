@@ -92,7 +92,7 @@ namespace
 	}
 }
 
-ax::Error ax::generate_source_code_pro_font_sheet(std::span<const uint8_t> fontData, FontSheet& sheet)
+ax::Error ax::generate_main_font_sheet(std::span<const uint8_t> fontData, FontSheet& sheet)
 {
 	sheet = {};
 	if (fontData.empty())

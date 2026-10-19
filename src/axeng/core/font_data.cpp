@@ -2,13 +2,13 @@
 
 namespace
 {
-	unsigned char sourceCodeProFont[] =
+	unsigned char mainFont[] =
 	{
-		#embed "../../../fonts/SourceCodePro-Medium.ttf"
+		#embed "../../../fonts/Reglo-Bold.ttf"
 	};
 }
 
-std::span<unsigned char> ax::source_code_pro_font_data() noexcept
+std::span<unsigned char> ax::main_font_data() noexcept
 {
-	return sourceCodeProFont;
+	return mainFont;
 }

@@ -223,8 +223,8 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 	{
 		init_window(backendType);
 
-		const auto fontData{ source_code_pro_font_data() };
-		const auto fontResult{ generate_source_code_pro_font_sheet(fontData, m_fontSheet) };
+		const auto fontData{ main_font_data() };
+		const auto fontResult{ generate_main_font_sheet(fontData, m_fontSheet) };
 		if (fontResult != Error::Success)
 		{
 			spdlog::error("Failed to generate the Source Code Pro font sheet.");
@@ -240,7 +240,7 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 			return false;
 		}
 
-		if (m_textures.load_from_raw("__builtin_font", "SourceCodePro-Medium.ttf", encodedFont) == nullptr)
+		if (m_textures.load_from_raw("__builtin_font", "QuirkyRobot.ttf", encodedFont) == nullptr)
 		{
 			spdlog::error("Failed to load the generated Source Code Pro font sheet.");
 			return false;
@@ -250,7 +250,7 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 		{
 			std::vector<uint8_t> encodedSdf{};
 			auto* sdfTexture{ encode_png(m_sdfFont.width, m_sdfFont.height, 4, m_sdfFont.pixels.data(), m_sdfFont.width * 4, encodedSdf) == Error::Success
-				? m_textures.load_from_raw(std::string{ sdf_font_texture_name }, "SourceCodePro-Medium.ttf", encodedSdf)
+				? m_textures.load_from_raw(std::string{ sdf_font_texture_name }, "QuirkyRobot.ttf", encodedSdf)
 				: nullptr };
 			if (sdfTexture != nullptr)
 				sdfTexture->set_sdf(true);

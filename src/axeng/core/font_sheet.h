@@ -40,6 +40,6 @@ namespace ax
 		float lineHeight{};
 	};
 
-	Error generate_source_code_pro_font_sheet(std::span<const uint8_t> fontData, FontSheet& sheet);
+	Error generate_main_font_sheet(std::span<const uint8_t> fontData, FontSheet& sheet);
 	bool is_font_texture_name(std::string_view name) noexcept;
 }

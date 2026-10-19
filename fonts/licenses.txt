@@ -18,3 +18,8 @@ This Font Software is licensed under the SIL Open Font License, Version 1.1 . Th
 
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007 
 =======================
+
+=======================
+Reglo-Bold
+=======================
+SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
