@@ -10,8 +10,10 @@
 #include "axeng/core/lua/bindings/lua_sprite_bindings.h"
 #include "axeng/core/lua/bindings/lua_user_io_bindings.h"
 #include "axeng/core/lua/bindings/lua_window_bindings.h"
+#include "axeng/core/window.h"
 #include "spdlog/spdlog.h"
 #include <chrono>
+#include <string>
 
 void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::state& state, bool mainThread)
 {
@@ -36,6 +38,21 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 		app_table["project_source_directory"] = app.project_source_directory().string();
 
 	setup_user_io_bindings(app, state);
+
+	if (mainThread && app.has_window())
+	{
+		auto clipboard{ state.create_table() };
+		clipboard["get"] = [&app]()
+		{
+			const char* text{ glfwGetClipboardString(app.window()->glfw_handle()) };
+			return text ? std::string{ text } : std::string{};
+		};
+		clipboard["set"] = [&app](const std::string& text)
+		{
+			glfwSetClipboardString(app.window()->glfw_handle(), text.c_str());
+		};
+		app_table["clipboard"] = clipboard;
+	}
 
 	if (app.has_window())
 	{
