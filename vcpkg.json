@@ -15,6 +15,13 @@
                          "luajit",
                          "miniaudio",
                          "minizip-ng",
+                         {
+                             "name": "msdfgen",
+                             "default-features": false,
+                             "features": [
+                                 "extensions"
+                             ]
+                         },
                          "sol2",
                          "spdlog",
                          "stb",

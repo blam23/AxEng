@@ -36,7 +36,7 @@ namespace ax
 	struct SdfFont
 	{
 		std::array<SdfGlyph, font_glyph_count> glyphs{};
-		// RGBA: white with the distance in alpha (128 = edge, higher = inside).
+		// SDF uses alpha for distance; MSDF uses encoded RGB distances with opaque alpha.
 		std::vector<uint8_t> pixels{};
 		uint32_t width{};
 		uint32_t height{};
@@ -46,5 +46,6 @@ namespace ax
 		float texelScale{};
 	};
 
-	Error generate_sdf_font(std::span<const uint8_t> fontData, SdfFont& font);
+	Error generate_sdf_font(std::span<const uint8_t> fontData, SdfFont& font,
+		float pixelHeight = sdf_font_pixel_height, int spread = sdf_font_spread, float thickness = 0.0f);
 }

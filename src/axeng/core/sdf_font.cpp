@@ -1,13 +1,17 @@
 #include "axeng/core/sdf_font.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include <stb_truetype.h>
 
-ax::Error ax::generate_sdf_font(std::span<const uint8_t> fontData, SdfFont& font)
+ax::Error ax::generate_sdf_font(std::span<const uint8_t> fontData, SdfFont& font,
+	float pixelHeight, int spread, float thickness)
 {
 	font = {};
-	if (fontData.empty())
+	if (fontData.empty() || !std::isfinite(pixelHeight) || pixelHeight <= 0.0f || spread <= 0 ||
+		!std::isfinite(thickness) || thickness < 0.0f ||
+		thickness > spread * sdf_font_reference_height / pixelHeight)
 		return Error::InvalidTexture;
 
 	std::vector<unsigned char> mutableFontData{ fontData.begin(), fontData.end() };
@@ -15,9 +19,9 @@ ax::Error ax::generate_sdf_font(std::span<const uint8_t> fontData, SdfFont& font
 	if (stbtt_InitFont(&info, mutableFontData.data(), 0) == 0)
 		return Error::InvalidTexture;
 
-	const float scale{ stbtt_ScaleForPixelHeight(&info, sdf_font_pixel_height) };
+	const float scale{ stbtt_ScaleForPixelHeight(&info, pixelHeight) };
 	const float referenceScale{ stbtt_ScaleForPixelHeight(&info, sdf_font_reference_height) };
-	font.texelScale = sdf_font_reference_height / sdf_font_pixel_height;
+	font.texelScale = sdf_font_reference_height / pixelHeight;
 	int ascent{}, descent{}, lineGap{};
 	stbtt_GetFontVMetrics(&info, &ascent, &descent, &lineGap);
 	font.baseline = ascent * referenceScale;
@@ -33,7 +37,7 @@ ax::Error ax::generate_sdf_font(std::span<const uint8_t> fontData, SdfFont& font
 	std::vector<Raster> rasters{};
 	rasters.reserve(font_glyph_count);
 	constexpr unsigned char onEdge{ 128 };
-	constexpr float distanceScale{ static_cast<float>(onEdge) / sdf_font_spread };
+	const float distanceScale{ static_cast<float>(onEdge) / spread };
 	for (size_t index{}; index < font_glyph_count; ++index)
 	{
 		const int codepoint{ static_cast<int>(font_first_codepoint + index) };
@@ -43,7 +47,7 @@ ax::Error ax::generate_sdf_font(std::span<const uint8_t> fontData, SdfFont& font
 		glyph.advance = advanceWidth * referenceScale;
 
 		int width{}, height{}, xOffset{}, yOffset{};
-		unsigned char* sdf{ stbtt_GetCodepointSDF(&info, scale, codepoint, sdf_font_spread, onEdge, distanceScale,
+		unsigned char* sdf{ stbtt_GetCodepointSDF(&info, scale, codepoint, spread, onEdge, distanceScale,
 			&width, &height, &xOffset, &yOffset) };
 		if (sdf == nullptr || width <= 0 || height <= 0)
 		{
@@ -98,6 +102,7 @@ ax::Error ax::generate_sdf_font(std::span<const uint8_t> fontData, SdfFont& font
 		font.pixels[i + 1] = 255;
 		font.pixels[i + 2] = 255;
 	}
+	const float thicknessOffset{ thickness / font.texelScale * distanceScale };
 	for (const auto& raster : rasters)
 	{
 		const auto& glyph{ font.glyphs[raster.index] };
@@ -106,7 +111,9 @@ ax::Error ax::generate_sdf_font(std::span<const uint8_t> fontData, SdfFont& font
 			for (int x{}; x < raster.width; ++x)
 			{
 				const size_t offset{ ((static_cast<size_t>(glyph.y) + y) * font.width + glyph.x + x) * 4 + 3 };
-				font.pixels[offset] = raster.distance[static_cast<size_t>(y) * raster.width + x];
+				const auto sample{ raster.distance[static_cast<size_t>(y) * raster.width + x] };
+				font.pixels[offset] = static_cast<uint8_t>(std::clamp(
+					static_cast<int>(std::lround(sample + thicknessOffset)), 0, 255));
 			}
 		}
 	}

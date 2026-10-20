@@ -57,8 +57,7 @@ namespace ax
 		glm::vec4 tint{ 1.0f, 1.0f, 1.0f, 1.0f };
 		float z{ 0.0f };
 		float rotation{ 0.0f };
-		// Bit flags: sprite_flag_region uses `region`, sprite_flag_sdf renders the texture's alpha as a
-		// signed distance field (0.5 = edge).
+		// Bit flags: sprite_flag_region uses `region`; SDF/MSDF flags select their distance channels.
 		std::uint32_t useRegion{ 0 };
 		std::uint32_t screenSpace{ 0 };
 		glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
@@ -68,6 +67,7 @@ namespace ax
 
 	inline constexpr std::uint32_t sprite_flag_region{ 1u };
 	inline constexpr std::uint32_t sprite_flag_sdf{ 2u };
+	inline constexpr std::uint32_t sprite_flag_msdf{ 4u };
 
 	struct SpriteDefinition
 	{
@@ -127,6 +127,8 @@ namespace ax
 		// Distance field textures (e.g. the SDF font) are drawn with sprite_flag_sdf.
 		bool sdf() const { return m_sdf; }
 		void set_sdf(bool sdf) { m_sdf = sdf; }
+		bool msdf() const { return m_msdf; }
+		void set_msdf(bool msdf) { m_msdf = msdf; }
 
 		// Sprite data for drawing with this texture, with texture dependent flags applied.
 		SpriteGpuData gpu_data_for(const SpriteGpuData& data) const
@@ -134,6 +136,8 @@ namespace ax
 			auto result{ data };
 			if (m_sdf)
 				result.useRegion |= sprite_flag_sdf;
+			if (m_msdf)
+				result.useRegion |= sprite_flag_msdf;
 			return result;
 		}
 
@@ -148,6 +152,7 @@ namespace ax
 		std::map<std::string, rectf> m_regions{};
 		bool m_gpuModified{ false };
 		bool m_sdf{ false };
+		bool m_msdf{ false };
 
 		friend class TextureManager;
 		friend class Window;

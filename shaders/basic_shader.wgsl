@@ -5,7 +5,7 @@ struct Uniforms {
 	tint: vec4<f32>, // r, g, b, a
 	z_idx: f32,
 	rotation: f32,
-	use_region: u32, // flags: 1 = use region, 2 = signed distance field (alpha 0.5 = edge)
+	use_region: u32, // flags: 1 = use region, 2 = SDF, 4 = MSDF (distance edge at 0.5)
 	screen_space: u32,
 	clip_rect: vec4<f32>, // min x/y and max x/y in screen pixels; max < min disables clipping
 };
@@ -78,7 +78,7 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	out.pos = vec4<f32>(ndcX, ndcY, depth, 1.0);
 	out.uv = uv;
 	out.tint = u.tint;
-	out.sdf = (u.use_region >> 1u) & 1u;
+	out.sdf = (u.use_region >> 1u) & 3u;
 	out.clip_rect = u.clip_rect;
 	let texelMin = select(vec2<f32>(0.0), u.region.xy, useRegion);
 	let texelMax = select(textureSize, u.region.xy + u.region.zw, useRegion) - vec2<f32>(1.0);
@@ -92,8 +92,27 @@ fn texel(coord: vec2<i32>, bounds: vec4<f32>, premultiply: bool) -> vec4<f32> {
 	return select(pixel, vec4<f32>(pixel.rgb * pixel.a, pixel.a), premultiply);
 }
 
+fn sample_texture(uv: vec2<f32>, bounds: vec4<f32>, premultiply: bool) -> vec4<f32> {
+	let texturePixelSize = vec2<f32>(1.0) / vec2<f32>(textureDimensions(tex, 0));
+	let texelPos = uv / texturePixelSize - vec2<f32>(0.5);
+	let base = vec2<i32>(floor(texelPos));
+	let fraction = fract(texelPos);
+	let top = mix(
+		texel(base, bounds, premultiply),
+		texel(base + vec2<i32>(1, 0), bounds, premultiply), fraction.x);
+	let bottom = mix(
+		texel(base + vec2<i32>(0, 1), bounds, premultiply),
+		texel(base + vec2<i32>(1, 1), bounds, premultiply), fraction.x);
+	return mix(top, bottom, fraction.y);
+}
+
+fn median3(values: vec3<f32>) -> f32 {
+	return max(min(values.r, values.g), min(max(values.r, values.g), values.b));
+}
+
 fn sprite_color(in_: VSOut) -> vec4<f32> {
 	let sdf = in_.sdf != 0u;
+	let msdf = in_.sdf == 2u;
 	let texturePixelSize = vec2<f32>(1.0) / vec2<f32>(textureDimensions(tex, 0));
 	let spriteScreenResolution = vec2<f32>(1.0) / fwidth(in_.uv);
 	let uvPixelSrc = floor(in_.uv / texturePixelSize + vec2<f32>(0.499));
@@ -103,25 +122,33 @@ fn sprite_color(in_: VSOut) -> vec4<f32> {
 	// Pixel art keeps texels sharp; distance fields are sampled smoothly.
 	let snappedUv = (mix(uvPixelSrc - vec2<f32>(1.0), uvPixelSrc, uvFactor) + vec2<f32>(0.5)) * texturePixelSize;
 	let uv = select(snappedUv, in_.uv, sdf);
-	let texelPos = uv / texturePixelSize - vec2<f32>(0.5);
-	let base = vec2<i32>(floor(texelPos));
-	let fraction = fract(texelPos);
 	// Clamp each tap to the sprite region, not just the full atlas. Distance fields aren't premultiplied:
 	// their alpha is a distance, not coverage.
 	let premultiply = !sdf;
-	let top = mix(
-		texel(base, in_.texelBounds, premultiply),
-		texel(base + vec2<i32>(1, 0), in_.texelBounds, premultiply), fraction.x);
-	let bottom = mix(
-		texel(base + vec2<i32>(0, 1), in_.texelBounds, premultiply),
-		texel(base + vec2<i32>(1, 1), in_.texelBounds, premultiply), fraction.x);
-	let pixel = mix(top, bottom, fraction.y);
-	// Anti-alias the distance field edge over about one screen pixel at any scale.
-	let distanceWidth = max(fwidth(pixel.a) * 0.5, 0.0001);
-	let sdfAlpha = smoothstep(0.5 - distanceWidth, 0.5 + distanceWidth, pixel.a);
+	let pixel = sample_texture(uv, in_.texelBounds, premultiply);
+	let distance = select(pixel.a, median3(pixel.rgb), msdf);
+	// Four quarter-pixel samples approximate 2x render-and-downsample for distance-field sprites.
+	let distanceWidth = max(fwidth(distance) * 0.25, 0.0001);
+	let lowerEdge = 0.5 - distanceWidth;
+	let upperEdge = 0.5 + distanceWidth;
+	var sdfAlpha = smoothstep(lowerEdge, upperEdge, distance);
+	let sampleOffsetX = dpdx(in_.uv) * 0.25;
+	let sampleOffsetY = dpdy(in_.uv) * 0.25;
+	if (sdf) {
+		let sample0 = sample_texture(uv - sampleOffsetX - sampleOffsetY, in_.texelBounds, false);
+		let sample1 = sample_texture(uv + sampleOffsetX - sampleOffsetY, in_.texelBounds, false);
+		let sample2 = sample_texture(uv - sampleOffsetX + sampleOffsetY, in_.texelBounds, false);
+		let sample3 = sample_texture(uv + sampleOffsetX + sampleOffsetY, in_.texelBounds, false);
+		sdfAlpha = (smoothstep(lowerEdge, upperEdge, select(sample0.a, median3(sample0.rgb), msdf))
+			+ smoothstep(lowerEdge, upperEdge, select(sample1.a, median3(sample1.rgb), msdf))
+			+ smoothstep(lowerEdge, upperEdge, select(sample2.a, median3(sample2.rgb), msdf))
+			+ smoothstep(lowerEdge, upperEdge, select(sample3.a, median3(sample3.rgb), msdf))) * 0.25;
+	}
 	// The render passes expect straight alpha; unpremultiply only after filtering.
 	var rgb = pixel.rgb;
-	if (!sdf && pixel.a > 0.0) {
+	if (msdf) {
+		rgb = vec3<f32>(1.0);
+	} else if (!sdf && pixel.a > 0.0) {
 		rgb = pixel.rgb / pixel.a;
 	} else if (!sdf) {
 		rgb = vec3<f32>(0.0);

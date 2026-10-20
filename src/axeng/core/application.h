@@ -142,7 +142,7 @@ namespace ax
 		MusicManager m_music;
 		std::unique_ptr<audio::AudioSystem> m_audio;
 		FontSheet m_fontSheet{};
-		SdfFont m_sdfFont{};
+		SdfFont m_msdfFont{};
 		type::TypeGenerator m_typeGen{};
 		sol::environment m_env;
 		bool m_create_window{ true };

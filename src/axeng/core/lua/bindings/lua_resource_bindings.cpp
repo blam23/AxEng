@@ -1,6 +1,7 @@
 #include "axeng/core/lua/bindings/lua_resource_bindings.h"
 #include "axeng/core/application.h"
 #include "axeng/core/font_sheet.h"
+#include "axeng/core/msdf_font.h"
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
 
 #include <algorithm>
@@ -168,7 +169,7 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 					return ret;
 				}
 
-				const auto& font{ app.m_sdfFont };
+				const auto& font{ app.m_msdfFont };
 				auto glyphs{ state.create_table() };
 				for (size_t index{}; index < font_glyph_count; ++index)
 				{
@@ -190,7 +191,7 @@ void ax::lua::bindings::setup_resource_bindings(ax::Application& app, sol::state
 				ret["space_advance"] = font.glyphs[0].advance;
 				ret["texel_scale"] = font.texelScale;
 				// Glyph rectangles include the distance field's spread on every side, in reference pixels.
-				ret["glyph_padding"] = static_cast<float>(sdf_font_spread) * font.texelScale;
+				ret["glyph_padding"] = static_cast<float>(msdf_font_spread) * font.texelScale;
 				return ret;
 			};
 

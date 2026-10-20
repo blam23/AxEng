@@ -2,11 +2,20 @@
 #include <dawn/native/DawnNative.h>
 #include <windows.h>
 
+#include "axeng/core/font_data.h"
+#include "axeng/core/msdf_font.h"
+#include "axeng/core/sdf_font.h"
 #include "axeng/core/texture.h"
 #include "axeng/core/retained_sprites.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <limits>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,6 +27,46 @@ namespace
 	};
 	constexpr std::uint32_t s_size{ 64 };
 	using Pixel = std::array<std::uint8_t, 4>;
+
+	std::vector<ax::SpriteGpuData> make_sdf_text(const ax::SdfFont& font, std::string_view text,
+		float centerX, float baselineY, float textScale, glm::vec4 tint,
+		std::uint32_t distanceFieldFlag = ax::sprite_flag_sdf)
+	{
+		float textWidth{};
+		for (const unsigned char character : text)
+		{
+			const auto index{ static_cast<std::size_t>(character - ax::font_first_codepoint) };
+			if (index < font.glyphs.size())
+				textWidth += font.glyphs[index].advance * textScale;
+		}
+
+		float penX{ centerX - textWidth * 0.5f };
+		std::vector<ax::SpriteGpuData> sprites{};
+		sprites.reserve(text.size());
+		for (const unsigned char character : text)
+		{
+			const auto index{ static_cast<std::size_t>(character - ax::font_first_codepoint) };
+			if (index >= font.glyphs.size())
+				continue;
+
+			const auto& glyph{ font.glyphs[index] };
+			if (glyph.width > 0 && glyph.height > 0)
+			{
+				ax::SpriteGpuData sprite{};
+				sprite.pos = { penX + glyph.xOffset * textScale, baselineY + glyph.yOffset * textScale };
+				sprite.scale = { font.texelScale * textScale, font.texelScale * textScale };
+				sprite.tint = tint;
+				sprite.region = { static_cast<float>(glyph.x), static_cast<float>(glyph.y),
+					static_cast<float>(glyph.width), static_cast<float>(glyph.height) };
+				sprite.useRegion = ax::sprite_flag_region | distanceFieldFlag;
+				sprite.screenSpace = 1;
+				sprites.push_back(sprite);
+			}
+			penX += glyph.advance * textScale;
+		}
+		return sprites;
+	}
+
 }
 
 class SpriteShaderTest : public testing::Test
@@ -81,7 +130,9 @@ protected:
 
 	static std::vector<Pixel> render(const std::vector<Pixel>& pixels, std::uint32_t width,
 		std::uint32_t height, const std::vector<ax::SpriteGpuData>& sprites, const char* entry = "fs_main",
-		wgpu::Buffer retained = nullptr)
+		wgpu::Buffer retained = nullptr, std::uint32_t outputWidth = s_size,
+		std::uint32_t outputHeight = s_size, std::array<double, 4> clearColour = { 0.0, 0.0, 0.0, 0.0 },
+		bool blend = false)
 	{
 		wgpu::ShaderSourceWGSL source{};
 		source.code = { reinterpret_cast<const char*>(s_shader), sizeof(s_shader) };
@@ -113,8 +164,16 @@ protected:
 		wgpu::PipelineLayoutDescriptor pipelineLayoutDesc{};
 		pipelineLayoutDesc.bindGroupLayoutCount = layouts.size();
 		pipelineLayoutDesc.bindGroupLayouts = layouts.data();
+		wgpu::BlendState blendState{};
+		blendState.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
+		blendState.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+		blendState.color.operation = wgpu::BlendOperation::Add;
+		blendState.alpha.srcFactor = wgpu::BlendFactor::One;
+		blendState.alpha.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+		blendState.alpha.operation = wgpu::BlendOperation::Add;
 		wgpu::ColorTargetState colourTarget{};
 		colourTarget.format = wgpu::TextureFormat::RGBA8Unorm;
+		colourTarget.blend = blend ? &blendState : nullptr;
 		wgpu::FragmentState fragment{};
 		fragment.module = shader;
 		fragment.entryPoint = entry;
@@ -153,7 +212,8 @@ protected:
 		const auto spriteBuffer{ retained ? retained : s_device.CreateBuffer(&bufferDesc) };
 		if (!retained)
 			s_device.GetQueue().WriteBuffer(spriteBuffer, 0, sprites.data(), bufferDesc.size);
-		const std::array<float, 8> camera{ s_size, s_size, 0, 0, 0, 0, 1, 0 };
+		const std::array<float, 8> camera{ static_cast<float>(outputWidth), static_cast<float>(outputHeight),
+			0, 0, 0, 0, 1, 0 };
 		bufferDesc.size = sizeof(camera);
 		bufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
 		const auto cameraBuffer{ s_device.CreateBuffer(&bufferDesc) };
@@ -184,10 +244,12 @@ protected:
 		groupDesc.entries = &cameraEntry;
 		const auto cameraGroup{ s_device.CreateBindGroup(&groupDesc) };
 
-		textureDesc.size = { s_size, s_size };
+		textureDesc.size = { outputWidth, outputHeight };
 		textureDesc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopySrc;
 		const auto output{ s_device.CreateTexture(&textureDesc) };
-		bufferDesc.size = s_size * s_size * sizeof(Pixel);
+		const std::uint32_t bytesPerRow{
+			(outputWidth * static_cast<std::uint32_t>(sizeof(Pixel)) + 255u) & ~255u };
+		bufferDesc.size = static_cast<std::uint64_t>(bytesPerRow) * outputHeight;
 		bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
 		const auto readback{ s_device.CreateBuffer(&bufferDesc) };
 		const auto encoder{ s_device.CreateCommandEncoder() };
@@ -195,6 +257,7 @@ protected:
 		attachment.view = output.CreateView();
 		attachment.loadOp = wgpu::LoadOp::Clear;
 		attachment.storeOp = wgpu::StoreOp::Store;
+		attachment.clearValue = { clearColour[0], clearColour[1], clearColour[2], clearColour[3] };
 		wgpu::RenderPassDescriptor passDesc{};
 		passDesc.colorAttachmentCount = 1;
 		passDesc.colorAttachments = &attachment;
@@ -209,8 +272,8 @@ protected:
 		copySource.texture = output;
 		wgpu::TexelCopyBufferInfo destination{};
 		destination.buffer = readback;
-		destination.layout.bytesPerRow = s_size * sizeof(Pixel);
-		destination.layout.rowsPerImage = s_size;
+		destination.layout.bytesPerRow = bytesPerRow;
+		destination.layout.rowsPerImage = outputHeight;
 		encoder.CopyTextureToBuffer(&copySource, &destination, &textureDesc.size);
 		const auto commands{ encoder.Finish() };
 		s_device.GetQueue().Submit(1, &commands);
@@ -223,8 +286,12 @@ protected:
 			}), UINT64_MAX);
 		if (!mapped)
 			return {};
-		std::vector<Pixel> result(s_size * s_size);
-		std::memcpy(result.data(), readback.GetConstMappedRange(), bufferDesc.size);
+		std::vector<Pixel> result(static_cast<std::size_t>(outputWidth) * outputHeight);
+		const auto* mappedBytes{ static_cast<const std::uint8_t*>(readback.GetConstMappedRange()) };
+		for (std::uint32_t y{}; y < outputHeight; ++y)
+			std::memcpy(result.data() + static_cast<std::size_t>(y) * outputWidth,
+				mappedBytes + static_cast<std::size_t>(y) * bytesPerRow,
+				static_cast<std::size_t>(outputWidth) * sizeof(Pixel));
 		readback.Unmap();
 		return result;
 	}
@@ -342,6 +409,305 @@ TEST_F(SpriteShaderTest, DistanceFieldSpritesHaveSharpAntialiasedEdges)
 	EXPECT_GE(countPartial(sdf), 1);
 	EXPECT_LE(countPartial(sdf), 3);
 	EXPECT_GT(countPartial(plain), 20);
+}
+
+TEST_F(SpriteShaderTest, WritesSdfFontRenderSamples)
+{
+	char* settingValue{};
+	std::size_t settingLength{};
+	ASSERT_EQ(_dupenv_s(&settingValue, &settingLength, "AXENG_SDF_FONT_SAMPLES"), 0);
+	const std::string setting{ settingValue != nullptr ? settingValue : "" };
+	std::free(settingValue);
+	if (setting.empty() || setting == "0")
+		GTEST_SKIP() << "Set AXENG_SDF_FONT_SAMPLES=1 to write SDF font comparison images";
+
+	const std::filesystem::path outputDirectory{
+		setting == "1" || setting == "true"
+			? std::filesystem::temp_directory_path() / "AxEngSdfFontSamples"
+			: std::filesystem::path(setting) };
+	std::error_code filesystemError{};
+	std::filesystem::create_directories(outputDirectory, filesystemError);
+	ASSERT_FALSE(filesystemError) << filesystemError.message();
+
+	constexpr std::uint32_t width{ 320 };
+	constexpr std::uint32_t height{ 48 };
+	const std::array<double, 4> steamBackground{ 0.82, 0.85, 0.91, 1.0 };
+	constexpr std::array fontSizes{ 8u, 10u, 12u, 16u };
+	const auto fontData{ ax::main_font_data() };
+	std::vector<Pixel> baselineSdf16{};
+	std::array<std::vector<Pixel>, 4> baselineSdfSamples{};
+	std::array<std::vector<Pixel>, 4> msdfSamples{};
+	const auto writeSample = [&](std::string_view name, const ax::SdfFont& font,
+		std::uint32_t fontSize, std::array<double, 4> background, glm::vec4 foreground,
+		float shadowOpacity, std::uint32_t supersampleFactor, std::uint32_t distanceFieldFlag)
+		-> std::vector<Pixel>
+	{
+		const float fontScale{ static_cast<float>(fontSize) / ax::sdf_font_reference_height };
+		const float textScale{ fontScale * supersampleFactor };
+		const float baseline{ ((height - fontSize) * 0.5f + font.baseline * fontScale) * supersampleFactor };
+		const auto renderWidth{ width * supersampleFactor };
+		const auto renderHeight{ height * supersampleFactor };
+		const float centerX{ static_cast<float>(width) * supersampleFactor * 0.5f };
+		std::vector<ax::SpriteGpuData> sprites{};
+		if (shadowOpacity > 0.0f)
+			sprites = make_sdf_text(font, "Steam 168/200", centerX + static_cast<float>(supersampleFactor),
+				baseline + static_cast<float>(supersampleFactor), textScale,
+				{ 0.0f, 0.0f, 0.0f, shadowOpacity }, distanceFieldFlag);
+		auto foregroundSprites{ make_sdf_text(font, "Steam 168/200", centerX, baseline,
+			textScale, foreground, distanceFieldFlag) };
+		sprites.insert(sprites.end(), foregroundSprites.begin(), foregroundSprites.end());
+
+		std::vector<Pixel> atlasPixels(font.pixels.size() / sizeof(Pixel));
+		std::memcpy(atlasPixels.data(), font.pixels.data(), font.pixels.size());
+		const auto rendered{ render(atlasPixels, font.width, font.height, sprites, "fs_main", nullptr,
+			renderWidth, renderHeight, background, true) };
+		if (rendered.size() != static_cast<std::size_t>(renderWidth) * renderHeight)
+			return {};
+
+		std::vector<Pixel> image(static_cast<std::size_t>(width) * height);
+		const auto sampleCount{ supersampleFactor * supersampleFactor };
+		for (std::uint32_t y{}; y < height; ++y)
+		{
+			for (std::uint32_t x{}; x < width; ++x)
+			{
+				std::array<std::uint32_t, 4> channels{};
+				for (std::uint32_t sy{}; sy < supersampleFactor; ++sy)
+				{
+					for (std::uint32_t sx{}; sx < supersampleFactor; ++sx)
+					{
+						const auto& sample{ rendered[static_cast<std::size_t>(y * supersampleFactor + sy) *
+							renderWidth + x * supersampleFactor + sx] };
+						for (std::size_t channel{}; channel < channels.size(); ++channel)
+							channels[channel] += sample[channel];
+					}
+				}
+				auto& pixel{ image[static_cast<std::size_t>(y) * width + x] };
+				for (std::size_t channel{}; channel < channels.size(); ++channel)
+					pixel[channel] = static_cast<std::uint8_t>((channels[channel] + sampleCount / 2) / sampleCount);
+			}
+		}
+
+		if (name == "size_16px_sdf_default_2x_downsample.png")
+			baselineSdf16 = image;
+		if (name == "size_16px_msdfgen_96x16_2x_downsample.png" &&
+			baselineSdf16.size() == image.size())
+		{
+			std::uint64_t uprightDifference{};
+			std::uint64_t flippedDifference{};
+			for (std::uint32_t y{}; y < height; ++y)
+			{
+					for (std::uint32_t x{}; x < width; ++x)
+					{
+						const auto index{ static_cast<std::size_t>(y) * width + x };
+						const auto flippedIndex{ static_cast<std::size_t>(height - y - 1) * width + x };
+						for (std::size_t channel{}; channel < 3; ++channel)
+						{
+							uprightDifference += static_cast<std::uint64_t>(
+								std::abs(static_cast<int>(baselineSdf16[index][channel]) - image[index][channel]));
+							flippedDifference += static_cast<std::uint64_t>(
+								std::abs(static_cast<int>(baselineSdf16[index][channel]) - image[flippedIndex][channel]));
+						}
+					}
+			}
+			EXPECT_LT(uprightDifference, flippedDifference) << "MSDF glyphs appear vertically flipped";
+		}
+
+		if (distanceFieldFlag == ax::sprite_flag_msdf)
+		{
+			const auto backgroundPixel{ image.front() };
+			const auto hasVisibleText{ std::any_of(image.begin(), image.end(), [&](const Pixel& pixel)
+			{
+				return pixel != backgroundPixel;
+			}) };
+			EXPECT_TRUE(hasVisibleText) << name;
+		}
+
+		const auto path{ outputDirectory / std::string(name) };
+		const auto result{ ax::write_png(path, width, height, 4, image.data(),
+			width * static_cast<std::uint32_t>(sizeof(Pixel))) };
+		EXPECT_EQ(result, ax::Error::Success) << path.string();
+		return result == ax::Error::Success ? std::move(image) : std::vector<Pixel>{};
+	};
+
+	constexpr glm::vec4 white{ 1.0f, 1.0f, 1.0f, 1.0f };
+	constexpr float thickening{ 0.5f };
+	ax::SdfFont baselineSdf{};
+	ASSERT_EQ(ax::generate_sdf_font(fontData, baselineSdf), ax::Error::Success);
+	ax::SdfFont thickenedSdf{};
+	ASSERT_EQ(ax::generate_sdf_font(fontData, thickenedSdf,
+		ax::sdf_font_pixel_height, ax::sdf_font_spread, thickening), ax::Error::Success);
+	ax::SdfFont msdf{};
+	const ax::MsdfFontSettings baselineSettings{};
+	ASSERT_EQ(ax::generate_msdf_font(fontData, msdf, baselineSettings), ax::Error::Success);
+	ax::SdfFont thickenedMsdf{};
+	auto thickenedSettings{ baselineSettings };
+	thickenedSettings.thickness = thickening;
+	ASSERT_EQ(ax::generate_msdf_font(fontData, thickenedMsdf, thickenedSettings), ax::Error::Success);
+	ax::SdfFont narrowRangeMsdf{};
+	auto narrowRangeSettings{ baselineSettings };
+	narrowRangeSettings.spread = 8;
+	ASSERT_EQ(ax::generate_msdf_font(fontData, narrowRangeMsdf, narrowRangeSettings), ax::Error::Success);
+	ax::SdfFont highResolutionMsdf{};
+	auto highResolutionSettings{ baselineSettings };
+	highResolutionSettings.pixelHeight = 192.0f;
+	highResolutionSettings.spread = 32;
+	ASSERT_EQ(ax::generate_msdf_font(fontData, highResolutionMsdf, highResolutionSettings),
+		ax::Error::Success);
+	ax::SdfFont simpleColoredMsdf{};
+	auto simpleColoringSettings{ baselineSettings };
+	simpleColoringSettings.edgeColoring = ax::MsdfEdgeColoring::Simple;
+	ASSERT_EQ(ax::generate_msdf_font(fontData, simpleColoredMsdf, simpleColoringSettings),
+		ax::Error::Success);
+	ax::SdfFont noErrorCorrectionMsdf{};
+	auto noErrorCorrectionSettings{ baselineSettings };
+	noErrorCorrectionSettings.errorCorrection = ax::MsdfErrorCorrection::Disabled;
+	ASSERT_EQ(ax::generate_msdf_font(fontData, noErrorCorrectionMsdf, noErrorCorrectionSettings),
+		ax::Error::Success);
+	ax::SdfFont edgeOnlyCorrectionMsdf{};
+	auto edgeOnlyCorrectionSettings{ baselineSettings };
+	edgeOnlyCorrectionSettings.errorCorrection = ax::MsdfErrorCorrection::EdgeOnly;
+	ASSERT_EQ(ax::generate_msdf_font(fontData, edgeOnlyCorrectionMsdf, edgeOnlyCorrectionSettings),
+		ax::Error::Success);
+
+	struct Treatment
+	{
+		std::string_view name;
+		std::string_view label;
+		const ax::SdfFont* font;
+		std::uint32_t distanceFieldFlag;
+		std::uint32_t supersampleFactor;
+	};
+	const std::array treatments{
+		Treatment{ "sdf_default_2x_downsample", "SDF, 2x", &baselineSdf, ax::sprite_flag_sdf, 2 },
+		Treatment{ "sdf_thickened_0.5px_2x_downsample", "SDF +0.5px, 2x",
+			&thickenedSdf, ax::sprite_flag_sdf, 2 },
+		Treatment{ "msdfgen_96x16_2x_downsample", "MSDF distance-color, default",
+			&msdf, ax::sprite_flag_msdf, 2 },
+		Treatment{ "msdfgen_96x16_native_1x", "MSDF, no supersampling",
+			&msdf, ax::sprite_flag_msdf, 1 },
+		Treatment{ "msdfgen_96x16_4x_downsample", "MSDF, 4x downsample",
+			&msdf, ax::sprite_flag_msdf, 4 },
+		Treatment{ "msdfgen_96x8_narrow_range_2x_downsample",
+			"MSDF, narrow range", &narrowRangeMsdf, ax::sprite_flag_msdf, 2 },
+		Treatment{ "msdfgen_192x32_high_resolution_2x_downsample",
+			"MSDF, high-res atlas", &highResolutionMsdf, ax::sprite_flag_msdf, 2 },
+		Treatment{ "msdfgen_96x16_simple_coloring_2x_downsample",
+			"MSDF, simple edge colors", &simpleColoredMsdf, ax::sprite_flag_msdf, 2 },
+		Treatment{ "msdfgen_96x16_no_error_correction_2x_downsample",
+			"MSDF, no correction", &noErrorCorrectionMsdf, ax::sprite_flag_msdf, 2 },
+		Treatment{ "msdfgen_96x16_edge_only_correction_2x_downsample",
+			"MSDF, edge-only correction", &edgeOnlyCorrectionMsdf, ax::sprite_flag_msdf, 2 },
+		Treatment{ "msdfgen_96x16_thickened_0.5px_2x_downsample",
+			"MSDF +0.5px, 2x", &thickenedMsdf, ax::sprite_flag_msdf, 2 }
+	};
+	std::array<std::array<std::vector<Pixel>, fontSizes.size()>, treatments.size()> treatmentSamples{};
+	for (std::size_t sizeIndex{}; sizeIndex < fontSizes.size(); ++sizeIndex)
+	{
+		for (std::size_t treatmentIndex{}; treatmentIndex < treatments.size(); ++treatmentIndex)
+		{
+			const auto& treatment{ treatments[treatmentIndex] };
+			const auto fontSize{ fontSizes[sizeIndex] };
+			const std::string name{ "size_" + std::to_string(fontSize) + "px_" +
+				std::string(treatment.name) + ".png" };
+			auto image{ writeSample(name, *treatment.font, fontSize, steamBackground, white, 0.3f,
+				treatment.supersampleFactor, treatment.distanceFieldFlag) };
+			ASSERT_EQ(image.size(), static_cast<std::size_t>(width) * height) << name;
+			treatmentSamples[treatmentIndex][sizeIndex] = std::move(image);
+			if (treatment.name == "sdf_default_2x_downsample")
+				baselineSdfSamples[sizeIndex] = treatmentSamples[treatmentIndex][sizeIndex];
+			else if (treatment.name == "msdfgen_96x16_2x_downsample")
+				msdfSamples[sizeIndex] = treatmentSamples[treatmentIndex][sizeIndex];
+		}
+	}
+
+	constexpr std::uint32_t labelColumnWidth{ 200 };
+	const auto settingsSheetWidth{ labelColumnWidth +
+		width * static_cast<std::uint32_t>(fontSizes.size()) };
+	const auto settingsSheetHeight{ height * static_cast<std::uint32_t>(treatments.size()) };
+	std::vector<Pixel> settingsSheet(static_cast<std::size_t>(settingsSheetWidth) * settingsSheetHeight);
+	std::vector<Pixel> atlasPixels(msdf.pixels.size() / sizeof(Pixel));
+	std::memcpy(atlasPixels.data(), msdf.pixels.data(), msdf.pixels.size());
+	for (std::size_t treatmentIndex{}; treatmentIndex < treatments.size(); ++treatmentIndex)
+	{
+		constexpr float labelFontSize{ 9.0f };
+		const float labelScale{ labelFontSize / ax::sdf_font_reference_height };
+		const float labelBaseline{ (height - labelFontSize) * 0.5f + msdf.baseline * labelScale };
+		constexpr glm::vec4 labelColor{ 0.12f, 0.15f, 0.2f, 1.0f };
+		const auto labelSprites{ make_sdf_text(msdf, treatments[treatmentIndex].label,
+			labelColumnWidth * 0.5f, labelBaseline, labelScale, labelColor, ax::sprite_flag_msdf) };
+		const auto labelImage{ render(atlasPixels, msdf.width, msdf.height, labelSprites, "fs_main",
+			nullptr, labelColumnWidth, height, steamBackground, true) };
+		ASSERT_EQ(labelImage.size(), static_cast<std::size_t>(labelColumnWidth) * height)
+			<< treatments[treatmentIndex].label;
+		for (std::size_t sizeIndex{}; sizeIndex < fontSizes.size(); ++sizeIndex)
+		{
+			const auto& sample{ treatmentSamples[treatmentIndex][sizeIndex] };
+			ASSERT_EQ(sample.size(), static_cast<std::size_t>(width) * height)
+				<< treatments[treatmentIndex].name;
+			for (std::uint32_t y{}; y < height; ++y)
+			{
+				const auto sourceOffset{ static_cast<std::size_t>(y) * width };
+				const auto targetOffset{ (static_cast<std::size_t>(treatmentIndex) * height + y) *
+					settingsSheetWidth + labelColumnWidth + sizeIndex * width };
+				std::copy_n(sample.begin() + sourceOffset, width, settingsSheet.begin() + targetOffset);
+			}
+		}
+		for (std::uint32_t y{}; y < height; ++y)
+		{
+			const auto sourceOffset{ static_cast<std::size_t>(y) * labelColumnWidth };
+			const auto targetOffset{ (treatmentIndex * height + y) * settingsSheetWidth };
+			std::copy_n(labelImage.begin() + sourceOffset, labelColumnWidth,
+				settingsSheet.begin() + targetOffset);
+		}
+	}
+	const auto settingsSheetPath{ outputDirectory / "msdfgen_settings_comparison.png" };
+	const auto settingsSheetResult{ ax::write_png(settingsSheetPath, settingsSheetWidth, settingsSheetHeight,
+		4, settingsSheet.data(), settingsSheetWidth * static_cast<std::uint32_t>(sizeof(Pixel))) };
+	ASSERT_EQ(settingsSheetResult, ax::Error::Success) << settingsSheetPath.string();
+
+	const auto comparisonWidth{ width * static_cast<std::uint32_t>(fontSizes.size()) };
+	constexpr std::uint32_t comparisonRows{ 3 };
+	const auto comparisonHeight{ height * comparisonRows };
+	std::vector<Pixel> comparison(static_cast<std::size_t>(comparisonWidth) * comparisonHeight);
+	constexpr std::uint32_t differenceAmplification{ 64 };
+	std::uint64_t totalRgbDifference{};
+	for (std::size_t sizeIndex{}; sizeIndex < fontSizes.size(); ++sizeIndex)
+	{
+		ASSERT_EQ(baselineSdfSamples[sizeIndex].size(), static_cast<std::size_t>(width) * height);
+		ASSERT_EQ(msdfSamples[sizeIndex].size(), static_cast<std::size_t>(width) * height);
+		for (std::uint32_t y{}; y < height; ++y)
+		{
+			for (std::uint32_t x{}; x < width; ++x)
+			{
+				const auto sourceIndex{ static_cast<std::size_t>(y) * width + x };
+				const auto targetIndex{ static_cast<std::size_t>(y) * comparisonWidth + sizeIndex * width + x };
+				const auto& sdfPixel{ baselineSdfSamples[sizeIndex][sourceIndex] };
+				const auto& msdfPixel{ msdfSamples[sizeIndex][sourceIndex] };
+				comparison[targetIndex] = sdfPixel;
+				comparison[targetIndex + static_cast<std::size_t>(height) * comparisonWidth] = msdfPixel;
+				Pixel differencePixel{ 0, 0, 0, 255 };
+				for (std::size_t channel{}; channel < 3; ++channel)
+				{
+					const auto difference{ static_cast<std::uint32_t>(
+						std::abs(static_cast<int>(sdfPixel[channel]) - msdfPixel[channel])) };
+					totalRgbDifference += difference;
+					differencePixel[channel] = static_cast<std::uint8_t>(
+						std::min(255u, difference * differenceAmplification));
+				}
+				comparison[targetIndex + static_cast<std::size_t>(height) * comparisonWidth * 2] =
+					differencePixel;
+			}
+		}
+	}
+
+	const auto comparisonPath{ outputDirectory / "sdf_msdf_direct_comparison.png" };
+	const auto comparisonResult{ ax::write_png(comparisonPath, comparisonWidth, comparisonHeight, 4,
+		comparison.data(), comparisonWidth * static_cast<std::uint32_t>(sizeof(Pixel))) };
+	ASSERT_EQ(comparisonResult, ax::Error::Success) << comparisonPath.string();
+	testing::Test::RecordProperty("sdf_sample_output_directory", outputDirectory.string());
+	GTEST_SUCCEED() << "Wrote MSDF settings contact sheet to " << settingsSheetPath.string()
+		<< " and SDF / MSDF / 64x RGB difference image to " << comparisonPath.string()
+		<< " (columns: 8, 10, 12, 16 px; total raw RGB difference: " << totalRgbDifference << ")";
 }
 
 TEST_F(SpriteShaderTest, RotatedScaledSpritePreservesColourAndTint)

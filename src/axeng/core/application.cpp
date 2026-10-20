@@ -1,4 +1,5 @@
 #include "axeng/core/application.h"
+#include "axeng/core/msdf_font.h"
 
 #include "axeng/core/lua/bindings/lua_application_bindings.h"
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
@@ -258,19 +259,19 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 			return false;
 		}
 
-		if (generate_sdf_font(fontData, m_sdfFont) == Error::Success)
+		if (generate_msdf_font(fontData, m_msdfFont) == Error::Success)
 		{
-			std::vector<uint8_t> encodedSdf{};
-			auto* sdfTexture{ encode_png(m_sdfFont.width, m_sdfFont.height, 4, m_sdfFont.pixels.data(), m_sdfFont.width * 4, encodedSdf) == Error::Success
-				? m_textures.load_from_raw(std::string{ sdf_font_texture_name }, "QuirkyRobot.ttf", encodedSdf)
+			std::vector<uint8_t> encodedMsdf{};
+			auto* msdfTexture{ encode_png(m_msdfFont.width, m_msdfFont.height, 4, m_msdfFont.pixels.data(), m_msdfFont.width * 4, encodedMsdf) == Error::Success
+				? m_textures.load_from_raw(std::string{ sdf_font_texture_name }, "QuirkyRobot.ttf", encodedMsdf)
 				: nullptr };
-			if (sdfTexture != nullptr)
-				sdfTexture->set_sdf(true);
+			if (msdfTexture != nullptr)
+				msdfTexture->set_msdf(true);
 			else
-				spdlog::error("Failed to load the generated SDF font.");
+				spdlog::error("Failed to load the generated MSDF font.");
 		}
 		else
-			spdlog::error("Failed to generate the SDF font.");
+			spdlog::error("Failed to generate the MSDF font.");
 
 		const sol::table& textures{ manifest["textures"].get<sol::table>() };
 		for (const auto& entry : textures)

@@ -1,5 +1,6 @@
 #include "axeng/core/font_data.h"
 #include "axeng/core/font_sheet.h"
+#include "axeng/core/msdf_font.h"
 #include "axeng/core/sdf_font.h"
 
 #include <gtest/gtest.h>
@@ -10,6 +11,17 @@ TEST(SdfFont, GeneratesDistanceFieldGlyphsWithBitmapFontMetrics)
 	ax::SdfFont font{};
 	ax::FontSheet sheet{};
 	ASSERT_EQ(ax::generate_sdf_font(fontData, font), ax::Error::Success);
+	ax::SdfFont highResolutionFont{};
+	ASSERT_EQ(ax::generate_sdf_font(fontData, highResolutionFont, 64.0f, 11), ax::Error::Success);
+	EXPECT_FLOAT_EQ(highResolutionFont.texelScale, ax::sdf_font_reference_height / 64.0f);
+	EXPECT_FLOAT_EQ(highResolutionFont.glyphs['A' - ax::font_first_codepoint].advance,
+		font.glyphs['A' - ax::font_first_codepoint].advance);
+	ax::SdfFont thickenedFont{};
+	ASSERT_EQ(ax::generate_sdf_font(fontData, thickenedFont, ax::sdf_font_pixel_height,
+		ax::sdf_font_spread, 0.5f), ax::Error::Success);
+	EXPECT_EQ(ax::generate_sdf_font(fontData, highResolutionFont, 0.0f, 8), ax::Error::InvalidTexture);
+	EXPECT_EQ(ax::generate_sdf_font(fontData, highResolutionFont, 48.0f, 0), ax::Error::InvalidTexture);
+	EXPECT_EQ(ax::generate_sdf_font(fontData, highResolutionFont, 48.0f, 8, -0.1f), ax::Error::InvalidTexture);
 	ASSERT_EQ(ax::generate_main_font_sheet(fontData, sheet), ax::Error::Success);
 	ASSERT_EQ(font.pixels.size(), static_cast<size_t>(font.width) * font.height * 4);
 	EXPECT_FLOAT_EQ(font.texelScale, ax::sdf_font_reference_height / ax::sdf_font_pixel_height);
@@ -34,6 +46,20 @@ TEST(SdfFont, GeneratesDistanceFieldGlyphsWithBitmapFontMetrics)
 	ASSERT_GT(bar.width, 2 * ax::sdf_font_spread);
 	EXPECT_GT(distance(bar.x + bar.width / 2, bar.y + bar.height / 2), 128);
 	EXPECT_LT(distance(bar.x, bar.y), 128);
+	const auto& thickenedBar{ thickenedFont.glyphs['I' - ax::font_first_codepoint] };
+	bool changedDistance{};
+	for (uint32_t y{}; y < bar.height; ++y)
+	{
+		for (uint32_t x{}; x < bar.width; ++x)
+		{
+			const auto original{ distance(bar.x + x, bar.y + y) };
+			const auto thickened{ thickenedFont.pixels[
+				(static_cast<size_t>(thickenedBar.y + y) * thickenedFont.width + thickenedBar.x + x) * 4 + 3] };
+			EXPECT_GE(thickened, original);
+			changedDistance = changedDistance || thickened > original;
+		}
+	}
+	EXPECT_TRUE(changedDistance);
 	// Distances fall off smoothly rather than being a hard mask.
 	uint32_t partial{};
 	for (uint32_t x{}; x < bar.width; ++x)
@@ -43,6 +69,45 @@ TEST(SdfFont, GeneratesDistanceFieldGlyphsWithBitmapFontMetrics)
 			++partial;
 	}
 	EXPECT_GT(partial, 4u);
+}
+
+TEST(MsdfFont, GeneratesDistanceFieldGlyphsWithBitmapFontMetrics)
+{
+	const auto fontData{ ax::main_font_data() };
+	ax::SdfFont font{};
+	ax::FontSheet sheet{};
+	ASSERT_EQ(ax::generate_msdf_font(fontData, font), ax::Error::Success);
+	ASSERT_EQ(ax::generate_main_font_sheet(fontData, sheet), ax::Error::Success);
+	EXPECT_EQ(ax::MsdfFontSettings{}.edgeColoring, ax::MsdfEdgeColoring::ByDistance);
+	EXPECT_EQ(font.pixels.size(), static_cast<size_t>(font.width) * font.height * 4);
+	EXPECT_FLOAT_EQ(font.texelScale, ax::sdf_font_reference_height / ax::msdf_font_pixel_height);
+	EXPECT_NEAR(font.baseline, sheet.baseline, 1e-3f);
+	EXPECT_NEAR(font.lineHeight, sheet.lineHeight, 1e-3f);
+
+	for (size_t i{}; i < ax::font_glyph_count; ++i)
+	{
+		const auto& glyph{ font.glyphs[i] };
+		EXPECT_NEAR(glyph.advance, sheet.glyphs[i].advance, 1e-3f);
+		EXPECT_LE(static_cast<uint32_t>(glyph.x) + glyph.width, font.width);
+		EXPECT_LE(static_cast<uint32_t>(glyph.y) + glyph.height, font.height);
+	}
+
+	const auto& stem{ font.glyphs['I' - ax::font_first_codepoint] };
+	ASSERT_GT(stem.width, 2u * static_cast<uint32_t>(ax::msdf_font_spread));
+	const auto sample = [&font](uint32_t x, uint32_t y, size_t channel)
+	{
+		return font.pixels[(static_cast<size_t>(y) * font.width + x) * 4 + channel];
+	};
+	for (size_t channel{}; channel < 3; ++channel)
+	{
+		EXPECT_GT(sample(stem.x + stem.width / 2, stem.y + stem.height / 2, channel), 128);
+		EXPECT_LT(sample(stem.x, stem.y, channel), 128);
+	}
+	EXPECT_EQ(sample(stem.x + stem.width / 2, stem.y + stem.height / 2, 3), 255);
+
+	auto invalidSettings{ ax::MsdfFontSettings{} };
+	invalidSettings.spread = 0;
+	EXPECT_EQ(ax::generate_msdf_font(fontData, font, invalidSettings), ax::Error::InvalidTexture);
 }
 
 TEST(FontSheet, GeneratesRegularAndBoldAsciiGlyphs)
