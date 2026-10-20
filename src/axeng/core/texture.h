@@ -61,8 +61,9 @@ namespace ax
 		// signed distance field (0.5 = edge).
 		std::uint32_t useRegion{ 0 };
 		std::uint32_t screenSpace{ 0 };
+		glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
 
-		static constexpr std::size_t gpuDataSize{ 64 };
+		static constexpr std::size_t gpuDataSize{ 80 };
 	};
 
 	inline constexpr std::uint32_t sprite_flag_region{ 1u };
@@ -91,6 +92,7 @@ namespace ax
 	static_assert(offsetof(SpriteGpuData, rotation) == 52);
 	static_assert(offsetof(SpriteGpuData, useRegion) == 56);
 	static_assert(offsetof(SpriteGpuData, screenSpace) == 60);
+	static_assert(offsetof(SpriteGpuData, clipRect) == 64);
 	static_assert(sizeof(SpriteGpuData) == SpriteGpuData::gpuDataSize);
 	static_assert(offsetof(SpriteDefinition, gpuData) == 0);
 	static_assert(offsetof(SpriteDefinition, tex) == SpriteGpuData::gpuDataSize);

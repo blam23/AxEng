@@ -7,6 +7,7 @@ struct Uniforms {
 	rotation: f32,
 	use_region: u32, // flags: 1 = use region, 2 = signed distance field (alpha 0.5 = edge)
 	screen_space: u32,
+	clip_rect: vec4<f32>, // min x/y and max x/y in screen pixels; max < min disables clipping
 };
 
 @group(0) @binding(0) var<storage, read> sprites : array<Uniforms>;
@@ -25,6 +26,7 @@ struct VSOut {
 	@location(1) tint : vec4<f32>,
 	@location(2) @interpolate(flat) texelBounds : vec4<f32>,
 	@location(3) @interpolate(flat) sdf : u32,
+	@location(4) @interpolate(flat) clip_rect : vec4<f32>,
 };
 
 @vertex
@@ -77,6 +79,7 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	out.uv = uv;
 	out.tint = u.tint;
 	out.sdf = (u.use_region >> 1u) & 1u;
+	out.clip_rect = u.clip_rect;
 	let texelMin = select(vec2<f32>(0.0), u.region.xy, useRegion);
 	let texelMax = select(textureSize, u.region.xy + u.region.zw, useRegion) - vec2<f32>(1.0);
 	out.texelBounds = clamp(vec4<f32>(texelMin, texelMax),
@@ -128,6 +131,11 @@ fn sprite_color(in_: VSOut) -> vec4<f32> {
 
 @fragment
 fn fs_main(in_: VSOut) -> @location(0) vec4<f32> {
+	if (in_.clip_rect.z >= in_.clip_rect.x && in_.clip_rect.w >= in_.clip_rect.y
+		&& (in_.pos.x < in_.clip_rect.x || in_.pos.y < in_.clip_rect.y
+			|| in_.pos.x >= in_.clip_rect.z || in_.pos.y >= in_.clip_rect.w)) {
+		discard;
+	}
 	let col = sprite_color(in_);
 	if (col.a <= 0.0) {
 		discard;
@@ -137,6 +145,11 @@ fn fs_main(in_: VSOut) -> @location(0) vec4<f32> {
 
 @fragment
 fn fs_opaque(in_: VSOut) -> @location(0) vec4<f32> {
+	if (in_.clip_rect.z >= in_.clip_rect.x && in_.clip_rect.w >= in_.clip_rect.y
+		&& (in_.pos.x < in_.clip_rect.x || in_.pos.y < in_.clip_rect.y
+			|| in_.pos.x >= in_.clip_rect.z || in_.pos.y >= in_.clip_rect.w)) {
+		discard;
+	}
 	let col = sprite_color(in_);
 	if (col.a < 1.0) {
 		discard;
@@ -151,6 +164,11 @@ struct OitOutput {
 
 @fragment
 fn fs_oit(in_: VSOut) -> OitOutput {
+	if (in_.clip_rect.z >= in_.clip_rect.x && in_.clip_rect.w >= in_.clip_rect.y
+		&& (in_.pos.x < in_.clip_rect.x || in_.pos.y < in_.clip_rect.y
+			|| in_.pos.x >= in_.clip_rect.z || in_.pos.y >= in_.clip_rect.w)) {
+		discard;
+	}
 	let col = sprite_color(in_);
 	let alpha = clamp(col.a, 0.0, 1.0);
 	if (alpha <= 0.0 || alpha >= 1.0) {

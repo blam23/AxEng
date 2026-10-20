@@ -28,6 +28,9 @@ The AxEng CLI has a few important switches.
 
     -c      Compile the given project
 
+    --source
+            Write Lua scripts and the manifest as source text instead of LuaJIT bytecode.
+
     -x      Clean the out directory before doing anything (WARNING: WILL CLEAN THE ENTIRE OUT DIRECTORY!)
 
     -r      Run the project

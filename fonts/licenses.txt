@@ -20,6 +20,6 @@ SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
 =======================
 
 =======================
-Reglo-Bold
+Geist-SemiBold
 =======================
 SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007

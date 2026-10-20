@@ -13,6 +13,11 @@ ax::DirectoryResourceLoader::DirectoryResourceLoader(std::filesystem::path rootD
 {
 }
 
+bool ax::DirectoryResourceLoader::contains(ResourceID id) const
+{
+	return std::filesystem::exists(m_root / id);
+}
+
 std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::DirectoryResourceLoader::load(ResourceID id) const
 {
 	LogTimer _timer{ id };
@@ -66,6 +71,11 @@ void ax::EmbeddedResourceLoader::register_resource(ResourceID id, EmbeddedResour
 	m_layout[id] = res;
 }
 
+bool ax::EmbeddedResourceLoader::contains(ResourceID id) const
+{
+	return m_layout.contains(id);
+}
+
 std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::EmbeddedResourceLoader::load(ResourceID id) const
 {
 	std::vector<uint8_t> ret{};
@@ -92,6 +102,10 @@ std::optional<ax::ResourceLoadError> ax::Resource::cleanup_loader(ResourceLoader
 	return std::visit([](auto& l) { return l.cleanup(); }, loader);
 }
 
+bool ax::Resource::contains(const ResourceLoader& loader, ResourceID id)
+{
+	return std::visit([&id](const auto& l) { return l.contains(id); }, loader);
+}
 
 std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::Resource::load(const ResourceLoader& loader, ResourceID id)
 {
@@ -236,6 +250,12 @@ std::optional<ax::ResourceLoadError> ax::ZipResourceLoader::cleanup()
 	spdlog::debug("<Res> Zip loader cleanup complete!");
 
 	return {};
+}
+
+bool ax::ZipResourceLoader::contains(ResourceID path) const
+{
+	const std::string entry{ path };
+	return mz_zip_locate_entry(m_handle, entry.c_str(), true) == MZ_OK;
 }
 
 std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::ZipResourceLoader::load(ResourceID path) const

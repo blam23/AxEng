@@ -12,7 +12,7 @@
                                               "docking-experimental"
                                           ]
                          },
-                         "lua",
+                         "luajit",
                          "miniaudio",
                          "minizip-ng",
                          "sol2",

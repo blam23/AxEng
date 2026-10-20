@@ -10,11 +10,13 @@ struct VSIn {
 	@location(1) z: f32,
 	@location(2) screen_space: u32,
 	@location(3) colour: vec4<f32>,
+	@location(4) clip_rect: vec4<f32>,
 };
 
 struct VSOut {
 	@builtin(position) pos: vec4<f32>,
 	@location(0) colour: vec4<f32>,
+	@location(1) clip_rect: vec4<f32>,
 };
 
 @vertex
@@ -32,10 +34,16 @@ fn vs_main(in_: VSIn) -> VSOut {
 	var out: VSOut;
 	out.pos = vec4<f32>(ndcX, ndcY, depth, 1.0);
 	out.colour = in_.colour;
+	out.clip_rect = in_.clip_rect;
 	return out;
 }
 
 @fragment
 fn fs_main(in_: VSOut) -> @location(0) vec4<f32> {
+	if (in_.clip_rect.z >= in_.clip_rect.x && in_.clip_rect.w >= in_.clip_rect.y
+		&& (in_.pos.x < in_.clip_rect.x || in_.pos.y < in_.clip_rect.y
+			|| in_.pos.x >= in_.clip_rect.z || in_.pos.y >= in_.clip_rect.w)) {
+		discard;
+	}
 	return in_.colour;
 }

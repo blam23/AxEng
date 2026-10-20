@@ -165,6 +165,7 @@ namespace
 		float z{};
 		glm::vec4 tint{ 1.0f };
 		glm::vec2 scale{ 1.0f };
+		glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
 
 		if (useAtlas)
 			region = ax::lua::bindings::get_texture_region(texture);
@@ -191,6 +192,7 @@ namespace
 				z = number_argument(args, 4, ui ? "render_ui" : "render");
 			break;
 		case 12:
+		case 16:
 			region = {
 				number_argument(args, 0, ui ? "render_ui" : "render"),
 				number_argument(args, 1, ui ? "render_ui" : "render"),
@@ -212,9 +214,22 @@ namespace
 				number_argument(args, 10, ui ? "render_ui" : "render"),
 				number_argument(args, 11, ui ? "render_ui" : "render")
 			};
+			if (args.size() == 16)
+			{
+				if (!ui)
+					throw sol::error("render does not accept a clip rectangle; use render_ui.");
+				clipRect = {
+					number_argument(args, 12, "render_ui"),
+					number_argument(args, 13, "render_ui"),
+					number_argument(args, 14, "render_ui"),
+					number_argument(args, 15, "render_ui")
+				};
+				if (clipRect.z < clipRect.x || clipRect.w < clipRect.y)
+					throw sol::error("render_ui clip rectangle must have non-negative width and height.");
+			}
 			break;
 		default:
-			throw sol::error(std::format("{} expects zero, one, four, five, or twelve optional arguments.",
+			throw sol::error(std::format("{} expects zero, one, four, five, twelve, or sixteen optional arguments.",
 				ui ? "render_ui" : "render"));
 		}
 
@@ -222,12 +237,12 @@ namespace
 		{
 			if (ui)
 			{
-				if (args.size() == 12)
-					app.window()->render_ui_texture(tex, { x, y }, rotation, region, z, tint, scale, keepAlive);
+				if (args.size() == 12 || args.size() == 16)
+					app.window()->render_ui_texture(tex, { x, y }, rotation, region, z, tint, scale, keepAlive, clipRect);
 				else if (args.size() == 5 || args.size() == 1)
-					app.window()->render_ui_texture(tex, { x, y }, region, z, keepAlive);
+					app.window()->render_ui_texture(tex, { x, y }, region, z, keepAlive, clipRect);
 				else
-					app.window()->render_ui_texture(tex, { x, y }, region, keepAlive);
+					app.window()->render_ui_texture(tex, { x, y }, region, keepAlive, clipRect);
 			}
 			else if (args.size() == 12)
 				app.window()->render_texture(tex, { x, y }, rotation, region, z, tint, scale, keepAlive);
@@ -239,9 +254,9 @@ namespace
 		else if (ui)
 		{
 			if (args.size() == 1)
-				app.window()->render_ui_texture(tex, { x, y }, z, keepAlive);
+				app.window()->render_ui_texture(tex, { x, y }, z, keepAlive, clipRect);
 			else
-				app.window()->render_ui_texture(tex, { x, y }, keepAlive);
+				app.window()->render_ui_texture(tex, { x, y }, keepAlive, clipRect);
 		}
 		else if (args.size() == 1)
 			app.window()->render_texture(tex, { x, y }, z, keepAlive);

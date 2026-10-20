@@ -43,7 +43,7 @@ DO NOT Update the README for anything except build changes that are relevant to 
 - `AxEng.exe -cxr --in <project> --out <dir> --allow-io --allow-os`.
   - `-x` **deletes the whole `--out` directory**. Never point it at a user folder. Use something like `%TEMP%\AxSomething`.
   - Without `-x`, compiling into an existing output folder can fail with an IO error creating `assets`.
-  - `-r` alone needs an already compiled `manifest.luac`.
+  - `-r` alone needs `manifest.luac` or `manifest.lua`.
 - Exit code `1000` means the entry point failed.
 - To read the exit code from PowerShell, use `$p = Start-Process ... -PassThru` and access `$p.Handle` before `WaitForExit()`. Otherwise `ExitCode` comes back empty.
 - When stopping processes, use `Stop-Process -Id <pid>`, never by name.
@@ -54,7 +54,7 @@ DO NOT Update the README for anything except build changes that are relevant to 
 ## Code layout
 
 - `src/axeng/core/`: engine library (`AxEngLib`, static). `src/app/`: the `AxEng` executable. `src/tests/`: the `Tests` executable.
-- `src/axeng/core/window.cpp`: Dawn device/surface setup, the sprite pipeline, the render loop, ImGui, and the engine device limits (`maxVertexBuffers=1`, `maxVertexAttributes=4`, `maxBindGroups=2`).
+- `src/axeng/core/window.cpp`: Dawn device/surface setup, the sprite pipeline, the render loop, ImGui, and the engine device limits (`maxVertexBuffers=1`, `maxVertexAttributes=5`, `maxBindGroups=2`).
 - `src/axeng/core/shapes/`: immediate-mode shape renderer.
   - `shape.h` defines a `std::variant` of Circle, Ellipse, Rectangle, Triangle, Line and Polygon.
   - `shape_renderer.h/.cpp` holds the renderer; the shader is `shapes.wgsl`, embedded via `#embed`.

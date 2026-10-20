@@ -4,7 +4,7 @@ namespace
 {
 	unsigned char mainFont[] =
 	{
-		#embed "../../../fonts/Reglo-Bold.ttf"
+		#embed "../../../fonts/Geist-SemiBold.ttf"
 	};
 }
 

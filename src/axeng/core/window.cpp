@@ -593,7 +593,7 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 		.maxBindGroups = 2,
 		.maxVertexBuffers = 1,
 		.maxBufferSize = 150000 * sizeof(wgpu::VertexAttribute),
-		.maxVertexAttributes = 4,
+		.maxVertexAttributes = 5,
 	};
 
 	wgpu::DeviceDescriptor deviceDescriptor{};
@@ -1330,17 +1330,18 @@ void ax::Window::render_texture(Texture* tex, glm::vec2 position, rectf region, 
 	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, std::shared_ptr<Texture> keepAlive)
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, std::shared_ptr<Texture> keepAlive, glm::vec4 clipRect)
 {
 	SpriteDefinition sprite{};
 	sprite.tex = tex;
 	sprite.gpuData.pos = position;
 	sprite.gpuData.screenSpace = 1;
+	sprite.gpuData.clipRect = clipRect;
 	sprite.keepAlive = std::move(keepAlive);
 	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf region, std::shared_ptr<Texture> keepAlive)
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf region, std::shared_ptr<Texture> keepAlive, glm::vec4 clipRect)
 {
 	SpriteDefinition sprite{};
 	sprite.tex = tex;
@@ -1348,11 +1349,12 @@ void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf regio
 	sprite.gpuData.region = region;
 	sprite.gpuData.useRegion = 1;
 	sprite.gpuData.screenSpace = 1;
+	sprite.gpuData.clipRect = clipRect;
 	sprite.keepAlive = std::move(keepAlive);
 	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale, std::shared_ptr<Texture> keepAlive)
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale, std::shared_ptr<Texture> keepAlive, glm::vec4 clipRect)
 {
 	SpriteDefinition sprite{};
 	sprite.tex = tex;
@@ -1364,22 +1366,24 @@ void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, float r, re
 	sprite.gpuData.tint = color;
 	sprite.gpuData.scale = scale;
 	sprite.gpuData.screenSpace = 1;
+	sprite.gpuData.clipRect = clipRect;
 	sprite.keepAlive = std::move(keepAlive);
 	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive)
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive, glm::vec4 clipRect)
 {
 	SpriteDefinition sprite{};
 	sprite.tex = tex;
 	sprite.gpuData.pos = position;
 	sprite.gpuData.z = z;
 	sprite.gpuData.screenSpace = 1;
+	sprite.gpuData.clipRect = clipRect;
 	sprite.keepAlive = std::move(keepAlive);
 	queue_texture(std::move(sprite));
 }
 
-void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive)
+void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive, glm::vec4 clipRect)
 {
 	SpriteDefinition sprite{};
 	sprite.tex = tex;
@@ -1388,6 +1392,7 @@ void ax::Window::render_ui_texture(Texture* tex, glm::vec2 position, rectf regio
 	sprite.gpuData.useRegion = 1;
 	sprite.gpuData.z = z;
 	sprite.gpuData.screenSpace = 1;
+	sprite.gpuData.clipRect = clipRect;
 	sprite.keepAlive = std::move(keepAlive);
 	queue_texture(std::move(sprite));
 }

@@ -32,6 +32,7 @@ namespace ax
         float z{ 0.0f };
         bool screenSpace{ false };
         std::uint32_t segments{ 0 };
+        glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
 
     // Rotation is around the centre.
@@ -45,6 +46,7 @@ namespace ax
         float z{ 0.0f };
         bool screenSpace{ false };
         std::uint32_t segments{ 0 };
+        glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
 
     // Position is the top-left corner (like sprites); rotation is around the centre.
@@ -59,6 +61,7 @@ namespace ax
         float z{ 0.0f };
         bool screenSpace{ false };
         std::uint32_t segments{ 0 }; // per rounded corner
+        glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
 
     // Points are relative to position, scaled by scale and then rotated around position.
@@ -72,6 +75,7 @@ namespace ax
         float rotation{ 0.0f };
         float z{ 0.0f };
         bool screenSpace{ false };
+        glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
 
     // A straight line segment. fill is the line colour and thickness its width.
@@ -88,6 +92,7 @@ namespace ax
         float z{ 0.0f };
         bool screenSpace{ false };
         std::uint32_t segments{ 0 }; // per round cap
+        glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
 
     // A simple (non self-intersecting) polygon, convex or concave, in either winding order.
@@ -102,6 +107,7 @@ namespace ax
         float rotation{ 0.0f };
         float z{ 0.0f };
         bool screenSpace{ false };
+        glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
 
     using Shape = std::variant<Circle, Rectangle, Triangle, Line, Polygon, Ellipse>;

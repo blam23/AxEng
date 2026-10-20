@@ -262,7 +262,7 @@ protected:
 		limits.maxBindGroups = 2;
 		limits.maxVertexBuffers = 1;
 		limits.maxBufferSize = 150000 * sizeof(wgpu::VertexAttribute);
-		limits.maxVertexAttributes = 4;
+		limits.maxVertexAttributes = 5;
 
 		wgpu::DeviceDescriptor deviceDesc{};
 		deviceDesc.requiredLimits = &limits;
@@ -728,6 +728,17 @@ TEST_F(ShapeRendererTest, TranslucentFillBlendsOverOpaque)
 	EXPECT_PIXEL(image, 10, 10, s_blue);
 }
 
+TEST_F(ShapeRendererTest, TranslucentOverlayDoesNotOccludeLaterLowerZDraws)
+{
+	const ax::Rectangle blue{ .position = { 0, 0 }, .size = { 128, 128 }, .fill = s_blue, .z = 1, .screenSpace = true };
+	const ax::Rectangle overlay{ .position = { 0, 0 }, .size = { 128, 128 }, .fill = { 0, 0, 0, 0.5f }, .z = 1000, .screenSpace = true };
+	const ax::Rectangle red{ .position = { 32, 32 }, .size = { 64, 64 }, .fill = s_red, .z = 2, .screenSpace = true };
+
+	const auto image{ render(std::vector<ax::ShapeList>{ { blue }, { overlay }, { red } }) };
+	EXPECT_PIXEL(image, 64, 64, s_red);
+	EXPECT_PIXEL_NEAR(image, 10, 10, (Pixel{ 0, 0, 127, 255 }), 2);
+}
+
 TEST_F(ShapeRendererTest, TranslucentShapesBlendInZOrder)
 {
 	const ax::Rectangle green{ .position = { 32, 32 }, .size = { 64, 64 }, .fill = { 0, 1, 0, 0.5f }, .z = 2, .screenSpace = true };
@@ -1176,12 +1187,14 @@ TEST_F(WindowPendingDrawTest, TemporaryRenderTargetFlushesShapesAndSpritesAndSav
 	sourceSprite.gpuData.region = { 0.0f, 0.0f, 4.0f, 4.0f };
 	sourceSprite.gpuData.useRegion = 1;
 	sourceSprite.gpuData.screenSpace = 1;
+	sourceSprite.gpuData.clipRect = { 10.0f, 10.0f, 12.0f, 12.0f };
 	targetBatch.textures.push_back(std::move(sourceSprite));
 	targetBatch.shapes.push_back(ax::Rectangle{
 		.position = { 32.0f, 32.0f },
 		.size = { 64.0f, 32.0f },
 		.fill = s_red,
 		.screenSpace = true,
+		.clipRect = { 48.0f, 40.0f, 80.0f, 56.0f },
 	});
 	ASSERT_TRUE(window.submit_pending_draw_batch(std::move(targetBatch)));
 
@@ -1229,11 +1242,11 @@ TEST_F(WindowPendingDrawTest, TemporaryRenderTargetFlushesShapesAndSpritesAndSav
 		for (std::size_t channel{ 0 }; channel < 4; ++channel)
 			targetGolden[offset + channel] = static_cast<std::uint8_t>(colour[channel]);
 	};
-	for (std::uint32_t y{ 8 }; y < 12; ++y)
-		for (std::uint32_t x{ 8 }; x < 12; ++x)
+	for (std::uint32_t y{ 10 }; y < 12; ++y)
+		for (std::uint32_t x{ 10 }; x < 12; ++x)
 			setGoldenPixel(x, y, to_pixel(s_green));
-	for (std::uint32_t y{ 32 }; y < 64; ++y)
-		for (std::uint32_t x{ 32 }; x < 96; ++x)
+	for (std::uint32_t y{ 40 }; y < 56; ++y)
+		for (std::uint32_t x{ 48 }; x < 80; ++x)
 			setGoldenPixel(x, y, to_pixel(s_red));
 	const auto renderedTarget{ saveAndLoad(*target, "render_target") };
 	EXPECT_TRUE(renderedTarget == targetGolden);

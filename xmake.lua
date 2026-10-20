@@ -61,6 +61,7 @@ rule("vcpkg.manifest")
         local libdir = path.join(prefix, vcpkg_config_dir, "lib")
         assert(os.isdir(libdir), "Missing vcpkg libraries for the selected build mode: " .. libdir)
         target:add("sysincludedirs", path.join(prefix, "include"), {public = true})
+        target:add("sysincludedirs", path.join(prefix, "include", "luajit"), {public = true})
         target:add("linkdirs", libdir, {public = true})
         for _, lib in ipairs(os.files(path.join(libdir, "*.lib"))) do
             target:add("links", path.basename(lib), {public = true})

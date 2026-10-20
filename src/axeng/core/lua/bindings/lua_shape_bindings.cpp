@@ -117,12 +117,39 @@ namespace
 				: "must be a vec2, { x, y } or { x = .., y = .. }");
 		}
 
+		glm::vec4 to_vec4(const sol::object& o, std::string_view key) const
+		{
+			if (o.is<glm::vec4>())
+				return o.as<glm::vec4>();
+
+			if (o.get_type() == sol::type::table)
+			{
+				const auto t{ o.as<sol::table>() };
+				const auto x{ component(t, "x", 1) };
+				const auto y{ component(t, "y", 2) };
+				const auto z{ component(t, "z", 3) };
+				const auto w{ component(t, "w", 4) };
+				if (x && y && z && w)
+					return { *x, *y, *z, *w };
+			}
+
+			fail(key, "must be a vec4 or { x, y, z, w }");
+		}
+
 		std::optional<glm::vec2> opt_vec2(const char* key, bool allowScalar = false) const
 		{
 			const auto o{ field(key) };
 			if (is_nil(o))
 				return std::nullopt;
 			return to_vec2(o, key, allowScalar);
+		}
+
+		std::optional<glm::vec4> opt_vec4(const char* key) const
+		{
+			const auto o{ field(key) };
+			if (is_nil(o))
+				return std::nullopt;
+			return to_vec4(o, key);
 		}
 
 		glm::vec2 vec2(const char* key) const
@@ -220,6 +247,8 @@ namespace
 				shape.z = *z;
 			if (const auto screenSpace{ opt_bool("screen_space") })
 				shape.screenSpace = *screenSpace;
+			if (const auto clipRect{ opt_vec4("clip_rect") })
+				shape.clipRect = *clipRect;
 
 			if constexpr (requires { shape.segments; })
 			{

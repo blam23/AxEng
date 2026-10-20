@@ -131,6 +131,15 @@ TEST_F(LuaShapeBindings, RectangleAliasesAndCornerRadius)
 	EXPECT_FLOAT_EQ(rect.cornerRadius, 1.5f);
 }
 
+TEST_F(LuaShapeBindings, ClipRectIsParsedForEveryShape)
+{
+	const auto rect{ parse_as<ax::Rectangle>(R"({ type = "rect", x = 0, y = 0, width = 2, height = 2, clip_rect = { 10, 20, 30, 40 } })") };
+	expect_vec(rect.clipRect, { 10, 20, 30, 40 });
+
+	const auto line{ parse_as<ax::Line>(R"({ type = "line", start = { 0, 0 }, finish = { 1, 1 }, clip_rect = vec4:new(4, 5, 6, 7) })") };
+	expect_vec(line.clipRect, { 4, 5, 6, 7 });
+}
+
 TEST_F(LuaShapeBindings, TriangleAndPolygonPointsAndScale)
 {
 	const auto triangle{ parse_as<ax::Triangle>(R"({ type = "triangle", points = { { 0, 0 }, vec2:new(1, 0), { x = 0, y = 1 } }, scale = 2 })") };

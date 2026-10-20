@@ -41,7 +41,7 @@ end
 local shared_check_all_scripts = app.get_or_create_shared("check_all_scripts")
 
 local function list_box(name, tbl, selected, icon)
-    local cr, cg, cb, ca = table.unpack(get_color(name))
+    local cr, cg, cb, ca = unpack(get_color(name))
     ui.set_next_item_width(-1)
     local need_end = ui.begin_sized_listbox("##", -1, -10)
     ui.text_color(cr, cg, cb, ca, name:sub(1,1):upper() .. name:sub(2))

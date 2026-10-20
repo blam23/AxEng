@@ -45,7 +45,7 @@ TEST(LuaManagerTests, NoPermissions_AccessIOAndOS_LogsErrors)
 
 TEST(LuaManagerTests, IOAllowed_OSNot_OnlyOSLogs)
 {
-	testlog::LogCapture::instance().expect_total_error_count(1);
+	testlog::LogCapture::instance().expect_total_error_count(2);
 
 	register_minimal_init();
 
@@ -64,6 +64,10 @@ TEST(LuaManagerTests, IOAllowed_OSNot_OnlyOSLogs)
 	m.state().do_string("local g = os.exit;", "@test_os_denied");
 	ASSERT_LOG_CONTAINS(s_access_error_message);
 
+	testlog::LogCapture::instance().clear_messages();
+	m.state().do_string("assert(io.popen('echo denied') == nil);", "@test_io_popen_os_denied");
+	ASSERT_LOG_CONTAINS(s_access_error_message);
+
 	m.cleanup();
 }
 
@@ -79,6 +83,11 @@ TEST(LuaManagerTests, IOAllowed_PopenReadsOutput)
 	ASSERT_EQ(ax::Error::Success, m.setup());
 
 	const auto result{ m.state().do_string(
+		"local regular = assert(io.tmpfile()); "
+		"assert(regular:write('regular')); "
+		"assert(regular:close()); "
+		"local regular2 = assert(io.tmpfile()); "
+		"assert(io.close(regular2)); "
 		"local handle, pid = io.popen('echo AxEngPopenTest & ping -n 3 127.0.0.1 > nul', 'r'); "
 		"assert(handle, 'popen failed'); "
 		"assert(type(pid) == 'number' and pid > 0, 'invalid PID'); "

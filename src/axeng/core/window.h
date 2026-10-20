@@ -191,15 +191,15 @@ namespace ax
 		void render_texture(Texture* tex, glm::vec2 position, std::shared_ptr<Texture> keepAlive = {});
 		void render_texture(Texture* tex, glm::vec2 position, rectf region, std::shared_ptr<Texture> keepAlive = {});
 		void render_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale, std::shared_ptr<Texture> keepAlive = {});
-		void render_ui_texture(Texture* tex, glm::vec2 position, std::shared_ptr<Texture> keepAlive = {});
-		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region, std::shared_ptr<Texture> keepAlive = {});
-		void render_ui_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale, std::shared_ptr<Texture> keepAlive = {});
+		void render_ui_texture(Texture* tex, glm::vec2 position, std::shared_ptr<Texture> keepAlive = {}, glm::vec4 clipRect = { 0.0f, 0.0f, -1.0f, -1.0f });
+		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region, std::shared_ptr<Texture> keepAlive = {}, glm::vec4 clipRect = { 0.0f, 0.0f, -1.0f, -1.0f });
+		void render_ui_texture(Texture* tex, glm::vec2 position, float r, rectf region, float z, glm::vec4 color, glm::vec2 scale, std::shared_ptr<Texture> keepAlive = {}, glm::vec4 clipRect = { 0.0f, 0.0f, -1.0f, -1.0f });
 
 		// Optional overloads that accept a z-index for depth ordering
 		void render_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive = {});
 		void render_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive = {});
-		void render_ui_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive = {});
-		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive = {});
+		void render_ui_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive = {}, glm::vec4 clipRect = { 0.0f, 0.0f, -1.0f, -1.0f });
+		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive = {}, glm::vec4 clipRect = { 0.0f, 0.0f, -1.0f, -1.0f });
 
 		void call_deferred(std::function<void()> func);
 

@@ -2,10 +2,11 @@
 
 -- cmd line to compile this:
 -- -cxv --allow-io --allow-os --in "$(SolutionDir)compiler" --out "$(SolutionDir)AxCompiler2"
+-- Add --source to the AxEng command to output plain Lua scripts and manifest.lua.
 
 local comp = ax.import("@compiler_core")
 
-local function check_and_copy_script(script_in, script_out)
+local function check_and_copy_script(script_in, script_out, source_scripts)
     local success, res = comp.check_script(script_in)
 
     if not success then
@@ -14,14 +15,30 @@ local function check_and_copy_script(script_in, script_out)
     end
 
     local ofile = io.open(script_out, "wb")
-    ofile:write(string.dump(res))
+    if ofile == nil then
+        log.error("Cannot open output script '" .. script_out .. "'.")
+        return false
+    end
+
+    if source_scripts then
+        local ifile = io.open(script_in, "rb")
+        if ifile == nil then
+            log.error("Cannot open source script '" .. script_in .. "'.")
+            ofile:close()
+            return false
+        end
+        ofile:write(ifile:read("*all"))
+        ifile:close()
+    else
+        ofile:write(string.dump(res))
+    end
     ofile:close()
 
     return true
 end
 
 local built_scripts = {}
-local function check_and_copy_scripts(project, in_directory, out_directory)
+local function check_and_copy_scripts(project, in_directory, out_directory, source_scripts)
     for script_name, script_path in pairs(project.scripts) do
         if script_path:sub(-4) ~= ".lua" then
             log.error("All scripts must have '.lua' extension, '" .. script_path .. "' does not.")
@@ -29,13 +46,14 @@ local function check_and_copy_scripts(project, in_directory, out_directory)
         end
 
         local in_path = in_directory .. "/" .. script_path
-        local out_path = out_directory .. "/" .. script_path .. "c"
+        local out_script_path = source_scripts and script_path or (script_path .. "c")
+        local out_path = out_directory .. "/" .. out_script_path
 
-        if not check_and_copy_script(in_path, out_path) then
+        if not check_and_copy_script(in_path, out_path, source_scripts) then
             return false
         end
 
-        built_scripts[script_name] = script_path .. "c"
+        built_scripts[script_name] = out_script_path
         log.debug("Compiled script: " .. script_name)
     end
 
@@ -294,7 +312,7 @@ local function gen_atlas_regions_text(project)
     return ax.rstrip(ret)
 end
 
-local function create_manifest(project, dir, strip_debug_output)
+local function create_manifest(project, dir, source_scripts)
     -- TODO: I need to make this use the project directory directly
     local tfile = io.open("AxCompiler/templates/output_template.luat", "r")
     if tfile == nil then
@@ -325,7 +343,7 @@ local function create_manifest(project, dir, strip_debug_output)
 
     log.debug("Manifest:\n" .. output)
 
-    local chunk, err_msg = load(output, "!manifest", "t", strip_debug_output)
+    local chunk, err_msg = load(output, "!manifest", "t")
 
     -- make sure it loads
     if chunk == nil then
@@ -333,8 +351,17 @@ local function create_manifest(project, dir, strip_debug_output)
         return false
     end
 
-    local ofile = io.open(dir .. "/manifest.luac", "wb")
-    ofile:write(string.dump(chunk))
+    local manifest_path = dir .. (source_scripts and "/manifest.lua" or "/manifest.luac")
+    local ofile = io.open(manifest_path, "wb")
+    if ofile == nil then
+        log.error("Cannot open manifest output '" .. manifest_path .. "'.")
+        return false
+    end
+    if source_scripts then
+        ofile:write(output)
+    else
+        ofile:write(string.dump(chunk))
+    end
     ofile:close()
 
     log.info("Created manifest.")
@@ -370,7 +397,16 @@ local function get_in_out_from_args()
     return ret_indir, ret_outdir
 end
 
-function compile(in_directory, out_directory)
+local function is_source_mode()
+    for _, arg in pairs(args) do
+        if arg == "--source" then
+            return true
+        end
+    end
+    return false
+end
+
+function compile(in_directory, out_directory, source_scripts)
     local project = comp.open_project(in_directory)
 
     local validated = comp.validate_project(project)
@@ -379,7 +415,7 @@ function compile(in_directory, out_directory)
         return error_code.InvalidConfiguration
     end
 
-    local checked_scripts = check_and_copy_scripts(project, in_directory, out_directory)
+    local checked_scripts = check_and_copy_scripts(project, in_directory, out_directory, source_scripts)
     if not checked_scripts then
         log.error("Failed to validate scripts.")
         return error_code.InvalidScript
@@ -403,7 +439,7 @@ function compile(in_directory, out_directory)
         return error_code.InvalidResource
     end
 
-    local created_manifest = create_manifest(project, out_directory, true)
+    local created_manifest = create_manifest(project, out_directory, source_scripts)
     if not created_manifest then
         log.error("Failed to create manifest.")
         return error_code.InvalidConfiguration
@@ -418,4 +454,4 @@ end
 
 local in_directory, out_directory = get_in_out_from_args()
 log.info("<Build> Compiling from '" .. in_directory .. " to '" .. out_directory .. "'..")
-return compile(in_directory, out_directory)
+return compile(in_directory, out_directory, is_source_mode())

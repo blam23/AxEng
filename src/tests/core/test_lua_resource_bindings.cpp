@@ -142,6 +142,26 @@ TEST(LuaResourceBindings, SaveTextureMethodsWritePngFiles)
 	expect_png(user_file);
 }
 
+TEST(LuaResourceBindings, SourceManifestOverridesIncompatibleBytecode)
+{
+	const std::string manifest{
+		"manifest = { name = 'source_manifest_test', headless = true, permissions = {}, scripts = { main = 'main.lua' }, entry_point = 'main' }"
+	};
+	const std::string incompatible_bytecode{ "\x1bLua" };
+	const std::string entry_point{ "assert(type(args) == 'table' and args[1] == 'bootstrap-test'); return 0" };
+
+	ax::EmbeddedResourceLayout layout;
+	layout.emplace("manifest.lua", ax::EmbeddedResource{
+		reinterpret_cast<const uint8_t*>(manifest.data()), manifest.size() });
+	layout.emplace("manifest.luac", ax::EmbeddedResource{
+		reinterpret_cast<const uint8_t*>(incompatible_bytecode.data()), incompatible_bytecode.size() });
+	layout.emplace("main.lua", ax::EmbeddedResource{
+		reinterpret_cast<const uint8_t*>(entry_point.data()), entry_point.size() });
+
+	auto app{ ax::Application::from_embedded({}, std::move(layout)) };
+	EXPECT_TRUE(app.try_load({ "bootstrap-test" }, wgpu::BackendType::Undefined));
+}
+
 TEST(LuaResourceBindings, IOBindingsAreUnavailableWithoutPermission)
 {
 	testlog::LogCapture::instance().expect_total_error_count(1);

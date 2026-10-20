@@ -9,15 +9,137 @@
 #include <fcntl.h>
 #include <io.h>
 #include <string>
+#include <unordered_set>
 
 namespace
 {
-	struct PopenStream
+	char s_popen_registry_key{};
+
+	void push_popen_registry(lua_State* L)
 	{
-		luaL_Stream stream{};
-		HANDLE process{ nullptr };
-		HANDLE job{ nullptr };
-	};
+		lua_pushlightuserdata(L, &s_popen_registry_key);
+		lua_rawget(L, LUA_REGISTRYINDEX);
+		if (lua_istable(L, -1))
+			return;
+
+		lua_pop(L, 1);
+		lua_newtable(L);
+		lua_pushlightuserdata(L, &s_popen_registry_key);
+		lua_pushvalue(L, -2);
+		lua_rawset(L, LUA_REGISTRYINDEX);
+	}
+
+	HANDLE get_popen_job(lua_State* L, int index)
+	{
+		if (lua_type(L, index) != LUA_TUSERDATA)
+			return nullptr;
+
+		void* userdata{ lua_touserdata(L, index) };
+		if (userdata == nullptr)
+			return nullptr;
+
+		push_popen_registry(L);
+		lua_pushlightuserdata(L, userdata);
+		lua_rawget(L, -2);
+		HANDLE job{ static_cast<HANDLE>(lua_touserdata(L, -1)) };
+		lua_pop(L, 2);
+		return job;
+	}
+
+	void set_popen_job(lua_State* L, int index, HANDLE job)
+	{
+		void* userdata{ lua_touserdata(L, index) };
+		push_popen_registry(L);
+		lua_pushlightuserdata(L, userdata);
+		lua_pushlightuserdata(L, job);
+		lua_rawset(L, -3);
+		lua_pop(L, 1);
+	}
+
+	void clear_popen_job(lua_State* L, void* userdata, HANDLE job)
+	{
+		push_popen_registry(L);
+		lua_pushlightuserdata(L, userdata);
+		lua_pushnil(L);
+		lua_rawset(L, -3);
+		lua_pop(L, 1);
+		CloseHandle(job);
+	}
+
+	std::wstring popen_shell_name()
+	{
+		wchar_t shell[MAX_PATH]{};
+		const DWORD shellLength{ GetEnvironmentVariableW(L"COMSPEC", shell, static_cast<DWORD>(std::size(shell))) };
+		std::wstring shellPath{ shellLength > 0 && shellLength < std::size(shell) ? shell : L"cmd.exe" };
+		const size_t separator{ shellPath.find_last_of(L"\\/") };
+		if (separator != std::wstring::npos)
+			shellPath.erase(0, separator + 1);
+		return shellPath;
+	}
+
+	std::unordered_set<DWORD> current_popen_shells()
+	{
+		std::unordered_set<DWORD> shells;
+		const HANDLE snapshot{ CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+		if (snapshot == INVALID_HANDLE_VALUE)
+			return shells;
+
+		PROCESSENTRY32W entry{};
+		entry.dwSize = sizeof(entry);
+		if (Process32FirstW(snapshot, &entry))
+		{
+			const std::wstring shellName{ popen_shell_name() };
+			do
+			{
+				if (entry.th32ParentProcessID == GetCurrentProcessId() &&
+					CompareStringOrdinal(entry.szExeFile, -1, shellName.c_str(), -1, TRUE) == CSTR_EQUAL)
+					shells.insert(entry.th32ProcessID);
+			} while (Process32NextW(snapshot, &entry));
+		}
+		CloseHandle(snapshot);
+		return shells;
+	}
+
+	DWORD find_new_popen_shell(const std::unordered_set<DWORD>& existingShells, HANDLE& shellProcess)
+	{
+		const ULONGLONG deadline{ GetTickCount64() + 1000 };
+		const std::wstring shellName{ popen_shell_name() };
+		do
+		{
+			const HANDLE snapshot{ CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+			if (snapshot != INVALID_HANDLE_VALUE)
+			{
+				PROCESSENTRY32W entry{};
+				entry.dwSize = sizeof(entry);
+				if (Process32FirstW(snapshot, &entry))
+				{
+					do
+					{
+						if (entry.th32ParentProcessID == GetCurrentProcessId() &&
+							!existingShells.contains(entry.th32ProcessID) &&
+							CompareStringOrdinal(entry.szExeFile, -1, shellName.c_str(), -1, TRUE) == CSTR_EQUAL)
+						{
+							shellProcess = OpenProcess(
+								PROCESS_SET_QUOTA | PROCESS_TERMINATE | SYNCHRONIZE,
+								FALSE,
+								entry.th32ProcessID
+							);
+							if (shellProcess != nullptr)
+							{
+								const DWORD shellPid{ entry.th32ProcessID };
+								CloseHandle(snapshot);
+								return shellPid;
+							}
+						}
+					} while (Process32NextW(snapshot, &entry));
+				}
+				CloseHandle(snapshot);
+			}
+			Sleep(5);
+		} while (GetTickCount64() < deadline);
+
+		return 0;
+	}
 
 	DWORD find_popen_child(DWORD shellPid, HANDLE shellProcess)
 	{
@@ -60,145 +182,211 @@ namespace
 		return 0;
 	}
 
-	int lua_popen_close(lua_State* L)
+	void terminate_popen_processes(DWORD shellPid, HANDLE shellProcess)
 	{
-		auto* popenStream{ static_cast<PopenStream*>(luaL_checkudata(L, 1, LUA_FILEHANDLE)) };
-		luaL_Stream* stream{ &popenStream->stream };
-		std::fclose(stream->f);
-		stream->f = nullptr;
-
-		int status{ -1 };
-		if (popenStream->process != nullptr)
+		const DWORD childPid{ find_popen_child(shellPid, shellProcess) };
+		if (childPid != 0)
 		{
-			DWORD exitCode{};
-			if (WaitForSingleObject(popenStream->process, INFINITE) == WAIT_OBJECT_0 &&
-				GetExitCodeProcess(popenStream->process, &exitCode))
-				status = static_cast<int>(exitCode);
-			CloseHandle(popenStream->process);
-			popenStream->process = nullptr;
-		}
-		if (popenStream->job != nullptr)
-		{
-			CloseHandle(popenStream->job);
-			popenStream->job = nullptr;
+			HANDLE childProcess{ OpenProcess(PROCESS_TERMINATE | SYNCHRONIZE, FALSE, childPid) };
+			if (childProcess != nullptr)
+			{
+				TerminateProcess(childProcess, 1);
+				WaitForSingleObject(childProcess, INFINITE);
+				CloseHandle(childProcess);
+			}
 		}
 
-		return luaL_execresult(L, status);
+		TerminateProcess(shellProcess, 1);
+		WaitForSingleObject(shellProcess, INFINITE);
+	}
+
+	int lua_io_popen(lua_State* L);
+
+	int lua_popen_file_close(lua_State* L)
+	{
+		const int argumentCount{ lua_gettop(L) };
+		void* userdata{ argumentCount > 0 && lua_type(L, 1) == LUA_TUSERDATA ? lua_touserdata(L, 1) : nullptr };
+		HANDLE job{ userdata == nullptr ? nullptr : get_popen_job(L, 1) };
+
+		lua_pushvalue(L, lua_upvalueindex(1));
+		lua_insert(L, 1);
+		const int status{ lua_pcall(L, argumentCount, LUA_MULTRET, 0) };
+		if (job != nullptr)
+			clear_popen_job(L, userdata, job);
+		if (status != LUA_OK)
+			return lua_error(L);
+		return lua_gettop(L);
+	}
+
+	int lua_popen_file_gc(lua_State* L)
+	{
+		void* userdata{ lua_type(L, 1) == LUA_TUSERDATA ? lua_touserdata(L, 1) : nullptr };
+		HANDLE job{ userdata == nullptr ? nullptr : get_popen_job(L, 1) };
+		int status{ LUA_OK };
+
+		if (lua_isfunction(L, lua_upvalueindex(1)))
+		{
+			lua_pushvalue(L, lua_upvalueindex(1));
+			lua_pushvalue(L, 1);
+			status = lua_pcall(L, 1, 0, 0);
+		}
+		if (job != nullptr)
+			clear_popen_job(L, userdata, job);
+		if (status != LUA_OK)
+			return lua_error(L);
+		return 0;
+	}
+
+	bool install_popen_close_handlers(lua_State* L)
+	{
+		push_popen_registry(L);
+		lua_pop(L, 1);
+
+		luaL_getmetatable(L, LUA_FILEHANDLE);
+		if (!lua_istable(L, -1))
+		{
+			spdlog::error("Lua file handle metatable is unavailable");
+			lua_pop(L, 1);
+			return false;
+		}
+
+		lua_getfield(L, -1, "__index");
+		if (!lua_istable(L, -1))
+		{
+			spdlog::error("Lua file handle methods are unavailable");
+			lua_pop(L, 2);
+			return false;
+		}
+		lua_getfield(L, -1, "close");
+		if (!lua_isfunction(L, -1))
+		{
+			spdlog::error("Lua file handle close method is unavailable");
+			lua_pop(L, 3);
+			return false;
+		}
+		lua_pushcclosure(L, &lua_popen_file_close, 1);
+		lua_setfield(L, -2, "close");
+		lua_pop(L, 1);
+
+		lua_getfield(L, -1, "__gc");
+		if (!lua_isfunction(L, -1))
+		{
+			spdlog::error("Lua file handle finalizer is unavailable");
+			lua_pop(L, 2);
+			return false;
+		}
+		lua_pushcclosure(L, &lua_popen_file_gc, 1);
+		lua_setfield(L, -2, "__gc");
+		lua_pop(L, 1);
+
+		lua_getglobal(L, "io");
+		lua_getfield(L, -1, "close");
+		if (!lua_isfunction(L, -1))
+		{
+			spdlog::error("Lua io.close function is unavailable");
+			lua_pop(L, 2);
+			return false;
+		}
+		lua_pushcclosure(L, &lua_popen_file_close, 1);
+		lua_setfield(L, -2, "close");
+		lua_getfield(L, -1, "popen");
+		if (!lua_isfunction(L, -1))
+		{
+			spdlog::error("Lua io.popen function is unavailable");
+			lua_pop(L, 2);
+			return false;
+		}
+		lua_pushcclosure(L, &lua_io_popen, 1);
+		lua_setfield(L, -2, "popen");
+		lua_pop(L, 1);
+		return true;
 	}
 
 	int lua_io_popen(lua_State* L)
 	{
-		const char* command{ luaL_checkstring(L, 1) };
+		luaL_checkstring(L, 1);
 		const char* mode{ luaL_optstring(L, 2, "r") };
 		const bool reading{ mode[0] == 'r' };
 		const bool validMode{ (reading || mode[0] == 'w') &&
 			(mode[1] == '\0' || ((mode[1] == 'b' || mode[1] == 't') && mode[2] == '\0')) };
 		luaL_argcheck(L, validMode, 2, "invalid mode");
 
-		const int commandLength{ MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, command, -1, nullptr, 0) };
-		if (commandLength == 0)
-			return luaL_argerror(L, 1, "command must be valid UTF-8");
-		std::wstring wideCommand(static_cast<size_t>(commandLength), L'\0');
-		MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, command, -1, wideCommand.data(), commandLength);
-		wideCommand.pop_back();
+		const int argumentCount{ lua_gettop(L) };
+		const std::unordered_set<DWORD> existingShells{ current_popen_shells() };
+		lua_pushvalue(L, lua_upvalueindex(1));
+		lua_pushvalue(L, 1);
+		if (argumentCount > 1)
+			lua_pushvalue(L, 2);
+		else
+			lua_pushnil(L);
+		lua_call(L, 2, LUA_MULTRET);
 
-		SECURITY_ATTRIBUTES securityAttributes{ sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE };
-		HANDLE pipeRead{};
-		HANDLE pipeWrite{};
-		if (!CreatePipe(&pipeRead, &pipeWrite, &securityAttributes, 0))
-		{
-			errno = EIO;
-			return luaL_fileresult(L, 0, command);
-		}
+		const int resultCount{ lua_gettop(L) - argumentCount };
+		for (int i{}; i < argumentCount; ++i)
+			lua_remove(L, 1);
+		if (resultCount == 0 || lua_type(L, 1) != LUA_TUSERDATA)
+			return resultCount;
 
-		HANDLE parentPipe{ reading ? pipeRead : pipeWrite };
-		HANDLE childPipe{ reading ? pipeWrite : pipeRead };
-		if (!SetHandleInformation(parentPipe, HANDLE_FLAG_INHERIT, 0))
+		HANDLE shellProcess{};
+		const DWORD shellPid{ find_new_popen_shell(existingShells, shellProcess) };
+		DWORD childPid{};
+		if (shellPid != 0)
 		{
-			CloseHandle(pipeRead);
-			CloseHandle(pipeWrite);
-			errno = EIO;
-			return luaL_fileresult(L, 0, command);
-		}
-
-		const int openFlags{ (reading ? _O_RDONLY : _O_WRONLY) | (mode[1] == 'b' ? _O_BINARY : _O_TEXT) };
-		const int fd{ _open_osfhandle(reinterpret_cast<intptr_t>(parentPipe), openFlags) };
-		if (fd == -1)
-		{
-			CloseHandle(parentPipe);
-			CloseHandle(childPipe);
-			errno = EIO;
-			return luaL_fileresult(L, 0, command);
-		}
-		FILE* file{ _fdopen(fd, mode) };
-		if (file == nullptr)
-		{
-			_close(fd);
-			CloseHandle(childPipe);
-			errno = EIO;
-			return luaL_fileresult(L, 0, command);
-		}
-
-		wchar_t shell[MAX_PATH]{};
-		const DWORD shellLength{ GetEnvironmentVariableW(L"COMSPEC", shell, static_cast<DWORD>(std::size(shell))) };
-		const std::wstring shellPath{ shellLength > 0 && shellLength < std::size(shell) ? shell : L"cmd.exe" };
-		std::wstring commandLine{ L"\"" + shellPath + L"\" /d /c " + wideCommand };
-
-		STARTUPINFOW startupInfo{};
-		startupInfo.cb = sizeof(startupInfo);
-		startupInfo.dwFlags = STARTF_USESTDHANDLES;
-		startupInfo.hStdInput = reading ? GetStdHandle(STD_INPUT_HANDLE) : childPipe;
-		startupInfo.hStdOutput = reading ? childPipe : GetStdHandle(STD_OUTPUT_HANDLE);
-		startupInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-		HANDLE job{ CreateJobObjectW(nullptr, nullptr) };
-		JOBOBJECT_EXTENDED_LIMIT_INFORMATION jobInfo{};
-		jobInfo.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-		if (job == nullptr || !SetInformationJobObject(job, JobObjectExtendedLimitInformation,
-			&jobInfo, sizeof(jobInfo)))
-		{
-			if (job != nullptr)
+			HANDLE job{ CreateJobObjectW(nullptr, nullptr) };
+			JOBOBJECT_EXTENDED_LIMIT_INFORMATION jobInfo{};
+			jobInfo.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+			if (job == nullptr || !SetInformationJobObject(job, JobObjectExtendedLimitInformation, &jobInfo, sizeof(jobInfo)))
+			{
+				const DWORD error{ GetLastError() };
+				terminate_popen_processes(shellPid, shellProcess);
+				CloseHandle(shellProcess);
+				if (job != nullptr)
+					CloseHandle(job);
+				return luaL_error(L, "failed to create Lua io.popen job object: Windows error %lu", error);
+			}
+			if (!AssignProcessToJobObject(job, shellProcess))
+			{
+				const DWORD error{ GetLastError() };
+				terminate_popen_processes(shellPid, shellProcess);
+				CloseHandle(shellProcess);
 				CloseHandle(job);
-			std::fclose(file);
-			CloseHandle(childPipe);
-			errno = EIO;
-			return luaL_fileresult(L, 0, command);
+				return luaL_error(L, "failed to assign Lua io.popen shell to job object: Windows error %lu", error);
+			}
+
+			childPid = find_popen_child(shellPid, shellProcess);
+			if (childPid != 0)
+			{
+				HANDLE childProcess{ OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE | SYNCHRONIZE, FALSE, childPid) };
+				if (childProcess == nullptr || !AssignProcessToJobObject(job, childProcess))
+				{
+					const DWORD error{ GetLastError() };
+					if (childProcess != nullptr)
+					{
+						TerminateProcess(childProcess, 1);
+						WaitForSingleObject(childProcess, INFINITE);
+						CloseHandle(childProcess);
+					}
+					terminate_popen_processes(shellPid, shellProcess);
+					CloseHandle(shellProcess);
+					CloseHandle(job);
+					return luaL_error(L, "failed to assign Lua io.popen child to job object: Windows error %lu", error);
+				}
+				CloseHandle(childProcess);
+			}
+
+			CloseHandle(shellProcess);
+			set_popen_job(L, 1, job);
 		}
 
-		PROCESS_INFORMATION processInfo{};
-		if (!CreateProcessW(shellPath.c_str(), commandLine.data(), nullptr, nullptr, TRUE,
-			CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &startupInfo, &processInfo))
-		{
-			CloseHandle(job);
-			std::fclose(file);
-			CloseHandle(childPipe);
-			errno = EIO;
-			return luaL_fileresult(L, 0, command);
-		}
-		if (!AssignProcessToJobObject(job, processInfo.hProcess) || ResumeThread(processInfo.hThread) == static_cast<DWORD>(-1))
-		{
-			TerminateProcess(processInfo.hProcess, 1);
-			WaitForSingleObject(processInfo.hProcess, INFINITE);
-			CloseHandle(processInfo.hThread);
-			CloseHandle(processInfo.hProcess);
-			CloseHandle(job);
-			std::fclose(file);
-			CloseHandle(childPipe);
-			errno = EIO;
-			return luaL_fileresult(L, 0, command);
-		}
-		CloseHandle(childPipe);
-		CloseHandle(processInfo.hThread);
-		const DWORD popenPid{ find_popen_child(processInfo.dwProcessId, processInfo.hProcess) };
+		lua_pushinteger(L, static_cast<lua_Integer>(childPid));
+		return resultCount + 1;
+	}
 
-		auto* popenStream{ static_cast<PopenStream*>(lua_newuserdatauv(L, sizeof(PopenStream), 0)) };
-		popenStream->stream.f = file;
-		popenStream->stream.closef = &lua_popen_close;
-		popenStream->process = processInfo.hProcess;
-		popenStream->job = job;
-		luaL_setmetatable(L, LUA_FILEHANDLE);
-		lua_pushinteger(L, static_cast<lua_Integer>(popenPid));
-
-		return 2;
+	int lua_io_popen_denied(lua_State* L)
+	{
+		spdlog::error("Access to library is denied (permission not requested)");
+		lua_pushnil(L);
+		return 1;
 	}
 }
 #endif
@@ -230,6 +418,7 @@ int lua_exception_handler(lua_State* L, sol::optional<const std::exception&> may
 ax::Error ax::lua::Manager::setup()
 {
 	LogTimer _timer{ "setup lua" };
+	spdlog::info("LuaJIT version: {} (version number {})", LUAJIT_VERSION, LUAJIT_VERSION_NUM);
 
 	m_state.set_panic(sol::c_call<decltype(&lua_panic), &lua_panic>);
 	m_state.set_exception_handler(&lua_exception_handler);
@@ -270,8 +459,18 @@ ax::Error ax::lua::Manager::setup()
 #undef LIB_IF_PERMITTED_OR_ERROR_TABLE
 
 #ifdef _WIN32
-	if (has_permission(Permission::IO) && has_permission(Permission::OS))
-		m_state["io"]["popen"] = &lua_io_popen;
+	if (has_permission(Permission::IO))
+	{
+		if (has_permission(Permission::OS))
+		{
+			if (!install_popen_close_handlers(m_state.lua_state()))
+				return ax::Error::Lua;
+		}
+		else
+		{
+			m_state["io"]["popen"] = &lua_io_popen_denied;
+		}
+	}
 #endif
 
 	return ax::Error::Success;

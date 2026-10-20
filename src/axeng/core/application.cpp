@@ -165,10 +165,22 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 	if (setupErr != ax::Error::Success)
 		return false;
 
-	ax::lua::Script* manifest_script{ m_scripts.load("!manifest", "manifest.luac") };
+	ax::lua::Script* manifest_script{};
+	for (const std::string_view manifest_name : { "manifest.lua", "manifest.luac" })
+	{
+		if (Resource::contains(m_loader, manifest_name))
+		{
+			manifest_script = m_scripts.load("!manifest", std::string{ manifest_name });
+			if (manifest_script)
+				break;
+		}
+	}
 	m_env = m_scripts.create_env();
 
-	m_env["args"] = args;
+	auto lua_args{ m_scripts.state({}).create_table(static_cast<int>(args.size()), 0) };
+	for (const auto& arg : args)
+		lua_args.add(arg);
+	m_env["args"] = lua_args;
 
 	add_manifest_bindings(m_scripts.state({}));
 

@@ -74,6 +74,12 @@ int main(int argc, char* argv[])
 		.flag()
 		.help("Compiles to / loads from a ZIP file instead of directory");
 
+	bool sourceScripts{ false };
+	program.add_argument("--source")
+		.store_into(sourceScripts)
+		.flag()
+		.help("Writes Lua scripts and the manifest as source instead of LuaJIT bytecode");
+
 	bool recompileCompiler{ false };
 	program.add_argument("-q", "--recompile")
 		.store_into(recompileCompiler)
@@ -228,7 +234,7 @@ int main(int argc, char* argv[])
 
 		doneSomething = true;
 
-		const auto err{ ax::comp::compile(inDirectory, outDirectory, useZipFiles) };
+		const auto err{ ax::comp::compile(inDirectory, outDirectory, useZipFiles, sourceScripts) };
 		if (err != ax::Error::Success)
 			return RET(err);
 	}

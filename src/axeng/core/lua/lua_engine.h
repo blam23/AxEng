@@ -6,6 +6,14 @@
 #include "axeng/core/resource_loader.h"
 
 #include <string>
+extern "C"
+{
+#include <luajit.h>
+}
+
+#if !defined(LUAJIT_VERSION)
+#error AxEng requires LuaJIT for its sol2 Lua runtime
+#endif
 
 #define SOL_ALL_SAFETIES_ON 1
 #define SOL_PRINT_ERRORS 1

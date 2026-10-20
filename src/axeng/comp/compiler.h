@@ -7,6 +7,6 @@
 namespace ax::comp
 {
 	ax::Error clean(std::string_view outDir);
-	ax::Error compile(std::string_view inDir, std::string_view outDir, bool zipItUp);
+	ax::Error compile(std::string_view inDir, std::string_view outDir, bool zipItUp, bool sourceScripts = false);
 	ax::Error recompile_compiler();
 }

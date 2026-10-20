@@ -24,8 +24,9 @@ namespace
 		float z;
 		std::uint32_t screenSpace;
 		std::uint32_t colour; // RGBA8, unorm8x4
+		glm::vec4 clipRect;
 	};
-	static_assert(sizeof(ShapeVertex) == 20);
+	static_assert(sizeof(ShapeVertex) == 36);
 
 	struct ElementRange
 	{
@@ -319,6 +320,7 @@ namespace
 		ax::ShapeOutline outline;
 		float z;
 		bool screenSpace;
+		glm::vec4 clipRect;
 	};
 
 	// Builds the boundary of a shape in final (rotated, positioned) pixel coordinates.
@@ -415,7 +417,7 @@ namespace
 
 	ShapeParams params_of(const ax::Shape& shape)
 	{
-		return std::visit([](const auto& s) { return ShapeParams{ s.fill, s.outline, s.z, s.screenSpace }; }, shape);
+		return std::visit([](const auto& s) { return ShapeParams{ s.fill, s.outline, s.z, s.screenSpace, s.clipRect }; }, shape);
 	}
 
 	void begin_element(Mesh& mesh)
@@ -435,7 +437,7 @@ namespace
 	void append_vertices(Mesh& mesh, const Loop& loop, const ShapeParams& p, std::uint32_t colour)
 	{
 		for (const auto& pos : loop)
-			mesh.vertices.push_back({ pos, p.z, p.screenSpace ? 1u : 0u, colour });
+			mesh.vertices.push_back({ pos, p.z, p.screenSpace ? 1u : 0u, colour, p.clipRect });
 	}
 
 	void emit_fill(Mesh& mesh, const Loop& loop, const std::vector<std::uint32_t>& triangles, const ShapeParams& p, std::uint32_t colour)
@@ -602,16 +604,17 @@ namespace
 
 	wgpu::RenderPipeline create_pipeline(State& state, const wgpu::ShaderModule& shader, const wgpu::PipelineLayout& layout, bool translucent)
 	{
-		wgpu::VertexAttribute attributes[4]{};
+		wgpu::VertexAttribute attributes[5]{};
 		attributes[0] = { .format = wgpu::VertexFormat::Float32x2, .offset = offsetof(ShapeVertex, pos), .shaderLocation = 0 };
 		attributes[1] = { .format = wgpu::VertexFormat::Float32, .offset = offsetof(ShapeVertex, z), .shaderLocation = 1 };
 		attributes[2] = { .format = wgpu::VertexFormat::Uint32, .offset = offsetof(ShapeVertex, screenSpace), .shaderLocation = 2 };
 		attributes[3] = { .format = wgpu::VertexFormat::Unorm8x4, .offset = offsetof(ShapeVertex, colour), .shaderLocation = 3 };
+		attributes[4] = { .format = wgpu::VertexFormat::Float32x4, .offset = offsetof(ShapeVertex, clipRect), .shaderLocation = 4 };
 
 		wgpu::VertexBufferLayout vertexLayout{};
 		vertexLayout.stepMode = wgpu::VertexStepMode::Vertex;
 		vertexLayout.arrayStride = sizeof(ShapeVertex);
-		vertexLayout.attributeCount = 4;
+		vertexLayout.attributeCount = 5;
 		vertexLayout.attributes = attributes;
 
 		wgpu::BlendState blend{};

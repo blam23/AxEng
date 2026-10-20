@@ -109,7 +109,7 @@ ax::Error zip(std::string_view outDir)
 	return ret;
 }
 
-ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir, bool zipItUp)
+ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir, bool zipItUp, bool sourceScripts)
 {
 	LogTimer tmr{ "compilation" };
 
@@ -119,7 +119,9 @@ ax::Error ax::comp::compile(std::string_view inDir, std::string_view outDir, boo
 
 	AX_RETURN_ERROR_IF_FAIL(ret, setup_directory(inDir, outDir));
 
-	const std::vector<std::string> args{ "--in", std::string(inDir), "--out", std::string(outDir) };
+	std::vector<std::string> args{ "--in", std::string(inDir), "--out", std::string(outDir) };
+	if (sourceScripts)
+		args.emplace_back("--source");
 	AX_RETURN_ERROR_IF_FAIL(ret, ax::run_from_directory({ lua::Permission::IO | lua::Permission::OS }, args, "AxCompiler"));
 
 	if (zipItUp)
@@ -143,7 +145,7 @@ ax::Error ax::comp::recompile_compiler()
 
 	spdlog::info("<Build> Building compiler from '{}' to '{}'.", inDir.string(), outDir.string());
 
-	AX_RETURN_ERROR_IF_FAIL(ret, compile(inDir.string(), outDir.string(), false));
+	AX_RETURN_ERROR_IF_FAIL(ret, compile(inDir.string(), outDir.string(), false, false));
 
 	if (ret == ax::Error::Success)
 	{

@@ -31,6 +31,7 @@ namespace ax
 		DirectoryResourceLoader& operator=(DirectoryResourceLoader&& o) noexcept { m_root = o.m_root; return *this; }
 
 		DirectoryResourceLoader(std::filesystem::path rootDirectory);
+		bool contains(ResourceID id) const;
 		const std::filesystem::path& root_directory() const noexcept { return m_root; }
 		std::expected<std::vector<uint8_t>, ResourceLoadError> load(ResourceID id) const;
 		std::optional<ResourceLoadError> setup() { return {}; }
@@ -67,6 +68,7 @@ namespace ax
 		}
 
 		void register_resource(ResourceID, EmbeddedResource);
+		bool contains(ResourceID id) const;
 		std::expected<std::vector<uint8_t>, ResourceLoadError> load(ResourceID id) const;
 		std::optional<ResourceLoadError> setup() { return {}; }
 		std::optional<ResourceLoadError> cleanup() { return {}; }
@@ -85,6 +87,7 @@ namespace ax
 		ZipResourceLoader& operator=(ZipResourceLoader&&) noexcept;
 
 		ZipResourceLoader(std::filesystem::path zipFile);
+		bool contains(ResourceID id) const;
 		std::expected<std::vector<uint8_t>, ResourceLoadError> load(ResourceID id) const;
 		std::optional<ResourceLoadError> setup();
 		std::optional<ResourceLoadError>  cleanup();
@@ -106,6 +109,7 @@ namespace ax
 	class Resource
 	{
 	public:
+		static bool contains(const ResourceLoader& loader, ResourceID id);
 		static std::expected<std::vector<uint8_t>, ax::ResourceLoadError> load(const ResourceLoader& loader, ResourceID id);
 		static std::expected<std::string, ax::ResourceLoadError> load_as_text(const ResourceLoader& loader, ResourceID id);
 		static std::optional<ax::ResourceLoadError> setup_loader(ResourceLoader& loader);
