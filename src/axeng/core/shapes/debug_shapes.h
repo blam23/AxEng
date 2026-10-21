@@ -4,8 +4,7 @@
 
 namespace ax
 {
-	// Queue of immediate-mode debug shapes. Anything added during a frame is drawn as a single
-	// batch by flush() (called by the window at the end of the scene pass) and then cleared.
+	// Queue of immediate-mode shapes drawn after the transparent sprite composite.
 	class DebugShapes
 	{
 	public:

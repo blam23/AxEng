@@ -317,6 +317,30 @@ TEST_F(LuaShapeBindings, DebugShapesAreQueuedFromRenderPass)
 	ax::DebugShapes::clear();
 }
 
+TEST_F(LuaShapeBindings, DrawAfterSpritesQueuesShapesForTheOverlayPass)
+{
+	ax::DebugShapes::clear();
+	run(R"(
+		shapes.draw_after_sprites({
+			{ type = "rect", x = 1, y = 2, width = 3, height = 4, fill = { 1, 0, 0, 0.5 } },
+			{ type = "line", start = { 5, 6 }, finish = { 7, 8 }, thickness = 2 }
+		})
+	)");
+
+	const auto& shapes{ ax::DebugShapes::queued() };
+	ASSERT_EQ(shapes.size(), 2u);
+	const auto& rect{ std::get<ax::Rectangle>(shapes[0]) };
+	expect_vec(rect.position, { 1, 2 });
+	expect_vec(rect.size, { 3, 4 });
+	expect_vec(rect.fill, { 1, 0, 0, 0.5f });
+
+	const auto& line{ std::get<ax::Line>(shapes[1]) };
+	expect_vec(line.start, { 5, 6 });
+	expect_vec(line.end, { 7, 8 });
+	EXPECT_FLOAT_EQ(line.thickness, 2);
+	ax::DebugShapes::clear();
+}
+
 TEST_F(LuaShapeBindings, DebugShapeArgumentErrors)
 {
 	ax::DebugShapes::clear();

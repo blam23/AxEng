@@ -2007,6 +2007,38 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		compositePass.Draw(3, 1, 0, 0);
 		compositePass.End();
 
+		auto overlayShapes = DebugShapes::take_queued();
+		if (!overlayShapes.empty())
+		{
+			wgpu::RenderPassColorAttachment overlayColorAttachment
+			{
+				.view = targetView,
+				.depthSlice = wgpu::kDepthSliceUndefined,
+				.resolveTarget = nullptr,
+				.loadOp = wgpu::LoadOp::Load,
+				.storeOp = wgpu::StoreOp::Store,
+			};
+			wgpu::RenderPassDepthStencilAttachment overlayDepthAttachment
+			{
+				.view = m_depthTextureView,
+				.depthLoadOp = wgpu::LoadOp::Load,
+				.depthStoreOp = wgpu::StoreOp::Store,
+				.depthClearValue = 0.0f,
+				.depthReadOnly = false,
+				.stencilLoadOp = wgpu::LoadOp::Undefined,
+				.stencilStoreOp = wgpu::StoreOp::Undefined,
+				.stencilClearValue = 0,
+				.stencilReadOnly = true,
+			};
+			wgpu::RenderPassDescriptor overlayPassDesc{};
+			overlayPassDesc.colorAttachmentCount = 1;
+			overlayPassDesc.colorAttachments = &overlayColorAttachment;
+			overlayPassDesc.depthStencilAttachment = &overlayDepthAttachment;
+			auto overlayPass = encoder.BeginRenderPass(&overlayPassDesc);
+			ShapeRenderer::draw(overlayPass, overlayShapes);
+			overlayPass.End();
+		}
+
 		wgpu::RenderPassColorAttachment uiColorAttachment
 		{
 			.view = targetView,
@@ -2192,12 +2224,6 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		draw_sprite_batches(pass, m_pipeline);
 	}
 
-	{
-		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, debug_shapes);
-
-		// After the sprites so translucent debug shapes (which don't write depth) blend over them.
-		DebugShapes::flush(pass);
-	}
 }
 
 

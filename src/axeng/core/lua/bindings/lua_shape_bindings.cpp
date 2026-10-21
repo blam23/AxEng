@@ -651,6 +651,23 @@ sol::table ax::lua::bindings::create_shape_table(sol::state& state)
 			ax::ShapeRenderer::draw(pass, scratch);
 		};
 
+	// Queues shapes to be drawn after the transparent sprite composite.
+	shapes["draw_after_sprites"] =
+		[](const sol::object& value)
+		{
+			static ax::ShapeList scratch;
+			scratch.clear();
+			if (value.is<LuaShapeList>())
+				scratch = value.as<LuaShapeList>().shapes;
+			else if (value.get_type() == sol::type::table)
+				shapes_from_table(value.as<sol::table>(), scratch);
+			else
+				throw sol::error("shapes.draw_after_sprites expects a shape_list or shape description table.");
+
+			for (auto& shape : scratch)
+				ax::DebugShapes::add(std::move(shape));
+		};
+
 	shapes["stats"] = &stats_table;
 
 	return shapes;
