@@ -9,6 +9,8 @@ set_toolchains("clang")
 set_languages("c17", "c++23")
 set_encodings("utf-8")
 set_warnings("all", "error")
+-- LuaJIT's protected calls need sol2 to convert C++ callback exceptions into Lua errors.
+add_defines("SOL_EXCEPTIONS_SAFE_PROPAGATION=0")
 add_rules("mode.debug", "mode.release")
 
 option("vcpkg_full_check")
@@ -47,6 +49,12 @@ rule("vcpkg.manifest")
             local vcpkg_root = os.getenv("VCPKG_ROOT")
             if vcpkg_root and os.isfile(path.join(vcpkg_root, "vcpkg.exe")) then
                 vcpkg = path.join(vcpkg_root, "vcpkg.exe")
+                local git_dir = path.join(vcpkg_root, ".git")
+                if os.isdir(git_dir) or os.isfile(git_dir) then
+                    -- Git's filesystem monitor can keep vcpkg's temporary registry checkouts open.
+                    os.execv("git", {"-C", vcpkg_root, "config", "--local", "core.fsmonitor", "false"})
+                    os.execv("git", {"-C", vcpkg_root, "config", "--local", "core.usebuiltinfsmonitor", "false"})
+                end
             end
             os.execv(vcpkg, {"install", "--triplet", vcpkg_triplet,
                              "--overlay-triplets=" .. vcpkg_triplet_dir,

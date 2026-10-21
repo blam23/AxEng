@@ -165,8 +165,6 @@ void ax::BackgroundWorker::stop()
 ax::BackgroundTask* ax::BackgroundWorker::create()
 {
 	std::lock_guard lock{ m_mutex };
-	if (!m_running)
-		throw std::logic_error("Background worker is stopped");
 	auto task{ std::make_shared<BackgroundTask>() };
 	const auto ptr{ task.get() };
 	m_tasks.emplace(ptr, std::move(task));
