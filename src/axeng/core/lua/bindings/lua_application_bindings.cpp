@@ -37,7 +37,7 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 	if (mainThread && app.has_permission(lua::Permission::IO) && !app.project_source_directory().empty())
 		app_table["project_source_directory"] = app.project_source_directory().string();
 
-	setup_user_io_bindings(app, state);
+	setup_user_io_bindings(app, state, mainThread);
 
 	if (mainThread && app.has_window())
 	{

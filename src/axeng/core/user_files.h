@@ -10,6 +10,7 @@
 #include <list>
 #include "spdlog/spdlog.h"
 #include <string>
+#include <vector>
 
 namespace ax
 {
@@ -62,9 +63,20 @@ namespace ax
         UserFileHandle* open_file(const std::string& filename, const char* mode) noexcept;
         ax::Error close_file(UserFileHandle* handle) noexcept;
         // Deletes a file in the user directory. Returns false if it doesn't exist or can't be removed.
-        bool remove_file(const std::string& filename) noexcept;
+        bool remove_file(const std::string& filename) const noexcept;
 
         std::optional<std::filesystem::path> get_user_file_path(const std::string& filename) const noexcept;
+        std::expected<void, std::string> create_zip
+        (
+            const std::vector<std::string>& filenames,
+            const std::string& output_filename,
+            bool remove_sources = false
+        ) const;
+        std::optional<std::string> read_zip_entry
+        (
+            const std::string& zip_filename,
+            const std::string& entry_filename
+        ) const;
 
     private:
         ax::Error setup_directory() noexcept;

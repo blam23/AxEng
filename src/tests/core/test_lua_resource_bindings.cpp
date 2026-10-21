@@ -1,7 +1,13 @@
 #include <gtest/gtest.h>
 
 #include "axeng/core/application.h"
+#include "axeng/core/lua/bindings/lua_user_io_bindings.h"
 #include "tests/main/log_capture.h"
+
+#include <minizip-ng/mz.h>
+#include <minizip-ng/mz_strm.h>
+#include <minizip-ng/mz_zip.h>
+#include <minizip-ng/mz_zip_rw.h>
 
 #include <algorithm>
 #include <chrono>
@@ -140,6 +146,92 @@ TEST(LuaResourceBindings, SaveTextureMethodsWritePngFiles)
 	} };
 	expect_png(io_file);
 	expect_png(user_file);
+}
+
+TEST(LuaResourceBindings, UserFilesCanBeWrittenToZip)
+{
+	const auto app_name{ make_app_name("axeng_test_user_zip_") };
+	const auto user_directory{ get_user_directory(app_name) };
+	ASSERT_FALSE(user_directory.empty());
+	const auto archive_path{ user_directory / "factory_save.zip" };
+	ScopedTestFiles cleanup{ { archive_path, user_directory / "replacement.txt" }, user_directory };
+	const std::string manifest{
+		"manifest = { name = '" + app_name +
+		"', headless = true, permissions = { 'io' }, scripts = { main = 'main.lua' }, entry_point = 'main' }"
+	};
+	static constexpr char entry_point[] = "return 0";
+
+	ax::EmbeddedResourceLayout layout;
+	layout.emplace("manifest.lua", ax::EmbeddedResource{
+		reinterpret_cast<const uint8_t*>(manifest.data()), manifest.size() });
+	layout.emplace("main.lua", ax::EmbeddedResource{
+		reinterpret_cast<const uint8_t*>(entry_point), sizeof(entry_point) - 1 });
+
+	flag_set<ax::lua::Permission> permissions;
+	permissions |= ax::lua::Permission::IO;
+	auto app{ ax::Application::from_embedded(permissions, std::move(layout)) };
+	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
+
+	auto* save_file{ app.user_files().open_file("factory_save.lua", "w") };
+	ASSERT_NE(save_file, nullptr);
+	ASSERT_TRUE(save_file->write("return { seed = 123 }"));
+	save_file->close();
+	auto* screenshot{ app.user_files().open_file("factory_save.png", "w") };
+	ASSERT_NE(screenshot, nullptr);
+	ASSERT_TRUE(screenshot->write("png image bytes"));
+	screenshot->close();
+
+	const auto zip_result{ app.user_files().create_zip(
+		{ "factory_save.lua", "factory_save.png" },
+		"factory_save.zip",
+		true) };
+	ASSERT_TRUE(zip_result.has_value()) << zip_result.error();
+	EXPECT_FALSE(std::filesystem::exists(user_directory / "factory_save.lua"));
+	EXPECT_FALSE(std::filesystem::exists(user_directory / "factory_save.png"));
+	EXPECT_EQ(app.user_files().read_zip_entry("factory_save.zip", "factory_save.lua"),
+		std::optional<std::string>{ "return { seed = 123 }" });
+	EXPECT_EQ(app.user_files().read_zip_entry("factory_save.zip", "factory_save.png"),
+		std::optional<std::string>{ "png image bytes" });
+
+	sol::state lua;
+	lua.open_libraries();
+	lua["app"] = lua.create_table();
+	ax::lua::bindings::setup_user_io_bindings(app, lua, true);
+	const auto read_result{ lua.safe_script(
+		"assert(app.user_io.read_zip_entry('factory_save.zip', 'factory_save.lua') == 'return { seed = 123 }')",
+		sol::script_pass_on_error) };
+	ASSERT_TRUE(read_result.valid());
+
+	void* reader{ mz_zip_reader_create() };
+	ASSERT_NE(reader, nullptr);
+	ASSERT_EQ(mz_zip_reader_open_file(reader, archive_path.string().c_str()), MZ_OK);
+	ASSERT_EQ(mz_zip_reader_goto_first_entry(reader), MZ_OK);
+
+	std::vector<std::string> entry_names;
+	for (;;)
+	{
+		mz_zip_file* entry{ nullptr };
+		ASSERT_EQ(mz_zip_reader_entry_get_info(reader, &entry), MZ_OK);
+		ASSERT_NE(entry, nullptr);
+		entry_names.emplace_back(entry->filename);
+		const auto result{ mz_zip_reader_goto_next_entry(reader) };
+		if (result == MZ_END_OF_LIST)
+			break;
+		ASSERT_EQ(result, MZ_OK);
+	}
+	EXPECT_EQ(entry_names, (std::vector<std::string>{ "factory_save.lua", "factory_save.png" }));
+	EXPECT_EQ(mz_zip_reader_close(reader), MZ_OK);
+	mz_zip_reader_delete(&reader);
+
+	auto* replacement{ app.user_files().open_file("replacement.txt", "w") };
+	ASSERT_NE(replacement, nullptr);
+	ASSERT_TRUE(replacement->write("replacement save"));
+	replacement->close();
+	const auto replacement_result{ app.user_files().create_zip({ "replacement.txt" }, "factory_save.zip", true) };
+	ASSERT_TRUE(replacement_result.has_value()) << replacement_result.error();
+	EXPECT_EQ(app.user_files().read_zip_entry("factory_save.zip", "replacement.txt"),
+		std::optional<std::string>{ "replacement save" });
+	EXPECT_FALSE(std::filesystem::exists(user_directory / "replacement.txt"));
 }
 
 TEST(LuaResourceBindings, SourceManifestOverridesIncompatibleBytecode)

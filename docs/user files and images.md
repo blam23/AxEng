@@ -6,6 +6,8 @@ Files live in `%AppData%\AxEng\app_user\<project name>`. Paths outside that fold
 
 - `app.user_io.open(name, mode)` returns a handle with `read_all()`, `write(text)` (returns whether it succeeded) and `close()`, or nil if the file can't be opened.
 - `app.user_io.remove(name)` deletes a file and returns true, or false if it doesn't exist or couldn't be removed.
+- `app.user_io.zip_async(files, output, callback[, remove_sources])` writes the listed user files into a ZIP archive on the background worker. Set `remove_sources` to true to delete the inputs after the archive has been fully written. It returns false if the task can't be queued. The callback runs on the main thread with `(success, message)`; on success, `message` is the output filename, and on failure it describes the error. This API is available to the main Lua thread when the app has a window.
+- `app.user_io.read_zip_entry(archive, entry)` returns an archive member as a binary string, or nil if the archive/member can't be read.
 
 ## Textures from encoded images
 

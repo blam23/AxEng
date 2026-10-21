@@ -67,7 +67,7 @@ namespace ax
 		std::condition_variable m_condition{};
 		std::queue<std::shared_ptr<BackgroundTask>> m_queue{};
 		std::map<BackgroundTask*, std::shared_ptr<BackgroundTask>> m_tasks{};
-		bool m_running{ true };
+		bool m_running{ false };
 		std::function<void()> m_onStart;
 		std::function<void()> m_onStop;
 

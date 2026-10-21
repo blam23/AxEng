@@ -114,7 +114,7 @@ namespace ax
 
 	private:
 		friend void lua::bindings::setup_application_bindings(Application&, sol::state&, bool);
-		friend void lua::bindings::setup_user_io_bindings(Application&, sol::state&);
+		friend void lua::bindings::setup_user_io_bindings(Application&, sol::state&, bool);
 		friend void lua::bindings::setup_shared_bindings(Application&, sol::state&, bool);
 		friend void lua::bindings::setup_resource_bindings(Application&, sol::state&);
 		friend void lua::bindings::setup_sprite_bindings(Application&, sol::state&);
@@ -132,7 +132,7 @@ namespace ax
 		void init_audio(const sol::table& manifest);
 		void shutdown_audio();
 		void add_manifest_bindings(sol::state&);
-		ax::Error add_thread_bindings(sol::state&, const std::vector<std::string>& args);
+		ax::Error add_thread_bindings(sol::state&);
 		std::unique_ptr<Window> m_window;
 
 		ResourceLoader m_loader;

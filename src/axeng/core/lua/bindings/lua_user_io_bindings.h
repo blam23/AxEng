@@ -4,5 +4,5 @@
 
 namespace ax::lua::bindings
 {
-	void setup_user_io_bindings(ax::Application&, sol::state&);
+	void setup_user_io_bindings(ax::Application&, sol::state&, bool mainThread);
 }

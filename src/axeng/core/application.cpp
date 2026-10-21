@@ -54,12 +54,8 @@ bool ax::Application::init_window(wgpu::BackendType backendType)
 	return success;
 }
 
-ax::Error ax::Application::add_thread_bindings(sol::state& state, const std::vector<std::string>& args)
+ax::Error ax::Application::add_thread_bindings(sol::state& state)
 {
-	const auto initErr{ initialise_background_worker(args) };
-	if (initErr != ax::Error::Success)
-		return initErr;
-
 	auto background_table{ state.create_table() };
 
 	background_table["run_script"] =
@@ -362,10 +358,17 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 			}
 		};
 
-	if (m_allowedPermissions[ax::lua::Permission::Threads])
+	const bool hasThreadPermission{ m_allowedPermissions[ax::lua::Permission::Threads] };
+	if (m_create_window || hasThreadPermission)
 	{
-		const auto threadErr{ add_thread_bindings(m_scripts.state({}), args) };
+		const auto threadErr{ initialise_background_worker(args) };
 		if (threadErr != ax::Error::Success)
+			return false;
+	}
+	if (hasThreadPermission)
+	{
+		const auto bindingsErr{ add_thread_bindings(m_scripts.state({})) };
+		if (bindingsErr != ax::Error::Success)
 			return false;
 	}
 
