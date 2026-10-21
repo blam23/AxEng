@@ -1273,6 +1273,14 @@ void ax::Window::queue_texture(SpriteDefinition sprite)
 	m_queuedTextures.push_back(std::move(sprite));
 }
 
+void ax::Window::render_textures(std::vector<SpriteDefinition> sprites)
+{
+	std::lock_guard lock{ m_pendingTextureMutex };
+	m_queuedTextures.reserve(m_queuedTextures.size() + sprites.size());
+	for (auto& sprite : sprites)
+		m_queuedTextures.push_back(std::move(sprite));
+}
+
 void ax::Window::render_texture(Texture* tex, glm::vec2 position, std::shared_ptr<Texture> keepAlive)
 {
 	SpriteDefinition sprite{};
@@ -1945,7 +1953,7 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		auto scenePass = encoder.BeginRenderPass(&scenePassDesc);
 		{
 			std::lock_guard lock{ m_pendingTextureMutex };
-			m_pendingTextures = std::move(m_queuedTextures);
+			m_pendingTextures.swap(m_queuedTextures);
 			m_queuedTextures.clear();
 		}
 		handle_render_pass(scenePass, delta);

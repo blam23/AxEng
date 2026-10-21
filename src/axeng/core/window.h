@@ -198,6 +198,7 @@ namespace ax
 		// Optional overloads that accept a z-index for depth ordering
 		void render_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive = {});
 		void render_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive = {});
+		void render_textures(std::vector<SpriteDefinition> sprites);
 		void render_ui_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive = {}, glm::vec4 clipRect = { 0.0f, 0.0f, -1.0f, -1.0f });
 		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive = {}, glm::vec4 clipRect = { 0.0f, 0.0f, -1.0f, -1.0f });
 

@@ -2,6 +2,7 @@
 #include "axeng/core/application.h"
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
 #include "spdlog/spdlog.h"
+#include <unordered_map>
 
 namespace
 {
@@ -147,6 +148,104 @@ void ax::lua::bindings::setup_sprite_bindings(ax::Application& app, sol::state& 
 					sprite->gpuData.pos.y = update.get<float>("y");
 					sprite->gpuData.rotation = update.get<float>("r");
 				}
+			};
+
+		sprite_table["update_positions_batch"] =
+			[](const sol::table& updates, std::size_t count)
+			{
+				if (count > updates.size())
+					throw sol::error("Sprite position batch count exceeds the update table size");
+
+				for (std::size_t i = 1; i <= count; ++i)
+				{
+					const sol::table update{ updates.get<sol::table>(i) };
+					const auto handle{ update.get<LuaSprite>("sprite") };
+					auto sprite{ &handle.get() };
+					sprite->gpuData.pos.x = update.get<float>("x");
+					sprite->gpuData.pos.y = update.get<float>("y");
+					sprite->gpuData.z = update.get<float>("z");
+					sprite->gpuData.rotation = update.get<float>("r");
+				}
+			};
+
+		sprite_table["render_atlas_batch"] =
+			[&app](
+				const sol::table& atlas_sprites,
+				const sol::table& names,
+				const sol::table& positions_x,
+				const sol::table& positions_y,
+				const sol::table& depths,
+				std::size_t count,
+				const std::string& prefix,
+				float size
+			)
+			{
+				if (count > names.size() || count > positions_x.size()
+					|| count > positions_y.size() || count > depths.size())
+					throw sol::error("Atlas sprite batch count exceeds an input table size");
+
+				struct AtlasSprite
+				{
+					Texture* texture;
+					std::shared_ptr<Texture> keep_alive;
+					rectf region;
+					float content;
+				};
+				std::unordered_map<std::string, AtlasSprite> icon_cache;
+				icon_cache.reserve(32);
+				std::vector<SpriteDefinition> sprites;
+				sprites.reserve(count);
+				for (std::size_t i = 1; i <= count; ++i)
+				{
+					const auto name{ names.get<std::string>(i) };
+					auto icon{ icon_cache.find(name) };
+					if (icon == icon_cache.end())
+					{
+						const auto descriptor{ atlas_sprites.get<sol::table>(prefix + name) };
+						const auto texture{ descriptor.get<sol::table>("tex") };
+						if (!texture["valid"].get_or(false))
+							throw sol::error("Invalid atlas texture for sprite: " + name);
+
+						auto* const tex{ texture["ptr"].get<Texture*>() };
+						if (tex == nullptr)
+							throw sol::error("Missing atlas texture for sprite: " + name);
+						auto keep_alive{ get_texture_lease(texture) };
+						if (texture["temp"].get_or(false) && !keep_alive)
+							throw sol::error("Released atlas texture for sprite: " + name);
+
+						AtlasSprite atlas_sprite{
+							tex,
+							std::move(keep_alive),
+							{
+								descriptor.get<float>("sx"),
+								descriptor.get<float>("sy"),
+								descriptor.get<float>("sw"),
+								descriptor.get<float>("sh")
+							},
+							descriptor.get<float>("content")
+						};
+						icon = icon_cache.emplace(name, std::move(atlas_sprite)).first;
+					}
+
+					const auto& atlas_sprite{ icon->second };
+					const float scale{ size / atlas_sprite.content };
+					const float width{ atlas_sprite.region.z * scale };
+					const float height{ atlas_sprite.region.w * scale };
+					SpriteDefinition sprite{};
+					sprite.tex = atlas_sprite.texture;
+					sprite.keepAlive = atlas_sprite.keep_alive;
+					sprite.gpuData.pos = {
+						positions_x.get<float>(i) - width * 0.5f,
+						positions_y.get<float>(i) - height * 0.5f
+					};
+					sprite.gpuData.region = atlas_sprite.region;
+					sprite.gpuData.scale = { scale, scale };
+					sprite.gpuData.z = depths.get<float>(i);
+					sprite.gpuData.useRegion = 1;
+					sprites.push_back(std::move(sprite));
+				}
+
+				app.window()->render_textures(std::move(sprites));
 			};
 
 		state.new_usertype<LuaSprite>
