@@ -145,11 +145,35 @@ TEST(ParticleSystemTests, ComputesAndDrawsWithGpuResidentState)
 	EXPECT_FALSE(emitter->finished());
 	particles.set_paused(false);
 
+	auto inactiveConfig{ config };
+	inactiveConfig.playing = false;
+	inactiveConfig.visible = false;
+	auto inactiveEmitter{ particles.create(inactiveConfig) };
+	particles.suspend_all();
+	auto suspendedEncoder{ s_device.CreateCommandEncoder() };
+	particles.encode_compute(s_device, queue, suspendedEncoder, 1.0,
+		{ -16.0f, -16.0f, 16.0f, 16.0f }, { 32.0f, 32.0f }, 1.0f,
+		wgpu::TextureFormat::RGBA8Unorm, 1);
+	auto suspendedCommand{ suspendedEncoder.Finish() };
+	queue.Submit(1, &suspendedCommand);
+	s_device.Tick();
+	EXPECT_FALSE(emitter->config().playing);
+	EXPECT_FALSE(emitter->config().visible);
+	EXPECT_FALSE(inactiveEmitter->config().playing);
+	EXPECT_FALSE(inactiveEmitter->config().visible);
+
+	particles.resume_all();
+	EXPECT_TRUE(emitter->config().playing);
+	EXPECT_TRUE(emitter->config().visible);
+	EXPECT_FALSE(inactiveEmitter->config().playing);
+	EXPECT_FALSE(inactiveEmitter->config().visible);
+
 	auto encoder{ s_device.CreateCommandEncoder() };
 	particles.encode_compute(s_device, queue, encoder, 1.0,
 		{ -16.0f, -16.0f, 16.0f, 16.0f }, { 32.0f, 32.0f }, 1.0f,
 		wgpu::TextureFormat::RGBA8Unorm, 1);
 	EXPECT_TRUE(emitter->finished());
+	EXPECT_FALSE(inactiveEmitter->finished());
 
 	auto accumulation{ create_attachment(s_device, wgpu::TextureFormat::RGBA16Float) };
 	auto revealage{ create_attachment(s_device, wgpu::TextureFormat::R8Unorm) };

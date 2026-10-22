@@ -140,7 +140,16 @@ void ax::ParticleEmitter::set_config(const ParticleConfig& config)
 		throw std::invalid_argument(*error);
 	if (config.capacity != m_config.capacity)
 		throw std::invalid_argument("capacity cannot be changed after emitter creation");
-	m_config = config;
+	if (m_suspended)
+	{
+		m_resumePlaying = config.playing;
+		m_resumeVisible = config.visible;
+		m_config = config;
+		m_config.playing = false;
+		m_config.visible = false;
+	}
+	else
+		m_config = config;
 }
 
 void ax::ParticleEmitter::set_position(glm::vec2 position)
@@ -162,13 +171,18 @@ void ax::ParticleEmitter::play()
 	m_systemTime = 0.0;
 	m_sinceLastCompute = 0.0;
 	m_emissionRemainder = 0.0;
-	m_config.playing = true;
+	if (m_suspended)
+		m_resumePlaying = true;
+	else
+		m_config.playing = true;
 	m_clearRequested = true;
 }
 
 void ax::ParticleEmitter::stop() noexcept
 {
 	m_config.playing = false;
+	if (m_suspended)
+		m_resumePlaying = false;
 }
 
 void ax::ParticleEmitter::clear() noexcept
@@ -178,7 +192,10 @@ void ax::ParticleEmitter::clear() noexcept
 
 void ax::ParticleEmitter::set_visible(bool visible) noexcept
 {
-	m_config.visible = visible;
+	if (m_suspended)
+		m_resumeVisible = visible;
+	else
+		m_config.visible = visible;
 }
 
 bool ax::ParticleEmitter::finished() const noexcept
@@ -283,6 +300,38 @@ void ax::ParticleSystem::set_render_enabled(bool enabled)
 	if (m_thread != std::this_thread::get_id())
 		throw std::runtime_error("Particle systems belong to the renderer thread");
 	m_render_enabled = enabled;
+}
+
+void ax::ParticleSystem::suspend_all()
+{
+	if (m_thread != std::this_thread::get_id())
+		throw std::runtime_error("Particle systems belong to the renderer thread");
+	for (const auto& weakEmitter : m_emitters)
+	{
+		if (const auto emitter{ weakEmitter.lock() }; emitter && !emitter->m_suspended)
+		{
+			emitter->m_resumePlaying = emitter->m_config.playing;
+			emitter->m_resumeVisible = emitter->m_config.visible;
+			emitter->m_config.playing = false;
+			emitter->m_config.visible = false;
+			emitter->m_suspended = true;
+		}
+	}
+}
+
+void ax::ParticleSystem::resume_all()
+{
+	if (m_thread != std::this_thread::get_id())
+		throw std::runtime_error("Particle systems belong to the renderer thread");
+	for (const auto& weakEmitter : m_emitters)
+	{
+		if (const auto emitter{ weakEmitter.lock() }; emitter && emitter->m_suspended)
+		{
+			emitter->m_config.playing = emitter->m_resumePlaying;
+			emitter->m_config.visible = emitter->m_resumeVisible;
+			emitter->m_suspended = false;
+		}
+	}
 }
 
 void ax::ParticleSystem::set_debug_render_enabled(bool enabled)
@@ -452,6 +501,9 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 		}
 		emitter->check_thread();
 		++it;
+
+		if (emitter->m_suspended)
+			continue;
 
 		if (!emitter->m_particleBuffer.Get())
 		{

@@ -52,8 +52,10 @@ local emission_finished = emitter:finished()
 `set_config(table)` updates editable fields while retaining the emitter's fixed capacity. Capacity is selected
 when the emitter is created; recreate the emitter to change it. Invalid values raise Lua errors.
 `app.particles.set_paused(true)` freezes all emitters without clearing their state; pass `false` to resume.
-`app.particles.set_render_enabled(false)` hides all emitters without changing their state. The pause overlay
-keeps the frozen game particles visible, while pause-derived Options and Save/Load screens hide them.
+`app.particles.set_render_enabled(false)` disables drawing for all emitters without changing their individual
+state
+`app.particles.suspend_all()` remembers each emitter's playing and visible state, then stops and hides it;
+`app.particles.resume_all()` restores those states. Emitters that were already stopped or hidden remain so.
 `app.particles.set_debug_render_enabled(true)` draws the conservative world-space AABB of every live emitter,
 including its estimated particle reach. It does not alter visibility or simulation culling.
 

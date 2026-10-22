@@ -83,6 +83,9 @@ namespace ax
 		glm::vec4 m_worldBounds{};
 		bool m_hasWorldBounds{};
 		bool m_clearRequested{ true };
+		bool m_suspended{};
+		bool m_resumePlaying{};
+		bool m_resumeVisible{};
 		wgpu::Buffer m_particleBuffer;
 		wgpu::Buffer m_uniformBuffer;
 		wgpu::Buffer m_spawnCounterBuffer;
@@ -104,6 +107,8 @@ namespace ax
 		std::shared_ptr<ParticleEmitter> create(const ParticleConfig& config);
 		void set_paused(bool paused);
 		void set_render_enabled(bool enabled);
+		void suspend_all();
+		void resume_all();
 		void set_debug_render_enabled(bool enabled);
 		void encode_compute(wgpu::Device& device, wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
 			double delta, glm::vec4 cameraBounds, glm::vec2 viewport, float zoom,
