@@ -51,6 +51,11 @@ local emission_finished = emitter:finished()
 
 `set_config(table)` updates editable fields while retaining the emitter's fixed capacity. Capacity is selected
 when the emitter is created; recreate the emitter to change it. Invalid values raise Lua errors.
+`app.particles.set_paused(true)` freezes all emitters without clearing their state; pass `false` to resume.
+`app.particles.set_render_enabled(false)` hides all emitters without changing their state. The pause overlay
+keeps the frozen game particles visible, while pause-derived Options and Save/Load screens hide them.
+`app.particles.set_debug_render_enabled(true)` draws the conservative world-space AABB of every live emitter,
+including its estimated particle reach. It does not alter visibility or simulation culling.
 
 | Field | Meaning |
 | --- | --- |
@@ -86,9 +91,12 @@ outside the camera. The bound covers recorded spawn origins, maximum speed and l
 area, and particle size. Its origin history is retained conservatively, so moving emitters can make the
 bound larger but cannot cause visible particles to be wrongly dropped.
 
-When an emitter is considered, compute derives each particle's current AABB, excludes non-intersecting
+When an emitter is considered, compute derives each particle's current rotated AABB, excludes non-intersecting
 particles from the GPU-generated visible list, and marks expired slots reusable. Indirect drawing therefore
-does not issue particle instances outside the camera. Per-particle motion is analytic rather than stepped;
+does not issue particle instances outside the camera. Visibility is tested against the camera's world-space
+viewport bounds, which are derived from the current zoom; the rotated bounds include a one-pixel safety margin.
+The F5 **Particle emitter AABBs** debug toggle draws the same whole-emitter bounds for diagnosis.
+Per-particle motion is analytic rather than stepped;
 when an emitter is outside its conservative bound, the engine skips its compute dispatch and derives current
 particle age from GPU birth timestamps when it becomes visible again. If it has been culled long enough to
 make the wrapped GPU clock ambiguous, stale slots are cleared. Emission timing continues while culled; births

@@ -102,6 +102,9 @@ namespace ax
 		ParticleSystem& operator=(const ParticleSystem&) = delete;
 
 		std::shared_ptr<ParticleEmitter> create(const ParticleConfig& config);
+		void set_paused(bool paused);
+		void set_render_enabled(bool enabled);
+		void set_debug_render_enabled(bool enabled);
 		void encode_compute(wgpu::Device& device, wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
 			double delta, glm::vec4 cameraBounds, glm::vec2 viewport, float zoom,
 			wgpu::TextureFormat colourFormat, std::uint32_t sampleCount);
@@ -123,6 +126,9 @@ namespace ax
 		wgpu::PipelineLayout m_renderPipelineLayout;
 		std::vector<std::weak_ptr<ParticleEmitter>> m_emitters;
 		std::vector<std::shared_ptr<ParticleEmitter>> m_frameEmitters;
+		bool m_paused{};
+		bool m_render_enabled{ true };
+		bool m_debug_bounds{};
 		wgpu::TextureFormat m_colourFormat{ wgpu::TextureFormat::Undefined };
 		std::uint32_t m_sampleCount{};
 	};

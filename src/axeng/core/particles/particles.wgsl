@@ -87,7 +87,6 @@ fn update_particles(@builtin(global_invocation_id) id: vec3<u32>)
 	{
 		particle.ageLifeRotationAngular.y = 0.0;
 		particles[index] = particle;
-		return;
 	}
 
 	var age = particle_age(particle, parameters.time.x);
@@ -149,10 +148,14 @@ fn update_particles(@builtin(global_invocation_id) id: vec3<u32>)
 	let ageRatio = clamp(age / particle.ageLifeRotationAngular.y, 0.0, 1.0);
 	let size = mix(parameters.directionSpreadRadiusSize.w, parameters.appearance.x, ageRatio);
 	let halfSize = max(size * 0.5, 0.0);
-	let outside = position.x + halfSize < parameters.cameraBounds.x
-		|| position.y + halfSize < parameters.cameraBounds.y
-		|| position.x - halfSize > parameters.cameraBounds.z
-		|| position.y - halfSize > parameters.cameraBounds.w;
+	let angle = particle.ageLifeRotationAngular.z + particle.ageLifeRotationAngular.w * age
+		+ select(0.0, parameters.transform.z, (parameters.misc.w & 2u) != 0u);
+	let rotatedHalfExtent = halfSize * (abs(cos(angle)) + abs(sin(angle)))
+		+ 0.5 / max(parameters.appearance.w, 0.001);
+	let outside = position.x + rotatedHalfExtent < parameters.cameraBounds.x
+		|| position.y + rotatedHalfExtent < parameters.cameraBounds.y
+		|| position.x - rotatedHalfExtent > parameters.cameraBounds.z
+		|| position.y - rotatedHalfExtent > parameters.cameraBounds.w;
 	if (!outside)
 	{
 		let visibleIndex = atomicAdd(&drawArguments.instanceCount, 1u);

@@ -97,6 +97,11 @@ TEST(ParticleSystemTests, ValidatesEmitterParameters)
 	EXPECT_TRUE(ax::validate_particle_config(config));
 	config.duration = 0.01f;
 	EXPECT_FALSE(ax::validate_particle_config(config));
+	config.spread = 6.2832f;
+	EXPECT_FALSE(ax::validate_particle_config(config));
+	config.spread = 6.284f;
+	EXPECT_TRUE(ax::validate_particle_config(config));
+	config.spread = 6.2831853f;
 	config.capacity = 0;
 	EXPECT_TRUE(ax::validate_particle_config(config));
 }
@@ -128,11 +133,23 @@ TEST(ParticleSystemTests, ComputesAndDrawsWithGpuResidentState)
 	auto emitter{ particles.create(config) };
 	emitter->play();
 
-	auto encoder{ s_device.CreateCommandEncoder() };
 	auto queue{ s_device.GetQueue() };
-	particles.encode_compute(s_device, queue, encoder, 1.0 / 60.0,
+	particles.set_paused(true);
+	auto pausedEncoder{ s_device.CreateCommandEncoder() };
+	particles.encode_compute(s_device, queue, pausedEncoder, 1.0,
 		{ -16.0f, -16.0f, 16.0f, 16.0f }, { 32.0f, 32.0f }, 1.0f,
 		wgpu::TextureFormat::RGBA8Unorm, 1);
+	auto pausedCommand{ pausedEncoder.Finish() };
+	queue.Submit(1, &pausedCommand);
+	s_device.Tick();
+	EXPECT_FALSE(emitter->finished());
+	particles.set_paused(false);
+
+	auto encoder{ s_device.CreateCommandEncoder() };
+	particles.encode_compute(s_device, queue, encoder, 1.0,
+		{ -16.0f, -16.0f, 16.0f, 16.0f }, { 32.0f, 32.0f }, 1.0f,
+		wgpu::TextureFormat::RGBA8Unorm, 1);
+	EXPECT_TRUE(emitter->finished());
 
 	auto accumulation{ create_attachment(s_device, wgpu::TextureFormat::RGBA16Float) };
 	auto revealage{ create_attachment(s_device, wgpu::TextureFormat::R8Unorm) };

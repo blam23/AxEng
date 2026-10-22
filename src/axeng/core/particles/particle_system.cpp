@@ -1,4 +1,5 @@
 #include "axeng/core/particles/particle_system.h"
+#include "axeng/core/shapes/debug_shapes.h"
 
 #include <algorithm>
 #include <array>
@@ -14,6 +15,7 @@ namespace
 	constexpr double s_max_frame_delta{ 10.0 };
 	constexpr double s_particle_clock_period{ 4096.0 };
 	constexpr float s_min_emission_duration{ 0.01f };
+	constexpr float s_tau_tolerance{ 0.0001f };
 	constexpr float s_tau{ 6.28318530718f };
 
 	struct ParticleGpu
@@ -102,7 +104,7 @@ std::optional<std::string> ax::validate_particle_config(const ParticleConfig& co
 		return "lifetime must have positive min and max >= min";
 	if (config.speedMin < 0.0f || config.speedMax < config.speedMin)
 		return "speed must have non-negative min and max >= min";
-	if (config.spread < 0.0f || config.spread > s_tau || config.spawnRadius < 0.0f)
+	if (config.spread < 0.0f || config.spread > s_tau + s_tau_tolerance || config.spawnRadius < 0.0f)
 		return "spread must be in 0..2*pi and spawn_radius must be non-negative";
 	if (config.spawnSize.x < 0.0f || config.spawnSize.y < 0.0f
 		|| static_cast<std::uint32_t>(config.spawnShape) > static_cast<std::uint32_t>(ParticleSpawnShape::Rectangle))
@@ -189,13 +191,14 @@ void ax::ParticleEmitter::update_world_bounds()
 	const auto& config{ m_config };
 	const auto lifetime{ config.lifetimeMax };
 	const auto spawnExtent{ config.spawnShape == ParticleSpawnShape::Rectangle
-		? std::max(config.spawnSize.x, config.spawnSize.y) * 0.5f : config.spawnRadius };
+		? std::sqrt(config.spawnSize.x * config.spawnSize.x + config.spawnSize.y * config.spawnSize.y) * 0.5f
+		: config.spawnRadius };
 	const auto extentX{ spawnExtent + config.speedMax * lifetime
 		+ 0.5f * std::abs(config.gravity.x) * lifetime * lifetime
-		+ std::max(config.sizeStart, config.sizeEnd) * 0.5f };
+		+ (std::max)(config.sizeStart, config.sizeEnd) * 0.5f };
 	const auto extentY{ spawnExtent + config.speedMax * lifetime
 		+ 0.5f * std::abs(config.gravity.y) * lifetime * lifetime
-		+ std::max(config.sizeStart, config.sizeEnd) * 0.5f };
+		+ (std::max)(config.sizeStart, config.sizeEnd) * 0.5f };
 	const glm::vec4 reach{
 		config.position.x - extentX, config.position.y - extentY,
 		config.position.x + extentX, config.position.y + extentY
@@ -207,10 +210,10 @@ void ax::ParticleEmitter::update_world_bounds()
 		return;
 	}
 	m_worldBounds = {
-		std::min(m_worldBounds.x, reach.x),
-		std::min(m_worldBounds.y, reach.y),
-		std::max(m_worldBounds.z, reach.z),
-		std::max(m_worldBounds.w, reach.w)
+		(std::min)(m_worldBounds.x, reach.x),
+		(std::min)(m_worldBounds.y, reach.y),
+		(std::max)(m_worldBounds.z, reach.z),
+		(std::max)(m_worldBounds.w, reach.w)
 	};
 }
 
@@ -226,7 +229,7 @@ std::uint32_t ax::ParticleEmitter::advance(double delta)
 		const auto duration{ static_cast<double>(m_config.duration) };
 		const auto phase{ std::fmod(m_elapsed, duration) };
 		const auto untilCycleEnd{ duration - phase };
-		const auto step{ std::min(remaining, untilCycleEnd) };
+		const auto step{ (std::min)(remaining, untilCycleEnd) };
 		const auto explosiveness{ static_cast<double>(m_config.explosiveness) };
 		const auto emissionWindow{ duration * (1.0 - explosiveness) };
 
@@ -239,7 +242,7 @@ std::uint32_t ax::ParticleEmitter::advance(double delta)
 		}
 		else if (phase < emissionWindow)
 		{
-			const auto overlap{ std::max(0.0, std::min(phase + step, emissionWindow) - phase) };
+			const auto overlap{ (std::max)(0.0, (std::min)(phase + step, emissionWindow) - phase) };
 			const auto normalizedRate{ static_cast<double>(m_config.emissionRate) / (1.0 - explosiveness) };
 			m_emissionRemainder += normalizedRate * overlap;
 			const auto due{ static_cast<std::uint32_t>(std::floor(m_emissionRemainder)) };
@@ -254,7 +257,7 @@ std::uint32_t ax::ParticleEmitter::advance(double delta)
 		if (step <= 0.0)
 			break;
 	}
-	return std::min(spawnCount, s_max_capacity);
+	return (std::min)(spawnCount, s_max_capacity);
 }
 
 std::shared_ptr<ax::ParticleEmitter> ax::ParticleSystem::create(const ParticleConfig& config)
@@ -266,6 +269,27 @@ std::shared_ptr<ax::ParticleEmitter> ax::ParticleSystem::create(const ParticleCo
 	auto emitter{ std::shared_ptr<ParticleEmitter>{ new ParticleEmitter{ config } } };
 	m_emitters.emplace_back(emitter);
 	return emitter;
+}
+
+void ax::ParticleSystem::set_paused(bool paused)
+{
+	if (m_thread != std::this_thread::get_id())
+		throw std::runtime_error("Particle systems belong to the renderer thread");
+	m_paused = paused;
+}
+
+void ax::ParticleSystem::set_render_enabled(bool enabled)
+{
+	if (m_thread != std::this_thread::get_id())
+		throw std::runtime_error("Particle systems belong to the renderer thread");
+	m_render_enabled = enabled;
+}
+
+void ax::ParticleSystem::set_debug_render_enabled(bool enabled)
+{
+	if (m_thread != std::this_thread::get_id())
+		throw std::runtime_error("Particle systems belong to the renderer thread");
+	m_debug_bounds = enabled;
 }
 
 void ax::ParticleSystem::initialise(wgpu::Device& device, wgpu::TextureFormat colourFormat, std::uint32_t sampleCount)
@@ -332,7 +356,7 @@ void ax::ParticleSystem::initialise(wgpu::Device& device, wgpu::TextureFormat co
 		storage_entry(2, wgpu::ShaderStage::Vertex, wgpu::BufferBindingType::ReadOnlyStorage),
 	};
 	renderEntries[1].binding = 1;
-	renderEntries[1].visibility = wgpu::ShaderStage::Vertex;
+	renderEntries[1].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
 	renderEntries[1].buffer.type = wgpu::BufferBindingType::Uniform;
 	wgpu::BindGroupLayoutDescriptor renderLayoutDesc{};
 	renderLayoutDesc.entryCount = static_cast<std::uint32_t>(renderEntries.size());
@@ -413,6 +437,8 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 {
 	if (m_thread != std::this_thread::get_id())
 		throw std::runtime_error("Particle systems belong to the renderer thread");
+	if (m_paused)
+		return;
 	initialise(device, colourFormat, sampleCount);
 	m_frameEmitters.clear();
 
@@ -483,12 +509,20 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 			emitter->m_renderBindGroup = device.CreateBindGroup(&renderGroupDesc);
 		}
 
-		const auto frameDelta{ std::clamp(delta, 0.0, s_max_frame_delta) };
+		const auto frameDelta{ m_paused ? 0.0 : std::clamp(delta, 0.0, s_max_frame_delta) };
 		emitter->m_systemTime = std::fmod(emitter->m_systemTime + frameDelta, s_particle_clock_period);
 		emitter->m_sinceLastCompute += frameDelta;
 		emitter->m_spawnCount = emitter->advance(frameDelta);
 		const auto& config{ emitter->m_config };
 		emitter->update_world_bounds();
+		if (m_debug_bounds && emitter->m_hasWorldBounds)
+		{
+			const auto& bounds{ emitter->m_worldBounds };
+			DebugShapes::rect_outline(
+				{ bounds.x, bounds.y },
+				{ bounds.z - bounds.x, bounds.w - bounds.y },
+				{ 0.2f, 1.0f, 0.6f, 0.9f }, 1.0f);
+		}
 		if (!config.visible || !intersects(emitter->m_worldBounds, cameraBounds))
 			continue;
 		if (emitter->m_sinceLastCompute >= s_particle_clock_period)
@@ -546,7 +580,7 @@ void ax::ParticleSystem::draw(wgpu::RenderPassEncoder& pass)
 {
 	if (m_thread != std::this_thread::get_id())
 		throw std::runtime_error("Particle systems belong to the renderer thread");
-	if (m_renderPipeline.Get() == nullptr)
+	if (!m_render_enabled || m_renderPipeline.Get() == nullptr)
 		return;
 	pass.SetPipeline(m_renderPipeline);
 	pass.SetBindGroup(0, m_emptyBindGroup);
