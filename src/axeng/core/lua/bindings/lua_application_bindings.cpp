@@ -4,6 +4,7 @@
 #include "axeng/core/build_info.h"
 #include "axeng/core/event.h"
 #include "axeng/core/lua/bindings/lua_audio_bindings.h"
+#include "axeng/core/lua/bindings/lua_particle_bindings.h"
 #include "axeng/core/lua/bindings/lua_resource_bindings.h"
 #include "axeng/core/lua/bindings/lua_shape_bindings.h"
 #include "axeng/core/lua/bindings/lua_shared_bindings.h"
@@ -123,6 +124,7 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 	{
 		setup_sprite_bindings(app, state);
 		setup_shape_bindings(app, state);
+		setup_particle_bindings(app, state);
 	}
 
 	using EH = EventHandler<sol::object>;

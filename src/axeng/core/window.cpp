@@ -57,6 +57,7 @@ ax::Window::Window(const WindowDefinition& def)
 
 ax::Window::~Window()
 {
+	m_particleSystem.shutdown();
 	if (m_window)
 	{
 		{
@@ -1967,6 +1968,15 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			.cameraPosition = m_camera.position(),
 			.zoom = m_camera.zoom(),
 		});
+		const auto zoom{ std::max(m_camera.zoom(), 0.001f) };
+		const auto halfWidth{ static_cast<float>(m_width) / (2.0f * zoom) };
+		const auto halfHeight{ static_cast<float>(m_height) / (2.0f * zoom) };
+		const auto cameraPosition{ m_camera.position() };
+		m_particleSystem.encode_compute(m_device, m_queue, encoder, delta,
+			{ cameraPosition.x - halfWidth, cameraPosition.y - halfHeight,
+				cameraPosition.x + halfWidth, cameraPosition.y + halfHeight },
+			{ static_cast<float>(m_width), static_cast<float>(m_height) }, zoom,
+			m_surfaceFormat, m_sampleCount);
 
 		wgpu::RenderPassColorAttachment sceneColorAttachment
 		{
@@ -2039,6 +2049,7 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		oitPassDesc.depthStencilAttachment = &oitDepthAttachment;
 		auto oitPass = encoder.BeginRenderPass(&oitPassDesc);
 		draw_transparent_sprites(oitPass);
+		m_particleSystem.draw(oitPass);
 		oitPass.End();
 
 		wgpu::RenderPassColorAttachment compositeColorAttachment

@@ -33,6 +33,7 @@
 #include "axeng/core/texture.h"
 #include "axeng/core/retained_sprites.h"
 #include "axeng/core/shapes/shape.h"
+#include "axeng/core/particles/particle_system.h"
 #include "axeng/core/window_events.h"
 
 namespace ax
@@ -140,6 +141,7 @@ namespace ax
 		const wgpu::Device& device() const noexcept { return m_device; }
 		wgpu::Queue& queue() noexcept { return m_queue; }
 		const wgpu::Queue& queue() const noexcept { return m_queue; }
+		ParticleSystem& particle_system() noexcept { return m_particleSystem; }
 
 		std::uint32_t width() const noexcept { return m_width; }
 		std::uint32_t height() const noexcept { return m_height; }
@@ -343,5 +345,6 @@ namespace ax
 		std::vector<std::function<void()>> m_deferred{};
 
 		std::map<DWORD, HWND> m_childWindows{};
+		ParticleSystem m_particleSystem;
 	};
 }
