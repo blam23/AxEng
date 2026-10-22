@@ -60,7 +60,7 @@ DO NOT Update the README for anything except build changes that are relevant to 
   - `shape_renderer.h/.cpp` holds the renderer; the shader is `shapes.wgsl`, embedded via `#embed`.
   - Each `ShapeRenderer::draw(pass, shapes)` call is batched into at most one opaque and one translucent indexed draw, unless the buffer has to be chunked.
   - Shapes must be drawn in the scene/render-event pass, because the UI pass's depth is read-only.
-  - The scene pass uses 4x MSAA and `Depth24Plus` with reverse-Z (`GreaterEqual`, cleared to 0). Higher z is closer; at equal z, the later draw wins.
+  - The scene pass uses user-selectable 1x or 4x MSAA and `Depth24Plus` with reverse-Z (`GreaterEqual`, cleared to 0). Higher z is closer; at equal z, the later draw wins.
 - `src/axeng/core/lua/bindings/`: sol2 bindings, one `lua_*_bindings.cpp/.h` pair per area.
   - Window-dependent bindings (sprites, shapes) are set up in `lua_application_bindings.cpp` only when the app has a window.
   - Shapes are exposed as `app.shapes` (`list()`, `draw(pass, ...)`, `cap`, `stats()`).

@@ -493,6 +493,17 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 			app.window()->set_clear_color({ r, g, b });
 		};
 
+	window_table["set_msaa_enabled"] =
+		[&app](bool enabled)
+		{
+			app.window()->set_msaa_enabled(enabled);
+		};
+	window_table["get_msaa_enabled"] =
+		[&app]() -> bool
+		{
+			return app.window()->msaa_enabled();
+		};
+
 	window_table["compare_next_frame"] =
 		[&app](const sol::table& reference) -> bool
 		{

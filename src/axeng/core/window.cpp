@@ -169,7 +169,7 @@ bool ax::Window::create_surfaces()
 		.size = { m_width, m_height },
 		.format = m_depthTextureFormat,
 		.mipLevelCount = 1,
-		.sampleCount = 4,
+		.sampleCount = m_sampleCount,
 		.viewFormatCount = 1,
 		.viewFormats = &m_depthTextureFormat,
 	};
@@ -193,7 +193,7 @@ bool ax::Window::create_surfaces()
 	accumulationTextureDesc.size = { m_width, m_height };
 	accumulationTextureDesc.format = wgpu::TextureFormat::RGBA16Float;
 	accumulationTextureDesc.mipLevelCount = 1;
-	accumulationTextureDesc.sampleCount = 4;
+	accumulationTextureDesc.sampleCount = m_sampleCount;
 	m_oitAccumulationTexture = m_device.CreateTexture(&accumulationTextureDesc);
 	m_oitAccumulationView = m_oitAccumulationTexture.CreateView();
 
@@ -203,12 +203,9 @@ bool ax::Window::create_surfaces()
 	revealageTextureDesc.size = { m_width, m_height };
 	revealageTextureDesc.format = wgpu::TextureFormat::R8Unorm;
 	revealageTextureDesc.mipLevelCount = 1;
-	revealageTextureDesc.sampleCount = 4;
+	revealageTextureDesc.sampleCount = m_sampleCount;
 	m_oitRevealageTexture = m_device.CreateTexture(&revealageTextureDesc);
 	m_oitRevealageView = m_oitRevealageTexture.CreateView();
-
-	if (m_compositeGroupLayout)
-		create_composite_bind_group();
 
 	//
 	// Setup Default Samplers
@@ -237,6 +234,45 @@ bool ax::Window::create_surfaces()
 
 	reload_pipeline();
 	return true;
+}
+
+void ax::Window::set_msaa_enabled(bool enabled)
+{
+	const std::uint32_t sampleCount{ enabled ? 4u : 1u };
+	if (sampleCount == m_requestedSampleCount)
+		return;
+
+	m_requestedSampleCount = sampleCount;
+	call_deferred([this, sampleCount]()
+	{
+		if (sampleCount != m_requestedSampleCount || sampleCount == m_sampleCount)
+			return;
+
+		const auto previousSampleCount{ m_sampleCount };
+		m_sampleCount = sampleCount;
+		m_multisampleTexture = {};
+		if (!create_surfaces())
+		{
+			spdlog::error("Failed to reconfigure the rendering surfaces for {}x MSAA.", sampleCount);
+			m_sampleCount = previousSampleCount;
+			m_requestedSampleCount = previousSampleCount;
+			m_multisampleTexture = {};
+			create_surfaces();
+			return;
+		}
+
+		if (s_imgui_initialized && !ImGui_ImplWGPU_SetMultisampleCount(sampleCount))
+		{
+			spdlog::error("Failed to rebuild the ImGui pipeline for {}x MSAA; restoring {}x MSAA.",
+				sampleCount, previousSampleCount);
+			m_sampleCount = previousSampleCount;
+			m_requestedSampleCount = previousSampleCount;
+			m_multisampleTexture = {};
+			create_surfaces();
+			if (!ImGui_ImplWGPU_SetMultisampleCount(previousSampleCount))
+				spdlog::error("Failed to restore the ImGui pipeline to {}x MSAA.", previousSampleCount);
+		}
+	});
 }
 
 bool ax::Window::capture_next_frame(const std::filesystem::path& path)
@@ -714,7 +750,7 @@ void ax::Window::reload_pipeline()
 	pipelineDesc.fragment = &fragmentState;
 
 	// Multisampling (x4)
-	pipelineDesc.multisample.count = 4;
+	pipelineDesc.multisample.count = m_sampleCount;
 	pipelineDesc.multisample.mask = ~0u;
 	pipelineDesc.multisample.alphaToCoverageEnabled = false;
 
@@ -811,7 +847,7 @@ void ax::Window::reload_pipeline()
 	ShapeRenderer::init(m_device, {
 		.colourFormat = m_surfaceFormat,
 		.depthFormat = m_depthTextureFormat,
-		.sampleCount = 4,
+		.sampleCount = m_sampleCount,
 	});
 
 	depthStencilState.depthWriteEnabled = wgpu::OptionalBool::False;
@@ -840,7 +876,8 @@ void ax::Window::reload_pipeline()
 	m_oitPipeline = m_device.CreateRenderPipeline(&pipelineDesc);
 
 	std::string compositeShaderCode;
-	std::ifstream compositeFile{ "shaders/composite_shader.wgsl" };
+	std::ifstream compositeFile{ m_sampleCount > 1
+		? "shaders/composite_shader.wgsl" : "shaders/composite_shader_single.wgsl" };
 	if (compositeFile)
 	{
 		std::ostringstream stream;
@@ -865,7 +902,7 @@ void ax::Window::reload_pipeline()
 		compositeEntries[i].visibility = wgpu::ShaderStage::Fragment;
 		compositeEntries[i].texture.sampleType = wgpu::TextureSampleType::UnfilterableFloat;
 		compositeEntries[i].texture.viewDimension = wgpu::TextureViewDimension::e2D;
-		compositeEntries[i].texture.multisampled = true;
+		compositeEntries[i].texture.multisampled = m_sampleCount > 1;
 	}
 	wgpu::BindGroupLayoutDescriptor compositeLayoutDesc{};
 	compositeLayoutDesc.entryCount = 2;
@@ -884,7 +921,7 @@ void ax::Window::reload_pipeline()
 	compositePipelineDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
 	compositePipelineDesc.primitive.frontFace = wgpu::FrontFace::CCW;
 	compositePipelineDesc.primitive.cullMode = wgpu::CullMode::None;
-	compositePipelineDesc.multisample.count = 4;
+	compositePipelineDesc.multisample.count = m_sampleCount;
 	compositePipelineDesc.multisample.mask = ~0u;
 	wgpu::BlendState compositeBlend{};
 	compositeBlend.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
@@ -1691,7 +1728,7 @@ bool ax::Window::init_imgui()
 	info.Device = m_device.Get();
 	info.DepthStencilFormat = static_cast<WGPUTextureFormat>(m_depthTextureFormat);
 	info.RenderTargetFormat = static_cast<WGPUTextureFormat>(m_surfaceFormat);
-	info.PipelineMultisampleState.count = 4;
+	info.PipelineMultisampleState.count = m_sampleCount;
 	ImGui_ImplWGPU_Init(&info);
 
 	ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
@@ -1830,7 +1867,11 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, surface_setup);
 		PROFILER_NEW_SUBSEGMENT(surface_setup, create_texture);
 
-		if (m_multisampleTexture.Get() == nullptr || m_multisampleTexture.GetWidth() != m_width || m_multisampleTexture.GetHeight() != m_height)
+		const auto surfaceTexture = surfaceFuture.get();
+		const auto surfaceView = surfaceTexture.texture.CreateView();
+		const bool multisampled{ m_sampleCount > 1 };
+		if (multisampled && (m_multisampleTexture.Get() == nullptr
+			|| m_multisampleTexture.GetWidth() != m_width || m_multisampleTexture.GetHeight() != m_height))
 		{
 			wgpu::TextureDescriptor msaaDesc
 			{
@@ -1839,28 +1880,30 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				.size = { m_width, m_height },
 				.format = m_surfaceFormat,
 				.mipLevelCount = 1,
-				.sampleCount = 4,
+				.sampleCount = m_sampleCount,
 				.viewFormatCount = 1,
 				.viewFormats = &m_surfaceFormat,
 			};
 			m_multisampleTexture = m_device.CreateTexture(&msaaDesc);
 		}
 
-		wgpu::TextureViewDescriptor view
+		wgpu::TextureView targetView{ surfaceView };
+		if (multisampled)
 		{
-			.nextInChain = nullptr,
-			.label = "frame view",
-			.format = m_multisampleTexture.GetFormat(),
-			.dimension = wgpu::TextureViewDimension::e2D,
-			.baseMipLevel = 0,
-			.mipLevelCount = 1,
-			.baseArrayLayer = 0,
-			.arrayLayerCount = 1,
-			.aspect = wgpu::TextureAspect::All,
-		};
-		wgpu::TextureView targetView{ m_multisampleTexture.CreateView(&view) };
-		const auto surfaceTexture = surfaceFuture.get();
-		const auto surfaceView = surfaceTexture.texture.CreateView();
+			wgpu::TextureViewDescriptor view
+			{
+				.nextInChain = nullptr,
+				.label = "frame view",
+				.format = m_multisampleTexture.GetFormat(),
+				.dimension = wgpu::TextureViewDimension::e2D,
+				.baseMipLevel = 0,
+				.mipLevelCount = 1,
+				.baseArrayLayer = 0,
+				.arrayLayerCount = 1,
+				.aspect = wgpu::TextureAspect::All,
+			};
+			targetView = m_multisampleTexture.CreateView(&view);
+		}
 
 		std::optional<FrameImageRequest> frameImageRequest{};
 		{
@@ -1917,7 +1960,7 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		ShapeRenderer::init(m_device, {
 			.colourFormat = m_surfaceFormat,
 			.depthFormat = m_depthTextureFormat,
-			.sampleCount = 4,
+			.sampleCount = m_sampleCount,
 		});
 		ShapeRenderer::begin_frame({
 			.viewport = { static_cast<float>(m_width), static_cast<float>(m_height) },
@@ -2051,7 +2094,7 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		{
 			.view = targetView,
 			.depthSlice = wgpu::kDepthSliceUndefined,
-			.resolveTarget = surfaceView,
+			.resolveTarget = multisampled ? surfaceView : wgpu::TextureView{},
 			.loadOp = wgpu::LoadOp::Load,
 			.storeOp = wgpu::StoreOp::Store,
 		};

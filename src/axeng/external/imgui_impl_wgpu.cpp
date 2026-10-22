@@ -903,6 +903,21 @@ void ImGui_ImplWGPU_InvalidateDeviceObjects()
         SafeRelease(bd->pFrameResources[i]);
 }
 
+bool ImGui_ImplWGPU_SetMultisampleCount(uint32_t sample_count)
+{
+    if (sample_count != 1 && sample_count != 4)
+        return false;
+
+    ImGui_ImplWGPU_Data* bd = ImGui_ImplWGPU_GetBackendData();
+    if (!bd || !bd->wgpuDevice)
+        return false;
+    if (bd->initInfo.PipelineMultisampleState.count == sample_count)
+        return true;
+
+    bd->initInfo.PipelineMultisampleState.count = sample_count;
+    return ImGui_ImplWGPU_CreateDeviceObjects();
+}
+
 bool ImGui_ImplWGPU_Init(ImGui_ImplWGPU_InitInfo* init_info)
 {
     ImGuiIO& io = ImGui::GetIO();

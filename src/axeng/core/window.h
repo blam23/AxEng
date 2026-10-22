@@ -157,6 +157,8 @@ namespace ax
 		bool vsync() const noexcept { return m_vsync; }
 		// Must call create_surfaces() after changing vsync
 		void set_vsync(bool enabled) noexcept { m_vsync = enabled; }
+		bool msaa_enabled() const noexcept { return m_sampleCount == 4; }
+		void set_msaa_enabled(bool enabled);
 
 		void set_clear_color(const wgpu::Color& color)
 		{
@@ -243,6 +245,8 @@ namespace ax
 		uint32_t m_width;
 		uint32_t m_height;
 		bool m_vsync;
+		std::uint32_t m_sampleCount{ 4 };
+		std::uint32_t m_requestedSampleCount{ 4 };
 		bool m_can_close{ true };
 		Camera m_camera;
 
