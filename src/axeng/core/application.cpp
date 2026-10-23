@@ -341,13 +341,13 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 	lua::bindings::setup_application_bindings(*this, m_scripts.state({}), true);
 	if (m_nativeModule)
 	{
-		m_nativeModuleBound = true;
 		const auto bindErr{ m_nativeModule->bind_lua(*this, m_scripts.state({})) };
 		if (bindErr != ax::Error::Success)
 		{
 			spdlog::error("Failed to bind native application module: {}", ax::get_error_name(bindErr));
 			return false;
 		}
+		m_nativeModuleBound = true;
 	}
 
 	//
@@ -402,6 +402,7 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 			spdlog::error("Failed to initialize native application module: {}", ax::get_error_name(initializeErr));
 			return false;
 		}
+		m_nativeModuleBound = true;
 	}
 
 	spdlog::info("<Lua> Running entry point script: '{}'", entryPointScript);
