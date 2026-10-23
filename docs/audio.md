@@ -30,7 +30,7 @@ only**.
 - The `AXENG_AUDIO_BACKEND` environment variable overrides the device:
   - `none` (or `off`/`0`): never open a device. Tests use this.
   - `null`: use miniaudio's null backend, which runs a real audio thread but discards the output. Useful for
-    automated runs of a game (e.g. the AxFactory self-test) without making noise.
+    automated runs of a game without making noise.
 
 ## Music assets
 

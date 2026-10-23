@@ -56,16 +56,29 @@ ax::Error ax::run_from_directory
 	const std::vector<std::string>& args,
 	std::string_view rootDirectory,
 	wgpu::BackendType backendType,
-	std::string_view sourceDirectory
+	std::string_view sourceDirectory,
+	std::unique_ptr<NativeApplicationModule> nativeModule
 )
 {
 	std::filesystem::path rootPath{ rootDirectory };
 	spdlog::info("<Ax> Running from directory: '{}'", std::filesystem::absolute(rootPath).string());
-	return run(args, ax::Application::from_directory(permissions, rootPath.string(), sourceDirectory), backendType);
+	return run
+	(
+		args,
+		ax::Application::from_directory(permissions, rootPath.string(), sourceDirectory, std::move(nativeModule)),
+		backendType
+	);
 }
 
-ax::Error ax::run_from_zip(flag_set<lua::Permission> permissions, const std::vector<std::string>& args, std::string_view zip, wgpu::BackendType backendType)
+ax::Error ax::run_from_zip
+(
+	flag_set<lua::Permission> permissions,
+	const std::vector<std::string>& args,
+	std::string_view zip,
+	wgpu::BackendType backendType,
+	std::unique_ptr<NativeApplicationModule> nativeModule
+)
 {
 	spdlog::info("<Ax> Running from zip: '{}'", zip);
-	return run(args, ax::Application::from_zip(permissions, zip), backendType);
+	return run(args, ax::Application::from_zip(permissions, zip, std::move(nativeModule)), backendType);
 }

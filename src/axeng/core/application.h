@@ -31,6 +31,7 @@
 #include "axeng/core/texture.h"
 #include "axeng/core/user_files.h"
 #include "axeng/core/window.h"
+#include "axeng/core/native_application_module.h"
 
 // GFX
 #include <webgpu/webgpu_cpp.h>
@@ -52,10 +53,21 @@ namespace ax
 		(
 			flag_set<lua::Permission> permissions,
 			std::string_view root,
-			std::string_view sourceRoot = {}
+			std::string_view sourceRoot = {},
+			std::unique_ptr<NativeApplicationModule> nativeModule = {}
 		);
-		static Application from_embedded(flag_set<lua::Permission> permissions, EmbeddedResourceLayout&& layout);
-		static Application from_zip(flag_set<lua::Permission> permissions, std::string_view zipFile);
+		static Application from_embedded
+		(
+			flag_set<lua::Permission> permissions,
+			EmbeddedResourceLayout&& layout,
+			std::unique_ptr<NativeApplicationModule> nativeModule = {}
+		);
+		static Application from_zip
+		(
+			flag_set<lua::Permission> permissions,
+			std::string_view zipFile,
+			std::unique_ptr<NativeApplicationModule> nativeModule = {}
+		);
 
 		~Application();
 
@@ -123,7 +135,8 @@ namespace ax
 		(
 			flag_set<lua::Permission> permissions,
 			ResourceLoader&& loader,
-			std::filesystem::path projectSourceDirectory = {}
+			std::filesystem::path projectSourceDirectory = {},
+			std::unique_ptr<NativeApplicationModule> nativeModule = {}
 		);
 
 		const std::vector<std::string> m_args;
@@ -134,6 +147,8 @@ namespace ax
 		void add_manifest_bindings(sol::state&);
 		ax::Error add_thread_bindings(sol::state&);
 		std::unique_ptr<Window> m_window;
+		std::unique_ptr<NativeApplicationModule> m_nativeModule;
+		bool m_nativeModuleBound{ false };
 
 		ResourceLoader m_loader;
 		std::filesystem::path m_projectSourceDirectory{};
@@ -159,6 +174,7 @@ namespace ax
 
 		ax::Error initialise_background_worker(const std::vector<std::string>& args);
 		void cleanup_bindings();
+		void cleanup_native_module();
 		BackgroundWorker m_backgroundWorker;
 		std::unique_ptr<NativeTaskService> m_nativeTasks;
 		std::mutex m_shared_mutex{};

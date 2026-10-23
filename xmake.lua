@@ -13,6 +13,8 @@ set_warnings("all", "error")
 add_defines("SOL_EXCEPTIONS_SAFE_PROPAGATION=0")
 add_rules("mode.debug", "mode.release")
 
+local engine_root = os.scriptdir()
+
 option("vcpkg_full_check")
     set_default(false)
     set_showmenu(true)
@@ -21,7 +23,7 @@ option_end()
 
 local vcpkg_debug = is_mode("debug")
 local vcpkg_triplet = "x64-windows-static-md"
-local vcpkg_triplet_dir = path.join(os.projectdir(), "triplets")
+local vcpkg_triplet_dir = path.join(engine_root, "triplets")
 local vcpkg_config_dir = vcpkg_debug and "debug" or ""
 set_runtimes(vcpkg_debug and "MDd" or "MD")
 add_defines("_ITERATOR_DEBUG_LEVEL=" .. (vcpkg_debug and "2" or "0"))
@@ -33,7 +35,7 @@ end
 -- build/vcpkg_installed; quick builds use the existing installation.
 rule("vcpkg.manifest")
     on_load(function (target)
-        local installroot = path.join(os.projectdir(), "build", "vcpkg_installed")
+        local installroot = path.join(engine_root, "build", "vcpkg_installed")
         local prefix = path.join(installroot, vcpkg_triplet)
         if has_config("vcpkg_full_check") then
             local toolchain = target:toolchain("clang")
@@ -58,7 +60,7 @@ rule("vcpkg.manifest")
             end
             os.execv(vcpkg, {"install", "--triplet", vcpkg_triplet,
                              "--overlay-triplets=" .. vcpkg_triplet_dir,
-                             "--x-manifest-root=" .. os.projectdir(),
+                             "--x-manifest-root=" .. engine_root,
                              "--x-install-root=" .. installroot}, {envs = {
                 VCPKG_VISUAL_STUDIO_PATH = vcvars.VSInstallDir:gsub("[/\\]+$", ""),
                 AXENG_CLANG_CL = clang_cl,
@@ -78,7 +80,7 @@ rule("vcpkg.manifest")
 -- Dawn's D3D12 backend needs dxcompiler.dll / dxil.dll next to the executable.
 rule("vcpkg.runtime_dlls")
     after_build(function (target)
-        local prefix = path.join(os.projectdir(), "build", "vcpkg_installed", vcpkg_triplet)
+        local prefix = path.join(engine_root, "build", "vcpkg_installed", vcpkg_triplet)
         local bindir = path.join(prefix, vcpkg_config_dir, "bin")
         for _, dll in ipairs(os.files(path.join(bindir, "*.dll"))) do
             os.cp(dll, target:targetdir())
@@ -89,8 +91,8 @@ rule("vcpkg.runtime_dlls")
 -- This allows LuaTests.RunLuaTestSuite to run from the target directory directly
 rule("copy.lua_tests")
     after_build(function (target)
-        os.cp(path.join(os.projectdir(), "lua_tests"), target:targetdir())
-        os.cp(path.join(os.projectdir(), "AxCompiler"), target:targetdir())
+        os.cp(path.join(engine_root, "lua_tests"), target:targetdir())
+        os.cp(path.join(engine_root, "AxCompiler"), target:targetdir())
     end)
 
 local function enable_release_pdbs()
@@ -99,7 +101,7 @@ local function enable_release_pdbs()
     end
 end
 
-local src = "src"
+local src = path.join(engine_root, "src")
 
 target("AxEngLib")
     set_kind("static")

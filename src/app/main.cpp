@@ -1,11 +1,26 @@
 #include <windows.h>
 #include <map>
+#include <memory>
 
 #include "axeng/core/axeng.h"
 #include "axeng/comp/compiler.h"
 #include "axeng/debug/debug_view.h"
 
 #include "app/argparse/argparse.hpp"
+
+#ifdef USE_NATIVE_MODULE
+#ifndef NATIVE_MODULE_HEADER
+#error USE_NATIVE_MODULE requires NATIVE_MODULE_HEADER
+#endif
+#ifndef APPLICATION_NAME_OVERRIDE
+#error USE_NATIVE_MODULE requires APPLICATION_NAME_OVERRIDE
+#endif
+#include NATIVE_MODULE_HEADER
+#endif
+
+#ifndef APPLICATION_NAME_OVERRIDE
+#define APPLICATION_NAME_OVERRIDE "AxEng"
+#endif
 
 #define RET(x) std::to_underlying(x)
 
@@ -21,7 +36,7 @@ int main(int argc, char* argv[])
 	// Parse Args
 	//
 
-	argparse::ArgumentParser program("AxEng");
+	argparse::ArgumentParser program(APPLICATION_NAME_OVERRIDE);
 
 	std::string inDirectory;
 	program.add_argument("-i", "--in")
@@ -243,15 +258,35 @@ int main(int argc, char* argv[])
 	{
 		doneSomething = true;
 
+		std::unique_ptr<ax::NativeApplicationModule> nativeModule{};
+#ifdef USE_NATIVE_MODULE
+		nativeModule = create_native_application_module();
+#endif
+
 		if (useZipFiles)
 		{
-			const auto err{ ax::run_from_zip(permissions, out_args, compile ? outDirectory + ".zip" : inDirectory, backendType)};
+			const auto err{ ax::run_from_zip
+			(
+				permissions,
+				out_args,
+				compile ? outDirectory + ".zip" : inDirectory,
+				backendType,
+				std::move(nativeModule)
+			) };
 			if (err != ax::Error::Success)
 				return RET(err);
 		}
 		else
 		{
-			const auto err{ ax::run_from_directory(permissions, out_args, compile ? outDirectory : inDirectory, backendType, inDirectory) };
+			const auto err{ ax::run_from_directory
+			(
+				permissions,
+				out_args,
+				compile ? outDirectory : inDirectory,
+				backendType,
+				inDirectory,
+				std::move(nativeModule)
+			) };
 			if (err != ax::Error::Success)
 				return RET(err);
 		}

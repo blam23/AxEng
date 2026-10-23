@@ -2,6 +2,13 @@
 
 Notes for AI agents working on AxEng. AxEng is a WIP WebGPU (Dawn) + Lua game engine. It is Windows-only and built with xmake, clang and C++23. See [README.md](README.md) for user-facing CLI docs.
 
+## Project agnosticism
+
+AxEng must remain project agnostic. Do not add game-specific names, targets,
+defines, data models, build orchestration or project implementations to this
+repository. Keep extension points generic; project-specific host targets,
+native modules and their xmake configuration belong in the consuming project.
+
 ## Documentation
 
 DO NOT Update the README for anything except build changes that are relevant to the README examples, add any relevant data to the "docs" folder under either an existing md file or a new one.

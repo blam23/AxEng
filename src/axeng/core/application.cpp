@@ -1,5 +1,6 @@
 #include "axeng/core/application.h"
 #include "axeng/core/msdf_font.h"
+#include "axeng/core/native_application_module.h"
 
 #include "axeng/core/lua/bindings/lua_application_bindings.h"
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
@@ -11,21 +12,32 @@ ax::Application ax::Application::from_directory
 (
 	flag_set<lua::Permission> permissions,
 	std::string_view root,
-	std::string_view sourceRoot
+	std::string_view sourceRoot,
+	std::unique_ptr<NativeApplicationModule> nativeModule
 )
 {
 	const std::filesystem::path sourcePath{ sourceRoot.empty() ? root : sourceRoot };
-	return { permissions, DirectoryResourceLoader{ root }, std::filesystem::absolute(sourcePath) };
+	return { permissions, DirectoryResourceLoader{ root }, std::filesystem::absolute(sourcePath), std::move(nativeModule) };
 }
 
-ax::Application ax::Application::from_embedded(flag_set<lua::Permission> permissions, EmbeddedResourceLayout&& layout)
+ax::Application ax::Application::from_embedded
+(
+	flag_set<lua::Permission> permissions,
+	EmbeddedResourceLayout&& layout,
+	std::unique_ptr<NativeApplicationModule> nativeModule
+)
 {
-	return { permissions, std::move(layout) };
+	return { permissions, std::move(layout), {}, std::move(nativeModule) };
 }
 
-ax::Application ax::Application::from_zip(flag_set<lua::Permission> permissions, std::string_view zipFile)
+ax::Application ax::Application::from_zip
+(
+	flag_set<lua::Permission> permissions,
+	std::string_view zipFile,
+	std::unique_ptr<NativeApplicationModule> nativeModule
+)
 {
-	return { permissions, ZipResourceLoader{ zipFile } };
+	return { permissions, ZipResourceLoader{ zipFile }, {}, std::move(nativeModule) };
 }
 
 bool ax::Application::init_window(wgpu::BackendType backendType)
@@ -327,6 +339,16 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 	}
 
 	lua::bindings::setup_application_bindings(*this, m_scripts.state({}), true);
+	if (m_nativeModule)
+	{
+		m_nativeModuleBound = true;
+		const auto bindErr{ m_nativeModule->bind_lua(*this, m_scripts.state({})) };
+		if (bindErr != ax::Error::Success)
+		{
+			spdlog::error("Failed to bind native application module: {}", ax::get_error_name(bindErr));
+			return false;
+		}
+	}
 
 	//
 	// Main-thread specific bindings
@@ -372,6 +394,16 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 			return false;
 	}
 
+	if (m_nativeModule)
+	{
+		const auto initializeErr{ m_nativeModule->initialize(*this) };
+		if (initializeErr != ax::Error::Success)
+		{
+			spdlog::error("Failed to initialize native application module: {}", ax::get_error_name(initializeErr));
+			return false;
+		}
+	}
+
 	spdlog::info("<Lua> Running entry point script: '{}'", entryPointScript);
 	const auto ep_res = m_entryPoint->run(m_env);
 	if (!ep_res.valid())
@@ -392,6 +424,7 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 
 void ax::Application::cleanup()
 {
+	cleanup_native_module();
 	if (m_nativeTasks)
 		m_nativeTasks->stop();
 	m_backgroundWorker.stop();
@@ -428,6 +461,7 @@ ax::Application::~Application()
 		cleanup();
 	else
 	{
+		cleanup_native_module();
 		cleanup_bindings();
 		shutdown_audio();
 		m_window.reset();
@@ -454,6 +488,17 @@ void ax::Application::cleanup_bindings()
 	}
 }
 
+void ax::Application::cleanup_native_module()
+{
+	if (m_nativeModule && m_nativeModuleBound)
+	{
+		const auto err{ m_nativeModule->shutdown(*this) };
+		if (err != ax::Error::Success)
+			spdlog::error("Failed to shut down native application module: {}", ax::get_error_name(err));
+		m_nativeModuleBound = false;
+	}
+}
+
 void ax::Application::call_deferred(std::function<void()> func)
 {
 	m_window->call_deferred(std::move(func));
@@ -473,9 +518,11 @@ ax::Application::Application
 (
 	flag_set<lua::Permission> permissions,
 	ResourceLoader&& loader,
-	std::filesystem::path projectSourceDirectory
+	std::filesystem::path projectSourceDirectory,
+	std::unique_ptr<NativeApplicationModule> nativeModule
 )
-	: m_loader{ std::move(loader) }
+	: m_nativeModule{ std::move(nativeModule) }
+	, m_loader{ std::move(loader) }
 	, m_projectSourceDirectory{ std::move(projectSourceDirectory) }
 	, m_scripts{ Badge<Application>{}, permissions, m_loader }
 	, m_textures{ Badge<Application>{}, m_loader }
