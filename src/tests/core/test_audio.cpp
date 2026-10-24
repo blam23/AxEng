@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <numbers>
 #include <string>
 #include <thread>
@@ -80,33 +79,6 @@ namespace
 		return wav;
 	}
 
-	class ScopedEnv
-	{
-	public:
-		ScopedEnv(const char* name, const char* value)
-			: m_name{ name }
-		{
-			char* old{ nullptr };
-			std::size_t length{};
-			if (_dupenv_s(&old, &length, name) == 0 && old != nullptr)
-			{
-				m_old = old;
-				m_hadOld = true;
-				std::free(old);
-			}
-			_putenv_s(name, value);
-		}
-
-		~ScopedEnv()
-		{
-			_putenv_s(m_name.c_str(), m_hadOld ? m_old.c_str() : "");
-		}
-
-	private:
-		std::string m_name;
-		std::string m_old{};
-		bool m_hadOld{ false };
-	};
 }
 
 TEST(SfxSynth, EveryPresetProducesBoundedAudibleSound)
@@ -353,7 +325,6 @@ TEST(AudioSystem, VariantsAreRenderedLazily)
 TEST(AudioSystem, ApplicationLoadsMusicAndBindsLua)
 {
 	testlog::LogCapture::instance().expect_total_error_count(1);
-	ScopedEnv env{ "AXENG_AUDIO_BACKEND", "none" };
 
 	const auto wavA{ make_wav(0.25f, 440.0f) };
 	const auto wavB{ make_wav(0.25f, 660.0f) };
@@ -447,6 +418,7 @@ TEST(AudioSystem, ApplicationLoadsMusicAndBindsLua)
 	layout.emplace("music/b.wav", ax::EmbeddedResource{ wavB.data(), wavB.size() });
 
 	auto app{ ax::Application::from_embedded({}, std::move(layout)) };
+	app.set_audio_config(AudioSystem::Config{ .openDevice = false });
 	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
 
 	auto* const audio{ app.audio() };
@@ -556,10 +528,10 @@ TEST(AudioSystem, TimePassesWithoutADevice)
 
 TEST(AudioSystem, OutputDeviceRunsSilently)
 {
-	// Opens the real output device (or the null backend if AXENG_AUDIO_BACKEND=null) but plays nothing.
-	auto config{ AudioSystem::config_from_environment() };
+	// Opens the real output device but plays nothing.
+	auto config{ AudioSystem::default_config() };
 	if (!config.openDevice)
-		GTEST_SKIP() << "Audio disabled by AXENG_AUDIO_BACKEND";
+		GTEST_SKIP() << "Audio output device is disabled";
 	AudioSystem audio{ config };
 	if (!audio.device_open())
 		GTEST_SKIP() << "No audio output device available";
@@ -594,7 +566,6 @@ TEST(AudioSystem, HeadlessAppsHaveNoAudioByDefault)
 TEST(AudioSystem, InvalidMusicFailsGracefully)
 {
 	testlog::LogCapture::instance().expect_total_error_count(2);
-	ScopedEnv env{ "AXENG_AUDIO_BACKEND", "none" };
 
 	const std::string bogus{ "definitely not audio" };
 	const std::string manifest{
@@ -608,5 +579,6 @@ TEST(AudioSystem, InvalidMusicFailsGracefully)
 	layout.emplace("bad.ogg", ax::EmbeddedResource{ reinterpret_cast<const uint8_t*>(bogus.data()), bogus.size() });
 
 	auto app{ ax::Application::from_embedded({}, std::move(layout)) };
+	app.set_audio_config(AudioSystem::Config{ .openDevice = false });
 	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
 }

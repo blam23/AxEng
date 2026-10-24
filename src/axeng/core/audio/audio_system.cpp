@@ -550,22 +550,10 @@ std::optional<ax::audio::Bus> ax::audio::bus_from_name(std::string_view name) no
 	return std::nullopt;
 }
 
-ax::audio::AudioSystem::Config ax::audio::AudioSystem::config_from_environment()
+ax::audio::AudioSystem::Config ax::audio::AudioSystem::default_config()
 {
 	Config config{};
 	config.seed = static_cast<std::uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
-
-	char* value{ nullptr };
-	std::size_t length{};
-	if (_dupenv_s(&value, &length, "AXENG_AUDIO_BACKEND") == 0 && value != nullptr)
-	{
-		const std::string_view backend{ value };
-		if (backend == "none" || backend == "off" || backend == "0")
-			config.openDevice = false;
-		else if (backend == "null")
-			config.nullBackend = true;
-		std::free(value);
-	}
 	return config;
 }
 

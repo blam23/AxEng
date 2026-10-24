@@ -18,8 +18,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-#include <windows.h>
-#include <shlobj.h>
 
 namespace
 {
@@ -44,10 +42,7 @@ namespace
 
 	std::filesystem::path get_user_directory(const std::string& app_name)
 	{
-		char app_data[MAX_PATH];
-		if (FAILED(SHGetFolderPathA(nullptr, CSIDL_APPDATA, nullptr, 0, app_data)))
-			return {};
-		return std::filesystem::path{ app_data } / "AxEng" / "app_user" / app_name;
+		return std::filesystem::current_path() / app_name;
 	}
 
 	class ScopedTestFiles
@@ -132,6 +127,7 @@ TEST(LuaResourceBindings, SaveTextureMethodsWritePngFiles)
 	flag_set<ax::lua::Permission> permissions;
 	permissions |= ax::lua::Permission::IO;
 	auto app{ ax::Application::from_embedded(permissions, std::move(layout)) };
+	app.set_user_directory(user_directory);
 	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
 
 	const auto expect_png{ [](const std::filesystem::path& path)
@@ -170,6 +166,7 @@ TEST(LuaResourceBindings, UserFilesCanBeWrittenToZip)
 	flag_set<ax::lua::Permission> permissions;
 	permissions |= ax::lua::Permission::IO;
 	auto app{ ax::Application::from_embedded(permissions, std::move(layout)) };
+	app.set_user_directory(user_directory);
 	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
 
 	auto* save_file{ app.user_files().open_file("factory_save.lua", "w") };
@@ -236,6 +233,8 @@ TEST(LuaResourceBindings, UserFilesCanBeWrittenToZip)
 
 TEST(LuaResourceBindings, SourceManifestOverridesIncompatibleBytecode)
 {
+	const auto user_directory{ get_user_directory("source_manifest_overrides_incompatible_bytecode") };
+	ScopedTestFiles cleanup{ {}, user_directory };
 	const std::string manifest{
 		"manifest = { name = 'source_manifest_test', headless = true, permissions = {}, scripts = { main = 'main.lua' }, entry_point = 'main' }"
 	};
@@ -251,6 +250,7 @@ TEST(LuaResourceBindings, SourceManifestOverridesIncompatibleBytecode)
 		reinterpret_cast<const uint8_t*>(entry_point.data()), entry_point.size() });
 
 	auto app{ ax::Application::from_embedded({}, std::move(layout)) };
+	app.set_user_directory(user_directory);
 	EXPECT_TRUE(app.try_load({ "bootstrap-test" }, wgpu::BackendType::Undefined));
 }
 
@@ -289,6 +289,7 @@ TEST(LuaResourceBindings, IOBindingsAreUnavailableWithoutPermission)
 		reinterpret_cast<const uint8_t*>(entry_point.data()), entry_point.size() });
 
 	auto app{ ax::Application::from_embedded({}, std::move(layout)) };
+	app.set_user_directory(user_directory);
 	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
 
 	std::ifstream file{ user_file, std::ios::binary };
@@ -304,6 +305,8 @@ TEST(LuaResourceBindings, InvalidTextureAndAtlasInputsFailGracefully)
 	testlog::LogCapture::instance().expect_total_error_count(2);
 
 	const auto app_name{ make_app_name("axeng_test_invalid_resources_") };
+	const auto user_directory{ get_user_directory(app_name) };
+	ScopedTestFiles cleanup{ {}, user_directory };
 	const std::string entry_point{
 		"local texture = app.res.create_texture('invalid_texture', 'not a png')\n"
 		"assert(not texture.valid)\n"
@@ -327,5 +330,6 @@ TEST(LuaResourceBindings, InvalidTextureAndAtlasInputsFailGracefully)
 	flag_set<ax::lua::Permission> permissions;
 	permissions |= ax::lua::Permission::IO;
 	auto app{ ax::Application::from_embedded(permissions, std::move(layout)) };
+	app.set_user_directory(user_directory);
 	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
 }

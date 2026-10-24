@@ -18,8 +18,19 @@ void ax::teardown()
 	ax::teardown_glfw();
 }
 
-ax::Error ax::run(const std::vector<std::string>& args, Application&& app, wgpu::BackendType backendType)
+ax::Error ax::run
+(
+	const std::vector<std::string>& args,
+	Application&& app,
+	wgpu::BackendType backendType,
+	const std::filesystem::path& userDirectory,
+	const std::optional<audio::AudioSystem::Config>& audioConfig
+)
 {
+	if (!userDirectory.empty())
+		app.set_user_directory(userDirectory);
+	if (audioConfig)
+		app.set_audio_config(*audioConfig);
 	ax::init();
 	{
 		auto loaded{ app.try_load(args, backendType) };
@@ -57,7 +68,9 @@ ax::Error ax::run_from_directory
 	std::string_view rootDirectory,
 	wgpu::BackendType backendType,
 	std::string_view sourceDirectory,
-	std::unique_ptr<NativeApplicationModule> nativeModule
+	std::unique_ptr<NativeApplicationModule> nativeModule,
+	std::filesystem::path userDirectory,
+	std::optional<audio::AudioSystem::Config> audioConfig
 )
 {
 	std::filesystem::path rootPath{ rootDirectory };
@@ -66,7 +79,9 @@ ax::Error ax::run_from_directory
 	(
 		args,
 		ax::Application::from_directory(permissions, rootPath.string(), sourceDirectory, std::move(nativeModule)),
-		backendType
+		backendType,
+		userDirectory,
+		audioConfig
 	);
 }
 
@@ -76,9 +91,11 @@ ax::Error ax::run_from_zip
 	const std::vector<std::string>& args,
 	std::string_view zip,
 	wgpu::BackendType backendType,
-	std::unique_ptr<NativeApplicationModule> nativeModule
+	std::unique_ptr<NativeApplicationModule> nativeModule,
+	std::filesystem::path userDirectory,
+	std::optional<audio::AudioSystem::Config> audioConfig
 )
 {
 	spdlog::info("<Ax> Running from zip: '{}'", zip);
-	return run(args, ax::Application::from_zip(permissions, zip, std::move(nativeModule)), backendType);
+	return run(args, ax::Application::from_zip(permissions, zip, std::move(nativeModule)), backendType, userDirectory, audioConfig);
 }

@@ -126,7 +126,7 @@ void ax::Application::init_audio(const sol::table& manifest)
 	if (!audioSetting.value_or(m_create_window))
 		return;
 
-	m_audio = std::make_unique<audio::AudioSystem>(audio::AudioSystem::config_from_environment());
+	m_audio = std::make_unique<audio::AudioSystem>(m_audioConfig);
 
 	const sol::optional<sol::table> musicTable{ manifest["music"] };
 	if (!musicTable)
@@ -221,7 +221,8 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 	m_name = manifest["name"];
 	m_directory_name = make_safe_directory_name(m_name);
 	spdlog::info("Application '{}' will use directory '{}'", m_name, m_directory_name);
-	m_userFileManager.set_application(*this);
+	if (m_userFileManager.set_application(*this, m_userDirectory) != ax::Error::Success)
+		return false;
 
 	const sol::table& permissions{ manifest["permissions"].get<sol::table>() };
 	for (const auto& entry : permissions)

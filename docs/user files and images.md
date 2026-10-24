@@ -2,7 +2,7 @@
 
 ## `app.user_io`
 
-Files live in `%AppData%\AxEng\app_user\<project name>`. Paths outside that folder are rejected and log an error.
+Files live in `%AppData%\AxEng\app_user\<project name>` by default. Pass `--user-directory <path>` to the AxEng executable to use the specified directory for that application's user files. Paths outside the selected directory are rejected and log an error.
 
 - `app.user_io.open(name, mode)` returns a handle with `read_all()`, `write(text)` (returns whether it succeeded) and `close()`, or nil if the file can't be opened.
 - `app.user_io.remove(name)` deletes a file and returns true, or false if it doesn't exist or couldn't be removed.

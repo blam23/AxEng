@@ -22,8 +22,14 @@ std::optional<std::filesystem::path> get_app_data_directory() noexcept
     return std::nullopt;
 }
 
-ax::Error ax::UserFileManager::set_application(const Application& app) noexcept
+ax::Error ax::UserFileManager::set_application(const Application& app, const std::filesystem::path& user_directory) noexcept
 {
+	if (!user_directory.empty())
+	{
+		m_directory = user_directory;
+		return setup_directory();
+	}
+
     const auto base = get_app_data_directory();
     if (!base.has_value())
     {

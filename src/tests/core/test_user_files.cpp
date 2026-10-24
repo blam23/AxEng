@@ -7,8 +7,6 @@
 #include <fstream>
 #include <type_traits>
 #include <vector>
-#include <windows.h>
-#include <shlobj.h>
 
 static_assert(!std::is_move_constructible_v<ax::UserFileHandle>);
 static_assert(!std::is_copy_constructible_v<ax::UserFileHandle>);
@@ -29,11 +27,10 @@ protected:
         layout.emplace("main.lua", ax::EmbeddedResource{
             reinterpret_cast<const uint8_t*>(main_script), sizeof(main_script) - 1 });
         auto app = ax::Application::from_embedded({}, std::move(layout));
+        directory = std::filesystem::current_path() / name;
+        app.set_user_directory(directory);
         ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
-        ASSERT_EQ(manager.set_application(app), ax::Error::Success);
-        char app_data[MAX_PATH];
-        ASSERT_TRUE(SUCCEEDED(SHGetFolderPathA(nullptr, CSIDL_APPDATA, nullptr, 0, app_data)));
-        directory = std::filesystem::path(app_data) / "AxEng" / "app_user" / app.safe_directory_name();
+        ASSERT_EQ(manager.set_application(app, directory), ax::Error::Success);
         filepath = directory / filename;
         std::ofstream file(filepath, std::ios::binary);
         ASSERT_TRUE(file.is_open());

@@ -22,7 +22,9 @@ namespace ax
 	(
 		const std::vector<std::string>& args,
 		Application&&,
-		wgpu::BackendType backendType
+		wgpu::BackendType backendType,
+		const std::filesystem::path& userDirectory = {},
+		const std::optional<audio::AudioSystem::Config>& audioConfig = std::nullopt
 	);
 	ax::Error run_from_directory
 	(
@@ -31,7 +33,9 @@ namespace ax
 		std::string_view rootDirectory,
 		wgpu::BackendType backendType = wgpu::BackendType::Undefined,
 		std::string_view sourceDirectory = {},
-		std::unique_ptr<NativeApplicationModule> nativeModule = {}
+		std::unique_ptr<NativeApplicationModule> nativeModule = {},
+		std::filesystem::path userDirectory = {},
+		std::optional<audio::AudioSystem::Config> audioConfig = std::nullopt
 	);
 	ax::Error run_from_zip
 	(
@@ -39,6 +43,8 @@ namespace ax
 		const std::vector<std::string>& args,
 		std::string_view zipFile,
 		wgpu::BackendType backendType = wgpu::BackendType::Undefined,
-		std::unique_ptr<NativeApplicationModule> nativeModule = {}
+		std::unique_ptr<NativeApplicationModule> nativeModule = {},
+		std::filesystem::path userDirectory = {},
+		std::optional<audio::AudioSystem::Config> audioConfig = std::nullopt
 	);
 }

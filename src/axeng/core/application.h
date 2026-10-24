@@ -106,6 +106,8 @@ namespace ax
 		std::mutex& debug_get_temp_textures_mutex(Badge<debug::Debugger>) noexcept { return m_tempTexturesMutex; }
 
 		void set_headless() noexcept { m_create_window = false; }
+		void set_user_directory(std::filesystem::path user_directory) { m_userDirectory = std::move(user_directory); }
+		void set_audio_config(audio::AudioSystem::Config config) noexcept { m_audioConfig = config; }
 
 		void call_deferred(std::function<void()>);
 
@@ -152,6 +154,8 @@ namespace ax
 
 		ResourceLoader m_loader;
 		std::filesystem::path m_projectSourceDirectory{};
+		std::filesystem::path m_userDirectory{};
+		audio::AudioSystem::Config m_audioConfig{ audio::AudioSystem::default_config() };
 		lua::ScriptManager m_scripts;
 		TextureManager m_textures;
 		MusicManager m_music;

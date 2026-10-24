@@ -58,7 +58,7 @@ namespace ax
 
         UserFileManager() = default;
 
-        ax::Error set_application(const Application& app) noexcept;
+        ax::Error set_application(const Application& app, const std::filesystem::path& user_directory = {}) noexcept;
 
         UserFileHandle* open_file(const std::string& filename, const char* mode) noexcept;
         ax::Error close_file(UserFileHandle* handle) noexcept;

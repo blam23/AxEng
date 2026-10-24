@@ -48,6 +48,16 @@ int main(int argc, char* argv[])
 		.store_into(outDirectory)
 		.help("Where to store any results for the given operation");
 
+	std::string userDirectory;
+	program.add_argument("--user-directory")
+		.store_into(userDirectory)
+		.help("Directory for application user files; defaults to the AxEng AppData location");
+
+	std::string audioBackend{ "auto" };
+	program.add_argument("--audio-backend")
+		.store_into(audioBackend)
+		.help("Audio output backend: auto, null (discard output), or none (disable device)");
+
 	bool compile{ false };
 	program.add_argument("-c", "--comp")
 		.store_into(compile)
@@ -165,6 +175,20 @@ int main(int argc, char* argv[])
 		return RET(ax::Error::InvalidConfiguration);
 	}
 	const wgpu::BackendType backendType{ backendIt->second };
+	std::optional<ax::audio::AudioSystem::Config> audioConfig{};
+	if (audioBackend != "auto")
+	{
+		audioConfig = ax::audio::AudioSystem::default_config();
+		if (audioBackend == "null")
+			audioConfig->nullBackend = true;
+		else if (audioBackend == "none")
+			audioConfig->openDevice = false;
+		else
+		{
+			spdlog::error("Unknown audio backend '{}'. Choose auto, null, or none.", audioBackend);
+			return RET(ax::Error::InvalidConfiguration);
+		}
+	}
 
 	//
 	// Validate Args
@@ -271,7 +295,9 @@ int main(int argc, char* argv[])
 				out_args,
 				compile ? outDirectory + ".zip" : inDirectory,
 				backendType,
-				std::move(nativeModule)
+				std::move(nativeModule),
+				userDirectory,
+				audioConfig
 			) };
 			if (err != ax::Error::Success)
 				return RET(err);
@@ -285,7 +311,9 @@ int main(int argc, char* argv[])
 				compile ? outDirectory : inDirectory,
 				backendType,
 				inDirectory,
-				std::move(nativeModule)
+				std::move(nativeModule),
+				userDirectory,
+				audioConfig
 			) };
 			if (err != ax::Error::Success)
 				return RET(err);

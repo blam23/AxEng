@@ -117,8 +117,8 @@ namespace ax::audio
 			std::uint64_t seed{ 0 };
 		};
 
-		// Reads AXENG_AUDIO_BACKEND: "none" disables the device, "null" uses the null backend.
-		static Config config_from_environment();
+		// Returns the default device configuration with a per-process random seed.
+		static Config default_config();
 
 		explicit AudioSystem(const Config& config);
 		~AudioSystem();

@@ -27,10 +27,11 @@ only**.
 - If no output device can be opened, `app.audio` still exists and everything works (sounds can be defined,
   rendered and inspected, and time passes as normal: one-shots finish and playlists advance) but
   `app.audio.available` is `false` and the output is discarded.
-- The `AXENG_AUDIO_BACKEND` environment variable overrides the device:
-  - `none` (or `off`/`0`): never open a device. Tests use this.
+- `--audio-backend` selects the output behavior:
+  - `none`: never open a device. Tests use this.
   - `null`: use miniaudio's null backend, which runs a real audio thread but discards the output. Useful for
     automated runs of a game without making noise.
+  - `auto` (the default): use the system's normal output device.
 
 ## Music assets
 
@@ -175,5 +176,5 @@ out of this with `Config::manualMix` and drive `AudioSystem::mix()` themselves).
 
 `src/tests/core/test_audio.cpp` covers the synth (presets, determinism, envelope length, loop seams, mutation),
 the mixer driven offline through `AudioSystem::mix()` (panning, buses, loops, instance limits, cooldowns,
-variants), music loading and shuffling through `Application` with `AXENG_AUDIO_BACKEND=none`, and the Lua
+variants), music loading and shuffling through `Application` with its audio device disabled, and the Lua
 bindings. `OutputDeviceRunsSilently` opens the real device (skipped if there isn't one) and plays a silent sound.
