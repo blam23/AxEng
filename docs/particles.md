@@ -56,7 +56,6 @@ when the emitter is created; recreate the emitter to change it. Invalid values r
 state
 `app.particles.suspend_all()` remembers each emitter's playing and visible state, then stops and hides it;
 `app.particles.resume_all()` restores those states. Emitters that were already stopped or hidden remain so.
-`app.particles.set_debug_render_enabled(true)` draws the conservative world-space AABB of every live emitter,
 including its estimated particle reach. It does not alter visibility or simulation culling.
 
 | Field | Meaning |

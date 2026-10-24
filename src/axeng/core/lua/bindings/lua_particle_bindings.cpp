@@ -206,11 +206,5 @@ void ax::lua::bindings::setup_particle_bindings(ax::Application& app, sol::state
 			throw sol::error("Particle systems require a window.");
 		app.window()->particle_system().resume_all();
 	};
-	particles["set_debug_render_enabled"] = [&app](bool enabled)
-	{
-		if (!app.has_window())
-			throw sol::error("Particle systems require a window.");
-		app.window()->particle_system().set_debug_render_enabled(enabled);
-	};
 	appTable["particles"] = particles;
 }

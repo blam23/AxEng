@@ -109,7 +109,6 @@ namespace ax
 		void set_render_enabled(bool enabled);
 		void suspend_all();
 		void resume_all();
-		void set_debug_render_enabled(bool enabled);
 		void encode_compute(wgpu::Device& device, wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
 			double delta, glm::vec4 cameraBounds, glm::vec2 viewport, float zoom,
 			wgpu::TextureFormat colourFormat, std::uint32_t sampleCount);
@@ -133,7 +132,6 @@ namespace ax
 		std::vector<std::shared_ptr<ParticleEmitter>> m_frameEmitters;
 		bool m_paused{};
 		bool m_render_enabled{ true };
-		bool m_debug_bounds{};
 		wgpu::TextureFormat m_colourFormat{ wgpu::TextureFormat::Undefined };
 		std::uint32_t m_sampleCount{};
 	};

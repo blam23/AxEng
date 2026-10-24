@@ -1,5 +1,4 @@
 #include "axeng/core/particles/particle_system.h"
-#include "axeng/core/shapes/debug_shapes.h"
 
 #include <algorithm>
 #include <array>
@@ -334,13 +333,6 @@ void ax::ParticleSystem::resume_all()
 	}
 }
 
-void ax::ParticleSystem::set_debug_render_enabled(bool enabled)
-{
-	if (m_thread != std::this_thread::get_id())
-		throw std::runtime_error("Particle systems belong to the renderer thread");
-	m_debug_bounds = enabled;
-}
-
 void ax::ParticleSystem::initialise(wgpu::Device& device, wgpu::TextureFormat colourFormat, std::uint32_t sampleCount)
 {
 	if (m_device.Get() == device.Get() && m_computePipeline.Get() != nullptr
@@ -567,14 +559,6 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 		emitter->m_spawnCount = emitter->advance(frameDelta);
 		const auto& config{ emitter->m_config };
 		emitter->update_world_bounds();
-		if (m_debug_bounds && emitter->m_hasWorldBounds)
-		{
-			const auto& bounds{ emitter->m_worldBounds };
-			DebugShapes::rect_outline(
-				{ bounds.x, bounds.y },
-				{ bounds.z - bounds.x, bounds.w - bounds.y },
-				{ 0.2f, 1.0f, 0.6f, 0.9f }, 1.0f);
-		}
 		if (!config.visible || !intersects(emitter->m_worldBounds, cameraBounds))
 			continue;
 		if (emitter->m_sinceLastCompute >= s_particle_clock_period)
