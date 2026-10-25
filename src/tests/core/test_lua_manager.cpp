@@ -18,6 +18,25 @@ static void register_minimal_init()
 	ax::Resource::register_embedded_resource<ax::lua::Script>("@init", ax::EmbeddedResource{ (const uint8_t*)init, sizeof(init) - 1 });
 }
 
+TEST(LuaManagerTests, TracyProfilerApi_IsRegistered)
+{
+	register_minimal_init();
+
+	flag_set<Permission> perms;
+	Manager m(perms);
+	ASSERT_EQ(ax::Error::Success, m.setup());
+
+	const auto result{ m.state().safe_script(
+		"assert(type(tracy) == 'table'); "
+		"assert(type(tracy.ZoneBeginN) == 'function'); "
+		"assert(type(tracy.ZoneEnd) == 'function'); "
+		"tracy.ZoneBeginN('lua manager test'); tracy.ZoneEnd();",
+		"@test_tracy_api") };
+	ASSERT_TRUE(result.valid()) << "Tracy Lua API script failed";
+
+	m.cleanup();
+}
+
 TEST(LuaManagerTests, NoPermissions_AccessIOAndOS_LogsErrors)
 {
 	testlog::LogCapture::instance().expect_total_error_count(4);

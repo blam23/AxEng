@@ -24,6 +24,10 @@
                          },
                          "sol2",
                          "spdlog",
+                         {
+                             "name": "tracy",
+                             "features": [ "on-demand" ]
+                         },
                          "stb",
                          "dawn",
                          "vulkan-headers",

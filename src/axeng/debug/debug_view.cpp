@@ -16,7 +16,7 @@
 #include <spdlog/sinks/base_sink.h>
 #include <spdlog/spdlog.h>
 
-#include "axeng/debug/perf_profiler.h"
+#include <tracy/Tracy.hpp>
 #include "axeng/core/application.h"
 #include "axeng/core/window.h"
 #include "axeng/core/imgui_helper.h"
@@ -286,6 +286,7 @@ void ax::debug::ViewManager::teardown_console_logging()
 
 void ax::debug::ViewManager::debug_view_callback(Debugger& debugger, Application& app, const WindowUIEvent& e)
 {
+	ZoneScopedN("DebugView");
 	ImGui::ShowDemoWindow();
 
 	ImGui::Begin(ICON_FA_PAINTBRUSH " Renderer");
@@ -315,7 +316,7 @@ void ax::debug::ViewManager::debug_view_callback(Debugger& debugger, Application
 	}
 	ImGui::End();
 
-	ImGui::Begin(ICON_FA_CLOCK " Profiler");
+	ImGui::Begin(ICON_FA_CLOCK " Runtime");
 	{
 		#ifdef _DEBUG
 		ImGui::PushFont(nullptr, 24.f);
@@ -335,163 +336,6 @@ void ax::debug::ViewManager::debug_view_callback(Debugger& debugger, Application
 		allTimes /= deltaCount;
 		ImGui::Text("FPS Average: %.0f", 1000.0f / allTimes);
 
-		#ifdef ENABLE_PROFILER
-		{
-			ImGui::SeparatorText(ICON_FA_FIRE " Flame Graph");
-
-			auto& prof = ax::Profiler::instance();
-			auto roots = prof.all_segments();
-			std::sort(roots.begin(), roots.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-
-			if (!roots.empty())
-			{
-				auto getDepth = 
-					[&](auto&& self, const std::shared_ptr<ax::ProfilerSegment>& segment) -> size_t
-					{
-						size_t depth = 1;
-						for (const auto& child : segment->children())
-							depth = std::max(depth, 1 + self(self, child.second));
-						return depth;
-					};
-
-				double totalRootMs = 0.0;
-				size_t maxDepth = 0;
-				for (const auto& root : roots)
-				{
-					totalRootMs += root.second->stats().averageMs;
-					maxDepth = std::max(maxDepth, getDepth(getDepth, root.second));
-				}
-
-				if (totalRootMs > 0.0)
-				{
-					const ImVec2 graphPos = ImGui::GetCursorScreenPos();
-					const float graphWidth = ImGui::GetContentRegionAvail().x;
-					const float barHeight = 20.0f;
-					const float barGap = 2.0f;
-					ImDrawList* drawList = ImGui::GetWindowDrawList();
-
-					auto drawFlameSegment = 
-						[&](auto&& self, const std::string& name,
-							const std::string& path,
-							const std::shared_ptr<ax::ProfilerSegment>& segment,
-							float x, float y, float width, size_t depth)
-						{
-							if (width < 1.0f)
-								return;
-
-							const auto stats = segment->stats();
-							const ImVec2 min(x, y);
-							const ImVec2 max(x + width, y + barHeight);
-							const float variation = static_cast<float>((depth * 3) % 5) * 0.06f;
-							const ImU32 color = ImGui::GetColorU32(ImVec4(0.75f, 0.35f + variation, 0.2f, 1.0f));
-							drawList->AddRectFilled(min, max, color);
-							drawList->AddRect(min, max, ImGui::GetColorU32(ImGuiCol_Border));
-
-							if (width > ImGui::CalcTextSize(name.c_str()).x + 8.0f)
-								drawList->AddText(ImVec2(x + 4.0f, y + 2.0f), ImGui::GetColorU32(ImGuiCol_Text), name.c_str());
-
-							auto children = segment->children();
-							std::sort(children.begin(), children.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-							double childrenMs = 0.0;
-							for (const auto& child : children)
-								childrenMs += child.second->stats().averageMs;
-
-							const double childTimeScale = std::max(stats.averageMs, childrenMs);
-							if (childTimeScale <= 0.0)
-								return;
-
-							float childX = x;
-							for (const auto& child : children)
-							{
-								const auto childStats = child.second->stats();
-								const float childWidth = width * static_cast<float>(childStats.averageMs / childTimeScale);
-								self(self, child.first, path + "/" + child.first, child.second, childX, y + barHeight + barGap, childWidth, depth + 1);
-								childX += childWidth;
-							}
-						};
-
-					float rootX = graphPos.x;
-					for (const auto& root : roots)
-					{
-						const float rootWidth = graphWidth * static_cast<float>(root.second->stats().averageMs / totalRootMs);
-						drawFlameSegment(drawFlameSegment, root.first, root.first, root.second, rootX, graphPos.y, rootWidth, 0);
-						rootX += rootWidth;
-					}
-
-					ImGui::Dummy(ImVec2(graphWidth, static_cast<float>(maxDepth) * (barHeight + barGap)));
-				}
-				else
-				{
-					ImGui::TextUnformatted("No profiler samples yet.");
-				}
-			}
-			else
-			{
-				ImGui::TextUnformatted("No profiler segments yet.");
-			}
-
-			ImGui::SeparatorText(ICON_FA_LIST " Segments");
-
-			auto drawSegment = [&](auto&& self, const std::string& name,
-					const std::shared_ptr<ax::ProfilerSegment>& segment,
-					double topLevelMs, size_t depth) -> void
-				{
-					const auto stats = segment->stats();
-					float intensity = topLevelMs > 0.0
-						? std::clamp(static_cast<float>(stats.averageMs / topLevelMs), 0.0f, 1.0f)
-						: 0.0f;
-
-					if (depth == 0)
-						intensity = 0.0f; // Don't color top-level segments
-
-					const ImU32 cellColor = ImGui::GetColorU32(ImVec4(
-						0.25f + 0.65f * intensity,
-						0.28f * (1.0f - intensity),
-						0.28f * (1.0f - intensity), 1.0f));
-
-
-					ImGui::TableNextRow();
-					ImGui::TableNextColumn();
-					ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
-					auto children = segment->children();
-					const bool hasChildren = !children.empty();
-					const ImGuiTreeNodeFlags nodeFlags = ImGuiTreeNodeFlags_SpanFullWidth | ImGuiTreeNodeFlags_DefaultOpen
-						| (hasChildren ? ImGuiTreeNodeFlags_None : ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen);
-					const bool isOpen = ImGui::TreeNodeEx(name.c_str(), nodeFlags);
-					ImGui::TableNextColumn();
-					ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
-					ImGui::Text("%.3f", stats.averageMs);
-					ImGui::TableNextColumn();
-					ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
-					ImGui::Text("%.3f", stats.minMs);
-					ImGui::TableNextColumn();
-					ImGui::TableSetBgColor(ImGuiTableBgTarget_CellBg, cellColor);
-					ImGui::Text("%.3f", stats.maxMs);
-
-					if (hasChildren && isOpen)
-					{
-						std::sort(children.begin(), children.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-						for (const auto& child : children)
-							self(self, child.first, child.second, topLevelMs, depth + 1);
-						ImGui::TreePop();
-					}
-				};
-
-			if (ImGui::BeginTable("Profiler segments", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable))
-			{
-				ImGui::TableSetupColumn("Segment");
-				ImGui::TableSetupColumn("Avg (ms)");
-				ImGui::TableSetupColumn("Min (ms)");
-				ImGui::TableSetupColumn("Max (ms)");
-				ImGui::TableHeadersRow();
-				for (const auto& root : roots)
-					drawSegment(drawSegment, root.first, root.second, root.second->stats().averageMs, 0);
-				ImGui::EndTable();
-			}
-		}
-
-
-		#endif
 		ImGui::SeparatorText(ICON_FA_CHART_BAR " Statistics");
 
 		ImGui::Text("Sprites: %zu", app.window()->get_sprite_count());

@@ -1,7 +1,7 @@
 #include "axeng/core/imgui_helper.h"
 #include "axeng/core/imgui_style.h"
 #include "axeng/core/log_timer.h"
-#include "axeng/debug/perf_profiler.h"
+#include <tracy/Tracy.hpp>
 #include "axeng/core/window.h"
 #include "axeng/core/input/mouse.h"
 #include "axeng/core/shapes/debug_shapes.h"
@@ -1829,20 +1829,19 @@ void ax::Window::run_loop()
 				}
 			);
 
-		PROFILER_TOP_LEVEL(frame);
-		PROFILER_TOP_LEVEL_SEGMENT_SCOPED(frame);
+		FrameMark;
 		{
-			PROFILER_SEGMENT_SCOPED(frame, tick);
+			ZoneScopedN("Window::tick");
 			handle_tick(updateDelta);
 		}
 
 		{
-			PROFILER_SEGMENT_SCOPED(frame, render);
+			ZoneScopedN("Window::render");
 			run_wgpu_render_pass(updateDelta, std::move(surfaceFuture));
 		}
 
 		{
-			PROFILER_SEGMENT_SCOPED(frame, deferred);
+			ZoneScopedN("Window::deferred");
 			std::vector<std::function<void()>> deferred;
 			{
 				std::lock_guard lock{ m_deferredMutex };
@@ -1859,14 +1858,13 @@ void ax::Window::run_loop()
 void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture)
 {
 	{
-		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, pre_render);
+		ZoneScopedN("Window::pre-render");
 
 		m_preRenderEventHandler.fire({ .delta = delta });
 	}
 
 	{
-		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, surface_setup);
-		PROFILER_NEW_SUBSEGMENT(surface_setup, create_texture);
+		ZoneScopedN("Window::surface-setup");
 
 		const auto surfaceTexture = surfaceFuture.get();
 		const auto surfaceView = surfaceTexture.texture.CreateView();
@@ -2127,14 +2125,14 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		uiPassDesc.depthStencilAttachment = &uiDepthAttachment;
 		auto uiPass = encoder.BeginRenderPass(&uiPassDesc);
 		{
-			PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, ui);
+			ZoneScopedN("Window::ui");
 			render_gui(uiPass, delta);
 		}
 		uiPass.End();
 
 		// Submit commands to GPU
 		{
-			PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, finalise);
+			ZoneScopedN("Window::finalise");
 
 			wgpu::CommandBufferDescriptor bufferDesc
 			{
@@ -2198,7 +2196,7 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 {
 	{
-		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, render_event);
+		ZoneScopedN("Window::render-event");
 
 		// Send out the draw event
 		m_renderEventHandler.fire
@@ -2209,7 +2207,7 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 	}
 
 	{
-		PROFILER_SEGMENT_SCOPED_SUB_LEVEL(frame, render, sprite_batch);
+		ZoneScopedN("Window::sprite-batch");
 
 		// Group sprite records by texture so we can issue one instanced draw per texture.
 		m_spriteGroupRanges.clear();

@@ -8,8 +8,10 @@
 #include <minizip-ng/mz_zip_rw.h>
 
 #include <algorithm>
+#include <chrono>
 #include <optional>
 #include <shlobj.h>
+#include <thread>
 #include <windows.h>
 
 std::optional<std::filesystem::path> get_app_data_directory() noexcept
@@ -190,11 +192,23 @@ std::expected<void, std::string> ax::UserFileManager::create_zip
         return std::unexpected{ "Failed to finalize ZIP archive (minizip error " + std::to_string(close_result) + ")" };
     }
 
-    if (!MoveFileExW(temporary_path.c_str(), output_path->c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    bool replaced{ false };
+    DWORD replace_error{};
+    auto retryDelay{ std::chrono::milliseconds{ 10 } };
+    for (std::uint32_t attempt{}; attempt < 8; ++attempt)
     {
-        const auto error{ GetLastError() };
+        replaced = MoveFileExW(temporary_path.c_str(), output_path->c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
+        if (replaced) break;
+        replace_error = GetLastError();
+        if (replace_error != ERROR_ACCESS_DENIED && replace_error != ERROR_SHARING_VIOLATION) break;
+        std::this_thread::sleep_for(retryDelay);
+        retryDelay = std::min(retryDelay * 2, std::chrono::milliseconds{ 640 });
+    }
+    if (!replaced)
+    {
         std::filesystem::remove(temporary_path, filesystem_error);
-        return std::unexpected{ "Failed to replace ZIP output (Windows error " + std::to_string(error) + ")" };
+        return std::unexpected{ "Failed to replace ZIP output (Windows error " + std::to_string(replace_error) + ")" };
     }
 
     if (remove_sources)

@@ -1,6 +1,7 @@
 #include "axeng/core/lua/lua_engine.h"
 #include "axeng/core/log_timer.h"
 #include "axeng/core/lua/script.h"
+#include <tracy/TracyLua.hpp>
 
 #ifdef _WIN32
 #include <Windows.h>
@@ -433,6 +434,7 @@ ax::Error ax::lua::Manager::setup()
 		sol::lib::table,
 		sol::lib::bit32
 	);
+	tracy::LuaRegister(m_state.lua_state());
 
 	sol::table blocked{ m_state.create_table() };
 	sol::table mt{ m_state.create_table() };

@@ -51,15 +51,10 @@ rule("vcpkg.manifest")
             local vcpkg_root = os.getenv("VCPKG_ROOT")
             if vcpkg_root and os.isfile(path.join(vcpkg_root, "vcpkg.exe")) then
                 vcpkg = path.join(vcpkg_root, "vcpkg.exe")
-                local git_dir = path.join(vcpkg_root, ".git")
-                if os.isdir(git_dir) or os.isfile(git_dir) then
-                    -- Git's filesystem monitor can keep vcpkg's temporary registry checkouts open.
-                    os.execv("git", {"-C", vcpkg_root, "config", "--local", "core.fsmonitor", "false"})
-                    os.execv("git", {"-C", vcpkg_root, "config", "--local", "core.usebuiltinfsmonitor", "false"})
-                end
             end
             os.execv(vcpkg, {"install", "--triplet", vcpkg_triplet,
                              "--overlay-triplets=" .. vcpkg_triplet_dir,
+                             "--overlay-ports=" .. path.join(engine_root, "ports"),
                              "--x-manifest-root=" .. engine_root,
                              "--x-install-root=" .. installroot}, {envs = {
                 VCPKG_VISUAL_STUDIO_PATH = vcvars.VSInstallDir:gsub("[/\\]+$", ""),
@@ -71,6 +66,7 @@ rule("vcpkg.manifest")
         local libdir = path.join(prefix, vcpkg_config_dir, "lib")
         assert(os.isdir(libdir), "Missing vcpkg libraries for the selected build mode: " .. libdir)
         target:add("sysincludedirs", path.join(prefix, "include"), {public = true})
+        target:add("sysincludedirs", path.join(prefix, "include", "tracy"), {public = true})
         target:add("sysincludedirs", path.join(prefix, "include", "luajit"), {public = true})
         target:add("linkdirs", libdir, {public = true})
         for _, lib in ipairs(os.files(path.join(libdir, "*.lib"))) do
@@ -92,7 +88,10 @@ rule("vcpkg.runtime_dlls")
 rule("copy.lua_tests")
     after_build(function (target)
         os.cp(path.join(engine_root, "lua_tests"), target:targetdir())
-        os.cp(path.join(engine_root, "AxCompiler"), target:targetdir())
+        local compiler_output = path.join(target:targetdir(), "AxCompiler")
+        os.cp(path.join(engine_root, "compiler", "project.json"), compiler_output)
+        os.cp(path.join(engine_root, "compiler", "scripts"), compiler_output)
+        os.cp(path.join(engine_root, "compiler", "templates"), compiler_output)
     end)
 
 local function enable_release_pdbs()
@@ -118,7 +117,7 @@ target("AxEngLib")
     -- Third-party single file implementations (miniaudio + stb_vorbis)
     add_files(src .. "/axeng/core/audio/miniaudio_impl.c", {force = {cflags = "-w"}})
     add_includedirs(src, {public = true})
-    add_defines("ENABLE_PROFILER", "IMGUI_IMPL_WEBGPU_BACKEND_DAWN", {public = true})
+    add_defines("TRACY_ENABLE", "TRACY_ON_DEMAND", "IMGUI_IMPL_WEBGPU_BACKEND_DAWN", {public = true})
     add_cxflags("-Wa,-mbig-obj", {tools = {"clang"}})
     add_syslinks("bcrypt", "gdi32", "user32", "shell32", "advapi32", "kernel32", "onecore", "ole32", "dxgi", "dxguid", "d3d11", "d3d12", "d3dcompiler", "synchronization", {public = true})
 
