@@ -1,3 +1,4 @@
+#include <tracy/Tracy.hpp>
 #include "axeng/core/shapes/shape_renderer.h"
 
 #include "spdlog/spdlog.h"
@@ -760,6 +761,7 @@ void ax::ShapeRenderer::begin_frame(const ShapeView& view)
 
 void ax::ShapeRenderer::draw(wgpu::RenderPassEncoder& pass, const ShapeList& shapes)
 {
+	ZoneScopedN("Shapes mesh build and draw");
 	if (!s_state)
 	{
 		static bool warned{ false };

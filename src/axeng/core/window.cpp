@@ -1708,11 +1708,24 @@ wgpu::BindGroup ax::Window::get_texture_bind_group(Texture* texture)
 
 void ax::Window::handle_tick(double delta, std::optional<double> frameDelta)
 {
-	m_updateEventHandler.fire({ .delta = delta });
+	{
+		ZoneScopedN("Window::input-update");
+		m_updateEventHandler.fire({ .delta = delta });
+	}
 	// Frame preparation may emit UI commands. Commit these before the batch's final simulation tick.
-	if (frameDelta) m_prepareFrameEventHandler.fire({ .delta = *frameDelta });
-	m_simulationEventHandler.fire({ .delta = delta });
-	m_postUpdateEventHandler.fire({ .delta = delta });
+	if (frameDelta)
+	{
+		ZoneScopedN("Window::frame-prepare");
+		m_prepareFrameEventHandler.fire({ .delta = *frameDelta });
+	}
+	{
+		ZoneScopedN("Window::simulation-update");
+		m_simulationEventHandler.fire({ .delta = delta });
+	}
+	{
+		ZoneScopedN("Window::post-update");
+		m_postUpdateEventHandler.fire({ .delta = delta });
+	}
 	m_particleDeltaPending += delta;
 }
 
@@ -1868,6 +1881,7 @@ void ax::Window::run_loop()
 					[this]()
 					{
 						// Get current render surface
+						ZoneScopedN("Window::surface-acquire");
 						wgpu::SurfaceTexture surfaceTexture;
 						m_surface.GetCurrentTexture(&surfaceTexture);
 						if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal
@@ -1893,6 +1907,10 @@ void ax::Window::run_loop()
 				else ++m_loopStatistics.failedFrames;
 			}
 			m_loopStatistics.renderMilliseconds = std::chrono::duration<double, std::milli>(Clock::now() - renderStarted).count();
+			TracyPlot("Render CPU ms", m_loopStatistics.renderMilliseconds);
+			TracyPlot("Update CPU ms", m_loopStatistics.updateMilliseconds);
+			TracyPlot("Catch-up ticks", static_cast<std::int64_t>(m_loopStatistics.catchUpTicks));
+			TracyPlot("Discarded seconds", m_loopStatistics.discardedSeconds);
 		}
 
 		{
@@ -1909,7 +1927,11 @@ void ax::Window::run_loop()
 		{
 			const auto workSeconds{ std::chrono::duration<double>(Clock::now() - now).count() };
 			const auto wait{ scheduler.wait_seconds() - workSeconds };
-			if (wait > 0.0) glfwWaitEventsTimeout(wait);
+			if (wait > 0.0)
+			{
+				ZoneScopedN("Window::idle-wait");
+				glfwWaitEventsTimeout(wait);
+			}
 		}
 	}
 
@@ -1918,7 +1940,11 @@ void ax::Window::run_loop()
 
 bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture)
 {
-	const auto surfaceTexture{ surfaceFuture.get() };
+	wgpu::SurfaceTexture surfaceTexture{};
+	{
+		ZoneScopedN("Window::surface-wait");
+		surfaceTexture = surfaceFuture.get();
+	}
 	if (surfaceTexture.texture.Get() == nullptr)
 	{
 		create_surfaces();
@@ -2036,12 +2062,15 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		const auto halfWidth{ static_cast<float>(m_width) / (2.0f * zoom) };
 		const auto halfHeight{ static_cast<float>(m_height) / (2.0f * zoom) };
 		const auto cameraPosition{ m_camera.position() };
-		m_particleSystem.encode_compute(m_device, m_queue, encoder, m_particleDeltaPending,
-			{ cameraPosition.x - halfWidth, cameraPosition.y - halfHeight,
-				cameraPosition.x + halfWidth, cameraPosition.y + halfHeight },
-			{ static_cast<float>(m_width), static_cast<float>(m_height) }, zoom,
-			m_surfaceFormat, m_sampleCount);
-		m_particleDeltaPending = 0.0;
+		{
+			ZoneScopedN("Window::particle-compute-encode");
+			m_particleSystem.encode_compute(m_device, m_queue, encoder, m_particleDeltaPending,
+				{ cameraPosition.x - halfWidth, cameraPosition.y - halfHeight,
+					cameraPosition.x + halfWidth, cameraPosition.y + halfHeight },
+				{ static_cast<float>(m_width), static_cast<float>(m_height) }, zoom,
+				m_surfaceFormat, m_sampleCount);
+			m_particleDeltaPending = 0.0;
+		}
 
 		wgpu::RenderPassColorAttachment sceneColorAttachment
 		{
@@ -2206,9 +2235,15 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				.nextInChain = nullptr,
 				.label = "frame cmd buffer",
 			};
-			wgpu::CommandBuffer command{ encoder.Finish(&bufferDesc) };
-
-			m_queue.Submit(1, &command);
+			wgpu::CommandBuffer command{};
+			{
+				ZoneScopedN("Window::command-finish");
+				command = encoder.Finish(&bufferDesc);
+			}
+			{
+				ZoneScopedN("Window::queue-submit");
+				m_queue.Submit(1, &command);
+			}
 
 			std::vector<PendingDrawBatch> pendingBatches{};
 			{
@@ -2240,10 +2275,16 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				frameImageCopyQueued = true;
 			}
 
-			m_surface.Present();
+			{
+				ZoneScopedN("Window::present");
+				m_surface.Present();
+			}
 
 			// Let the device progress
-			m_device.Tick();
+			{
+				ZoneScopedN("Window::device-tick");
+				m_device.Tick();
+			}
 		}
 
 		if (frameImageRequest)
@@ -2278,28 +2319,32 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		ZoneScopedN("Window::sprite-batch");
 
 		// Group sprite records by texture so we can issue one instanced draw per texture.
-		m_spriteGroupRanges.clear();
-		for (auto* sprite : m_activeSprites)
 		{
-			if (sprite->tex == sprite->groupedTexture)
-				continue;
-
-			if (sprite->groupedTexture != nullptr)
+			ZoneScopedN("Window::sprite-grouping");
+			m_spriteGroupRanges.clear();
+			for (auto* sprite : m_activeSprites)
 			{
-				auto& oldGroup = m_spriteGroups[sprite->groupedTexture];
-				oldGroup.erase(std::remove(oldGroup.begin(), oldGroup.end(), sprite), oldGroup.end());
+				if (sprite->tex == sprite->groupedTexture)
+					continue;
+
+				if (sprite->groupedTexture != nullptr)
+				{
+					auto& oldGroup = m_spriteGroups[sprite->groupedTexture];
+					oldGroup.erase(std::remove(oldGroup.begin(), oldGroup.end(), sprite), oldGroup.end());
+				}
+
+				sprite->groupedTexture = sprite->tex;
+				if (sprite->tex != nullptr)
+					m_spriteGroups[sprite->tex].push_back(sprite);
 			}
 
-			sprite->groupedTexture = sprite->tex;
-			if (sprite->tex != nullptr)
-				m_spriteGroups[sprite->tex].push_back(sprite);
-		}
+			for (auto& group : m_pendingSpriteGroups)
+				group.second.clear();
+			for (const auto& sprite : m_pendingTextures)
+				if (sprite.tex != nullptr)
+					m_pendingSpriteGroups[sprite.tex].push_back(&sprite);
 
-		for (auto& group : m_pendingSpriteGroups)
-			group.second.clear();
-		for (const auto& sprite : m_pendingTextures)
-			if (sprite.tex != nullptr)
-				m_pendingSpriteGroups[sprite.tex].push_back(&sprite);
+		}
 
 		size_t spriteCount = 0;
 		for (const auto& group : m_spriteGroups)
@@ -2314,6 +2359,7 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		uint32_t instanceCursor = 0;
 		auto uploadGroup = [this, &instanceCursor](Texture* tex, const std::vector<const SpriteDefinition*>& activeSprites, const std::vector<const SpriteDefinition*>* pendingSprites)
 		{
+			ZoneScopedN("Window::sprite-upload-group");
 			m_spriteUploadData.clear();
 			if (pendingSprites != nullptr)
 				for (const auto* sprite : *pendingSprites)
@@ -2357,6 +2403,7 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 
 void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline)
 {
+	ZoneScopedN("Window::sprite-draw");
 	pass.SetPipeline(pipeline);
 	pass.SetBindGroup(1, m_viewportBindGroup);
 	// Static batches precede ordinary sprites in both passes, with stable caller-specified order.
