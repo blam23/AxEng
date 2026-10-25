@@ -1959,8 +1959,12 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 	{
 		ZoneScopedN("Window::surface-setup");
 
-		const auto surfaceView = surfaceTexture.texture.CreateView();
+		wgpu::TextureView surfaceView{};
 		const bool multisampled{ m_sampleCount > 1 };
+		wgpu::TextureView targetView{};
+		{
+		ZoneScopedN("Window::view-setup");
+		surfaceView = surfaceTexture.texture.CreateView();
 		if (multisampled && (m_multisampleTexture.Get() == nullptr
 			|| m_multisampleTexture.GetWidth() != m_width || m_multisampleTexture.GetHeight() != m_height))
 		{
@@ -1978,7 +1982,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_multisampleTexture = m_device.CreateTexture(&msaaDesc);
 		}
 
-		wgpu::TextureView targetView{ surfaceView };
+		targetView = surfaceView;
 		if (multisampled)
 		{
 			wgpu::TextureViewDescriptor view
@@ -1994,6 +1998,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				.aspect = wgpu::TextureAspect::All,
 			};
 			targetView = m_multisampleTexture.CreateView(&view);
+		}
 		}
 
 		std::optional<FrameImageRequest> frameImageRequest{};
@@ -2041,7 +2046,10 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			.nextInChain = nullptr,
 			.label = "frame encoder",
 		};
-		wgpu::CommandEncoder encoder = m_device.CreateCommandEncoder(&encoderDesc);
+		wgpu::CommandEncoder encoder{};
+		{
+		ZoneScopedN("Window::encoder-setup");
+		encoder = m_device.CreateCommandEncoder(&encoderDesc);
 
 		float vp[8] = {
 			static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f,
@@ -2058,6 +2066,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			.cameraPosition = m_camera.position(),
 			.zoom = m_camera.zoom(),
 		});
+		}
 		const auto zoom{ std::max(m_camera.zoom(), 0.001f) };
 		const auto halfWidth{ static_cast<float>(m_width) / (2.0f * zoom) };
 		const auto halfHeight{ static_cast<float>(m_height) / (2.0f * zoom) };
@@ -2072,6 +2081,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_particleDeltaPending = 0.0;
 		}
 
+		{
+		ZoneScopedN("Window::scene-pass");
 		wgpu::RenderPassColorAttachment sceneColorAttachment
 		{
 			.view = targetView,
@@ -2105,7 +2116,10 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		}
 		handle_render_pass(scenePass, delta);
 		scenePass.End();
+		}
 
+		{
+		ZoneScopedN("Window::oit-pass");
 		wgpu::RenderPassColorAttachment oitColorAttachments[2]
 		{
 			{
@@ -2145,7 +2159,10 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		draw_transparent_sprites(oitPass);
 		m_particleSystem.draw(oitPass);
 		oitPass.End();
+		}
 
+		{
+		ZoneScopedN("Window::composite-pass");
 		wgpu::RenderPassColorAttachment compositeColorAttachment
 		{
 			.view = targetView,
@@ -2162,10 +2179,12 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		compositePass.SetBindGroup(0, m_compositeBindGroup);
 		compositePass.Draw(3, 1, 0, 0);
 		compositePass.End();
+		}
 
 		auto overlayShapes = DebugShapes::take_queued();
 		if (!overlayShapes.empty())
 		{
+			ZoneScopedN("Window::overlay-pass");
 			wgpu::RenderPassColorAttachment overlayColorAttachment
 			{
 				.view = targetView,
