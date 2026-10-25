@@ -62,6 +62,13 @@ namespace ax
 		std::string imageData{};
 	};
 
+	struct WindowLoopStatistics
+	{
+		double activeSeconds{}, discardedSeconds{};
+		double updateMilliseconds{}, renderMilliseconds{};
+		std::uint64_t updates{}, frames{}, catchUpTicks{}, renderedUpdate{}, failedFrames{};
+	};
+
 	class Window
 	{
 	public:
@@ -84,6 +91,9 @@ namespace ax
 		bool init_webgpu(wgpu::BackendType backendType = wgpu::BackendType::Undefined);
 		bool init_imgui();
 		void run_loop();
+		// Zero retains the legacy variable-update loop. Configure before run_loop().
+		void set_fixed_update_rate(double rate);
+		const WindowLoopStatistics& loop_statistics() const noexcept { return m_loopStatistics; }
 
 		void prevent_close();
 
@@ -97,8 +107,11 @@ namespace ax
 		{
 			return m_updateEventHandler;
 		}
+		UpdateEventHandler& get_simulation_event_handler() { return m_simulationEventHandler; }
+		UpdateEventHandler& get_post_update_event_handler() { return m_postUpdateEventHandler; }
 
 		using PreRenderEventHandler = EventHandler<WindowPreRenderEvent>;
+		PreRenderEventHandler& get_prepare_frame_event_handler() { return m_prepareFrameEventHandler; }
 		PreRenderEventHandler& get_pre_render_event_handler()
 		{
 			return m_preRenderEventHandler;
@@ -228,7 +241,10 @@ namespace ax
 		void draw_pending_batch(const PendingDrawBatch& batch, const wgpu::TextureView& screenView);
 		wgpu::BindGroup get_texture_bind_group(Texture* texture);
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
-		void run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture);
+		bool run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture);
+		double m_fixedUpdateRate{};
+		double m_particleDeltaPending{};
+		WindowLoopStatistics m_loopStatistics{};
 		WindowFrameImageEvent read_frame_image
 		(
 			const FrameImageRequest& request,
@@ -241,7 +257,7 @@ namespace ax
 		void queue_texture(SpriteDefinition sprite);
 
 		// Logic
-		void handle_tick(double delta);
+		void handle_tick(double delta, std::optional<double> frameDelta = {});
 
 		// Properties
 		uint32_t m_width;
@@ -254,7 +270,10 @@ namespace ax
 
 		// Events
 		UpdateEventHandler m_updateEventHandler;
+		UpdateEventHandler m_simulationEventHandler;
+		UpdateEventHandler m_postUpdateEventHandler;
 		PreRenderEventHandler m_preRenderEventHandler;
+		PreRenderEventHandler m_prepareFrameEventHandler;
 		RenderEventHandler m_renderEventHandler;
 		UIEventHandler m_uiEventHandler;
 		RequestCloseEventHandler m_requestCloseEventHandler;

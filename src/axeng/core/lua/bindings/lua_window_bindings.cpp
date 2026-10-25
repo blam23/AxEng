@@ -305,6 +305,35 @@ namespace
 			};
 		window_table["on_frame_image"] = on_frame_image_table;
 
+		window_table["loop_stats"] = [&app](sol::this_state lua)
+		{
+			const auto& stats{ app.window()->loop_statistics() };
+			return sol::state_view{ lua }.create_table_with(
+				"active_seconds", stats.activeSeconds, "discarded_seconds", stats.discardedSeconds,
+				"updates", stats.updates, "frames", stats.frames, "catch_up_ticks", stats.catchUpTicks,
+				"rendered_update", stats.renderedUpdate, "failed_frames", stats.failedFrames,
+				"update_ms", stats.updateMilliseconds, "render_ms", stats.renderMilliseconds);
+		};
+
+		auto on_prepare_frame_table{ state.create_table() };
+		on_prepare_frame_table["subscribe"] = [&app](sol::protected_function f) -> ax::EventID
+		{
+			return app.window()->get_prepare_frame_event_handler().subscribe([f](const ax::WindowPreRenderEvent& event)
+			{
+				const auto result{ f(event.delta) };
+				if (!result.valid())
+				{
+					const sol::error error{ result };
+					spdlog::error("Failed to run on_prepare_frame callback: {}", error.what());
+				}
+			});
+		};
+		on_prepare_frame_table["unsubscribe"] = [&app](ax::EventID id)
+		{
+			app.window()->get_prepare_frame_event_handler().unsubscribe(id);
+		};
+		window_table["on_prepare_frame"] = on_prepare_frame_table;
+
 		auto on_ui_table{ state.create_table() };
 		on_ui_table["subscribe"] =
 			[&app](sol::protected_function f) -> ax::EventID

@@ -3,6 +3,7 @@
 #include "axeng/core/log_timer.h"
 #include <tracy/Tracy.hpp>
 #include "axeng/core/window.h"
+#include "axeng/core/fixed_update_scheduler.h"
 #include "axeng/core/input/mouse.h"
 #include "axeng/core/shapes/debug_shapes.h"
 #include "axeng/core/shapes/shape_renderer.h"
@@ -1705,9 +1706,14 @@ wgpu::BindGroup ax::Window::get_texture_bind_group(Texture* texture)
 	return bindGroup;
 }
 
-void ax::Window::handle_tick(double delta)
+void ax::Window::handle_tick(double delta, std::optional<double> frameDelta)
 {
 	m_updateEventHandler.fire({ .delta = delta });
+	// Frame preparation may emit UI commands. Commit these before the batch's final simulation tick.
+	if (frameDelta) m_prepareFrameEventHandler.fire({ .delta = *frameDelta });
+	m_simulationEventHandler.fire({ .delta = delta });
+	m_postUpdateEventHandler.fire({ .delta = delta });
+	m_particleDeltaPending += delta;
 }
 
 void ax::Window::prevent_close()
@@ -1796,48 +1802,97 @@ void ax::Window::window_close_handler(GLFWwindow* window)
 	}
 }
 
-double updatePrev{ 0 };
-double updateDelta{ 0 };
+void ax::Window::set_fixed_update_rate(double rate)
+{
+	if (!std::isfinite(rate) || rate < 0.0 || rate > 1000.0)
+		throw std::invalid_argument("Fixed update rate must be between 0 and 1000 Hz");
+	m_fixedUpdateRate = rate;
+}
+
 void ax::Window::run_loop()
 {
 	register_window_events();
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
 
-	//SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST);
+	using Clock = std::chrono::steady_clock;
+	auto previous{ Clock::now() };
+	auto previousRender{ previous };
+	FixedUpdateScheduler scheduler{ m_fixedUpdateRate > 0.0 ? m_fixedUpdateRate : 60.0 };
+	bool suspended{};
+	m_loopStatistics = {};
 
 	while (!glfwWindowShouldClose(m_window))
 	{
 		glfwPollEvents();
-		stage_sprite_batches();
-
-		updateDelta = glfwGetTime() - updatePrev;
-		updatePrev = glfwGetTime();
-
-		auto surfaceFuture = 
-			std::async(std::launch::async, 
-				[this]()
-				{
-					// Get current render surface
-					wgpu::SurfaceTexture surfaceTexture;
-					m_surface.GetCurrentTexture(&surfaceTexture);
-					if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal)
-					{
-						spdlog::error("Failed to get new frame surface");
-						return wgpu::SurfaceTexture{};
-					}
-					return surfaceTexture;
-				}
-			);
-
-		FrameMark;
+		if (glfwWindowShouldClose(m_window)) break;
+		const auto now{ Clock::now() };
+		const auto elapsed{ std::chrono::duration<double>(now - previous).count() };
+		previous = now;
+		if (m_fixedUpdateRate > 0.0 && glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))
 		{
-			ZoneScopedN("Window::tick");
-			handle_tick(updateDelta);
+			suspended = true;
+			scheduler.reset_timing();
+			glfwWaitEventsTimeout(0.05);
+			continue;
 		}
-
+		if (suspended)
 		{
-			ZoneScopedN("Window::render");
-			run_wgpu_render_pass(updateDelta, std::move(surfaceFuture));
+			suspended = false;
+			scheduler.reset_timing();
+			previousRender = now;
+			continue;
+		}
+		m_loopStatistics.activeSeconds += elapsed;
+		const auto steps{ m_fixedUpdateRate > 0.0 ? scheduler.advance(elapsed) : 1u };
+		m_loopStatistics.discardedSeconds = scheduler.discarded_seconds();
+		for (std::uint32_t step{}; step < steps; ++step)
+		{
+			if (step != 0) glfwPollEvents();
+			if (glfwWindowShouldClose(m_window) || (m_fixedUpdateRate > 0.0 && glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))) break;
+			ZoneScopedN("Window::tick");
+			const auto updateStarted{ Clock::now() };
+			handle_tick(m_fixedUpdateRate > 0.0 ? scheduler.delta() : elapsed,
+				step + 1 == steps ? std::optional<double>{ std::chrono::duration<double>(now - previousRender).count() } : std::nullopt);
+			scheduler.complete_update();
+			++m_loopStatistics.updates;
+			if (step > 0) ++m_loopStatistics.catchUpTicks;
+			m_loopStatistics.updateMilliseconds = std::chrono::duration<double, std::milli>(Clock::now() - updateStarted).count();
+		}
+		if (scheduler.render_due() && !glfwWindowShouldClose(m_window)
+			&& !(m_fixedUpdateRate > 0.0 && glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)))
+		{
+			stage_sprite_batches();
+			const auto renderStarted{ Clock::now() };
+			auto surfaceFuture =
+				std::async(std::launch::async,
+					[this]()
+					{
+						// Get current render surface
+						wgpu::SurfaceTexture surfaceTexture;
+						m_surface.GetCurrentTexture(&surfaceTexture);
+						if (surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessOptimal
+							&& surfaceTexture.status != wgpu::SurfaceGetCurrentTextureStatus::SuccessSuboptimal)
+						{
+							return wgpu::SurfaceTexture{};
+						}
+						return surfaceTexture;
+					}
+				);
+
+			FrameMark;
+			{
+				ZoneScopedN("Window::render");
+				const auto renderDelta{ std::chrono::duration<double>(now - previousRender).count() };
+				if (run_wgpu_render_pass(renderDelta, std::move(surfaceFuture)))
+				{
+					scheduler.complete_render();
+					previousRender = now;
+					++m_loopStatistics.frames;
+					m_loopStatistics.renderedUpdate = scheduler.updates();
+				}
+				else ++m_loopStatistics.failedFrames;
+			}
+			m_loopStatistics.renderMilliseconds = std::chrono::duration<double, std::milli>(Clock::now() - renderStarted).count();
 		}
 
 		{
@@ -1850,13 +1905,25 @@ void ax::Window::run_loop()
 			for (auto& func : deferred)
 				func();
 		}
+		if (m_fixedUpdateRate > 0.0)
+		{
+			const auto workSeconds{ std::chrono::duration<double>(Clock::now() - now).count() };
+			const auto wait{ scheduler.wait_seconds() - workSeconds };
+			if (wait > 0.0) glfwWaitEventsTimeout(wait);
+		}
 	}
 
 	ax::input::KeyEventHandler::cleanup_events(m_window);
 }
 
-void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture)
+bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture)
 {
+	const auto surfaceTexture{ surfaceFuture.get() };
+	if (surfaceTexture.texture.Get() == nullptr)
+	{
+		create_surfaces();
+		return false;
+	}
 	{
 		ZoneScopedN("Window::pre-render");
 
@@ -1866,7 +1933,6 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 	{
 		ZoneScopedN("Window::surface-setup");
 
-		const auto surfaceTexture = surfaceFuture.get();
 		const auto surfaceView = surfaceTexture.texture.CreateView();
 		const bool multisampled{ m_sampleCount > 1 };
 		if (multisampled && (m_multisampleTexture.Get() == nullptr
@@ -1970,11 +2036,12 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		const auto halfWidth{ static_cast<float>(m_width) / (2.0f * zoom) };
 		const auto halfHeight{ static_cast<float>(m_height) / (2.0f * zoom) };
 		const auto cameraPosition{ m_camera.position() };
-		m_particleSystem.encode_compute(m_device, m_queue, encoder, delta,
+		m_particleSystem.encode_compute(m_device, m_queue, encoder, m_particleDeltaPending,
 			{ cameraPosition.x - halfWidth, cameraPosition.y - halfHeight,
 				cameraPosition.x + halfWidth, cameraPosition.y + halfHeight },
 			{ static_cast<float>(m_width), static_cast<float>(m_height) }, zoom,
 			m_surfaceFormat, m_sampleCount);
+		m_particleDeltaPending = 0.0;
 
 		wgpu::RenderPassColorAttachment sceneColorAttachment
 		{
@@ -2190,6 +2257,7 @@ void ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			}
 		}
 	}
+	return true;
 }
 
 

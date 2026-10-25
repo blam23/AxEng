@@ -478,9 +478,10 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 {
 	if (m_thread != std::this_thread::get_id())
 		throw std::runtime_error("Particle systems belong to the renderer thread");
+	// Paused particles still draw, so their pipeline must follow render-target changes.
+	initialise(device, colourFormat, sampleCount);
 	if (m_paused)
 		return;
-	initialise(device, colourFormat, sampleCount);
 	m_frameEmitters.clear();
 
 	for (auto it{ m_emitters.begin() }; it != m_emitters.end();)

@@ -21,6 +21,7 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <numbers>
 #include <string>
@@ -94,6 +95,7 @@ namespace ax
 {
 	struct WindowTestAccess
 	{
+		static void tick(Window& window, double delta, std::optional<double> frameDelta = {}) { window.handle_tick(delta, frameDelta); }
 		static void initialize(Window& window, const wgpu::Device& device)
 		{
 			window.m_device = device;
@@ -949,6 +951,92 @@ namespace
 			ADD_FAILURE() << error.what();
 		}
 	}
+}
+
+TEST(WindowUpdates, CommandsPrecedeSimulationAndResultsWithinEveryCatchUpTick)
+{
+	if (!ax::setup_glfw()) GTEST_SKIP() << "GLFW unavailable";
+	struct Cleanup { ~Cleanup() { ax::teardown_glfw(); } } cleanup;
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+	ax::Window window({ .width = 128, .height = 128, .title = "Update ordering test" });
+	ASSERT_NE(window.glfw_handle(), nullptr);
+	std::vector<int> order{};
+	bool inputEdge{ true };
+	int commands{}, simulatedCommands{}, results{}, uiCommands{}, simulatedUiCommands{};
+	// Register in reverse phase order to detect accidental subscription-order dependence.
+	window.get_post_update_event_handler().subscribe([&](const ax::WindowUpdateEvent&)
+	{
+		order.push_back(3);
+		results = simulatedCommands;
+	});
+	window.get_simulation_event_handler().subscribe([&](const ax::WindowUpdateEvent& event)
+	{
+		order.push_back(2);
+		EXPECT_DOUBLE_EQ(event.delta, 1.0 / 60.0);
+		simulatedCommands = commands;
+		simulatedUiCommands = uiCommands;
+	});
+	window.get_prepare_frame_event_handler().subscribe([&](const ax::WindowPreRenderEvent& event)
+	{
+		order.push_back(4);
+		EXPECT_DOUBLE_EQ(event.delta, 1.0 / 30.0);
+		++uiCommands;
+	});
+	window.get_update_event_handler().subscribe([&](const ax::WindowUpdateEvent&)
+	{
+		order.push_back(1);
+		if (inputEdge) { ++commands; inputEdge = false; }
+	});
+	for (int tick{}; tick < 2; ++tick) ax::WindowTestAccess::tick(window, 1.0 / 60.0);
+	ax::WindowTestAccess::tick(window, 1.0 / 60.0, 1.0 / 30.0);
+	EXPECT_EQ(order, (std::vector<int>{ 1, 2, 3, 1, 2, 3, 1, 4, 2, 3 }));
+	EXPECT_EQ(commands, 1);
+	EXPECT_EQ(results, 1);
+	EXPECT_EQ(simulatedUiCommands, 1);
+}
+
+TEST(WindowUpdates, SlowRenderingRunsSeveralFixedUpdatesPerFrame)
+{
+	if (!ax::setup_glfw()) GTEST_SKIP() << "GLFW unavailable";
+	struct Cleanup { ~Cleanup() { ax::teardown_glfw(); } } cleanup;
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+	const auto originalPath{ std::filesystem::current_path() };
+	auto projectPath{ originalPath };
+	while (!std::filesystem::exists(projectPath / "shaders" / "basic_shader.wgsl") && projectPath.has_parent_path())
+		projectPath = projectPath.parent_path();
+	ASSERT_TRUE(std::filesystem::exists(projectPath / "shaders" / "basic_shader.wgsl"));
+	struct RestorePath
+	{
+		std::filesystem::path path;
+		~RestorePath() { std::filesystem::current_path(path); }
+	} restorePath{ originalPath };
+	std::filesystem::current_path(projectPath);
+	ax::Window window({ .width = 128, .height = 128, .title = "Slow rendering test", .vsync = false });
+	ASSERT_NE(window.glfw_handle(), nullptr);
+	if (!window.init_webgpu(wgpu::BackendType::D3D12)) GTEST_SKIP() << "No D3D12 device";
+	ASSERT_TRUE(window.init_imgui());
+	window.set_fixed_update_rate(60.0);
+	std::uint64_t previousRenderedUpdate{};
+	window.get_update_event_handler().subscribe([&](const ax::WindowUpdateEvent& event)
+	{
+		EXPECT_DOUBLE_EQ(event.delta, 1.0 / 60.0);
+		if (window.loop_statistics().frames >= 30) glfwSetWindowShouldClose(window.glfw_handle(), GLFW_TRUE);
+	});
+	window.get_render_event_handler().subscribe([&](const ax::WindowRenderEvent&)
+	{
+		EXPECT_GT(window.loop_statistics().updates, previousRenderedUpdate);
+		previousRenderedUpdate = window.loop_statistics().updates;
+		std::this_thread::sleep_for(std::chrono::milliseconds{ 35 });
+	});
+	window.run_loop();
+	const auto& stats{ window.loop_statistics() };
+	EXPECT_EQ(stats.frames, 30u);
+	EXPECT_GT(stats.updates, stats.frames * 2);
+	EXPECT_GT(stats.catchUpTicks, 0u);
+	EXPECT_LE(stats.updates, stats.activeSeconds * 60.0 + 1.0);
+	EXPECT_LE(stats.renderedUpdate, stats.updates);
+	std::cout << "Slow render: " << stats.updates / stats.activeSeconds << " updates/s, "
+		<< stats.frames / stats.activeSeconds << " frames/s, " << stats.discardedSeconds << " discarded seconds\n";
 }
 
 TEST_F(ShapeRendererTest, LuaShapeListMatchesNativeShapes)

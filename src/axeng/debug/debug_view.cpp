@@ -335,6 +335,10 @@ void ax::debug::ViewManager::debug_view_callback(Debugger& debugger, Application
 			allTimes += dt;
 		allTimes /= deltaCount;
 		ImGui::Text("FPS Average: %.0f", 1000.0f / allTimes);
+		const auto& loop{ app.window()->loop_statistics() };
+		ImGui::Text("Application updates: %llu / frames: %llu", loop.updates, loop.frames);
+		ImGui::Text("Catch-up ticks: %llu / discarded time: %.3f s", loop.catchUpTicks, loop.discardedSeconds);
+		ImGui::Text("Last update: %.2f ms / render: %.2f ms", loop.updateMilliseconds, loop.renderMilliseconds);
 
 		ImGui::SeparatorText(ICON_FA_CHART_BAR " Statistics");
 

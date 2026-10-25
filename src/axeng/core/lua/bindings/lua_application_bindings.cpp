@@ -115,6 +115,24 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 				app.m_window->get_update_event_handler().unsubscribe(id);
 			};
 		app_table["on_update"] = on_update_table;
+		auto on_post_update_table{ state.create_table() };
+		on_post_update_table["subscribe"] = [&app](sol::protected_function f) -> EventID
+		{
+			return app.window()->get_post_update_event_handler().subscribe([f](const WindowUpdateEvent& event)
+			{
+				const auto result{ f(event.delta) };
+				if (!result.valid())
+				{
+					const sol::error error{ result };
+					spdlog::error("Failed to run on_post_update callback: {}", error.what());
+				}
+			});
+		};
+		on_post_update_table["unsubscribe"] = [&app](EventID id)
+		{
+			app.window()->get_post_update_event_handler().unsubscribe(id);
+		};
+		app_table["on_post_update"] = on_post_update_table;
 	}
 
 	setup_resource_bindings(app, state);
