@@ -1822,8 +1822,34 @@ void ax::Window::set_fixed_update_rate(double rate)
 	m_fixedUpdateRate = rate;
 }
 
+void ax::Window::set_application_lock(std::function<void()> acquire, std::function<void(bool)> release)
+{
+	m_acquireApplication = std::move(acquire);
+	m_releaseApplication = std::move(release);
+}
+
 void ax::Window::run_loop()
 {
+	// Holds the application's lock for the scope of the callbacks that need it.
+	struct ApplicationScope
+	{
+		Window& window;
+		bool held{};
+		void acquire()
+		{
+			if (held || !window.m_acquireApplication) return;
+			window.m_acquireApplication();
+			held = true;
+		}
+		void release(bool rendering = false)
+		{
+			if (!held) return;
+			held = false;
+			if (window.m_releaseApplication) window.m_releaseApplication(rendering);
+		}
+		~ApplicationScope() { release(); }
+	};
+	ApplicationScope application{ *this };
 	register_window_events();
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
 
@@ -1844,6 +1870,7 @@ void ax::Window::run_loop()
 		if (m_fixedUpdateRate > 0.0 && glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))
 		{
 			suspended = true;
+			m_suspended.store(true, std::memory_order_release);
 			scheduler.reset_timing();
 			glfwWaitEventsTimeout(0.05);
 			continue;
@@ -1851,6 +1878,7 @@ void ax::Window::run_loop()
 		if (suspended)
 		{
 			suspended = false;
+			m_suspended.store(false, std::memory_order_release);
 			scheduler.reset_timing();
 			previousRender = now;
 			continue;
@@ -1858,6 +1886,7 @@ void ax::Window::run_loop()
 		m_loopStatistics.activeSeconds += elapsed;
 		const auto steps{ m_fixedUpdateRate > 0.0 ? scheduler.advance(elapsed) : 1u };
 		m_loopStatistics.discardedSeconds = scheduler.discarded_seconds();
+		if (steps > 0) application.acquire();
 		for (std::uint32_t step{}; step < steps; ++step)
 		{
 			if (step != 0) glfwPollEvents();
@@ -1871,8 +1900,10 @@ void ax::Window::run_loop()
 			if (step > 0) ++m_loopStatistics.catchUpTicks;
 			m_loopStatistics.updateMilliseconds = std::chrono::duration<double, std::milli>(Clock::now() - updateStarted).count();
 		}
-		if (scheduler.render_due() && !glfwWindowShouldClose(m_window)
-			&& !(m_fixedUpdateRate > 0.0 && glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)))
+		const bool rendering{ scheduler.render_due() && !glfwWindowShouldClose(m_window)
+			&& !(m_fixedUpdateRate > 0.0 && glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) };
+		application.release(rendering);
+		if (rendering)
 		{
 			stage_sprite_batches();
 			const auto renderStarted{ Clock::now() };
@@ -1920,8 +1951,10 @@ void ax::Window::run_loop()
 				std::lock_guard lock{ m_deferredMutex };
 				deferred.swap(m_deferred);
 			}
+			if (!deferred.empty()) application.acquire();
 			for (auto& func : deferred)
 				func();
+			application.release();
 		}
 		if (m_fixedUpdateRate > 0.0)
 		{

@@ -4,6 +4,7 @@
 #include <windows.h>
 
 // STD
+#include <atomic>
 #include <deque>
 #include <filesystem>
 #include <future>
@@ -94,6 +95,15 @@ namespace ax
 		// Zero retains the legacy variable-update loop. Configure before run_loop().
 		void set_fixed_update_rate(double rate);
 		const WindowLoopStatistics& loop_statistics() const noexcept { return m_loopStatistics; }
+		// Called on the window thread: `acquire` before the loop runs fixed updates (and the input events handled
+		// between catch-up updates) or deferred functions, and `release` after them. The lock is free while the
+		// window polls input between updates, renders and waits, so other threads can use what the update callbacks
+		// guard. Callbacks that run at those times must take the lock themselves.
+		// `release` is told whether a frame is about to be rendered, so an application can gather what that frame
+		// draws while it still holds its lock.
+		void set_application_lock(std::function<void()> acquire, std::function<void(bool rendering)> release);
+		// True while the window is minimised and its updates are suspended. Safe to read from any thread.
+		bool suspended() const noexcept { return m_suspended.load(std::memory_order_acquire); }
 
 		void prevent_close();
 
@@ -243,6 +253,9 @@ namespace ax
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
 		bool run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture);
 		double m_fixedUpdateRate{};
+		std::function<void()> m_acquireApplication{};
+		std::function<void(bool)> m_releaseApplication{};
+		std::atomic<bool> m_suspended{};
 		double m_particleDeltaPending{};
 		WindowLoopStatistics m_loopStatistics{};
 		WindowFrameImageEvent read_frame_image
