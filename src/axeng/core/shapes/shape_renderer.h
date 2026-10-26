@@ -43,6 +43,10 @@ namespace ax
 
         static void draw(wgpu::RenderPassEncoder& pass, const ShapeList& shapes);
 
+        // While set, draw() holds unlit shapes (see shape_unlit) back in capture instead of drawing them, so they
+        // can be drawn after lighting. Pass nullptr to draw everything again.
+        static void set_unlit_capture(UnlitShapeCapture* capture) noexcept;
+
         // Statistics for the most recent draw() call.
         static ShapeDrawStats last_draw_stats();
     };

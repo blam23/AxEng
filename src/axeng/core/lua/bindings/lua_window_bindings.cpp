@@ -533,6 +533,16 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 			return app.window()->msaa_enabled();
 		};
 
+	// What the lighting passes drew in the most recent frame.
+	window_table["lighting_stats"] =
+		[&app](sol::this_state lua)
+		{
+			const auto stats{ app.window()->lighting_stats() };
+			return sol::state_view{ lua }.create_table_with("ran", app.window()->lighting_ran(),
+				"lights", stats.lights, "glows", stats.glows, "map_width", stats.lightMapWidth,
+				"map_height", stats.lightMapHeight);
+		};
+
 	window_table["compare_next_frame"] =
 		[&app](const sol::table& reference) -> bool
 		{

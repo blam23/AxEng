@@ -28,6 +28,9 @@ namespace ax
 	{
 	public:
 		void set_visible(bool visible);
+		// Unlit batches are drawn after lighting is applied, like screen space sprites.
+		void set_unlit(bool unlit);
+		bool unlit() const { return m_unlit; }
 		void set_staging(bool eligible, std::int64_t priority);
 		bool staging_eligible() const { return !m_released && m_stagingEligible; }
 		std::int64_t staging_priority() const { return m_stagingPriority; }
@@ -40,6 +43,7 @@ namespace ax
 	private:
 		void check_thread() const;
 		bool m_visible{ false };
+		bool m_unlit{ false };
 		bool m_stagingEligible{ false };
 		std::int64_t m_stagingPriority{};
 		bool m_released{ false };

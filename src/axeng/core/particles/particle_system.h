@@ -60,6 +60,8 @@ namespace ax
 		void set_config(const ParticleConfig& config);
 		void set_position(glm::vec2 position);
 		void set_rotation(float rotation);
+		// Recolours the emitter, its live particles included (colours are applied as particles are drawn).
+		void set_colors(glm::vec4 start, glm::vec4 end);
 		void play();
 		void stop() noexcept;
 		void clear() noexcept;

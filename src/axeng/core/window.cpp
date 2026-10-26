@@ -1315,6 +1315,11 @@ void ax::Window::queue_texture(SpriteDefinition sprite)
 	m_queuedTextures.push_back(std::move(sprite));
 }
 
+void ax::Window::render_sprite(SpriteDefinition sprite)
+{
+	queue_texture(std::move(sprite));
+}
+
 void ax::Window::render_textures(std::vector<SpriteDefinition> sprites)
 {
 	std::lock_guard lock{ m_pendingTextureMutex };
@@ -2145,109 +2150,120 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_particleDeltaPending = 0.0;
 		}
 
+		LightingSettings lightingSettings{};
+		bool lightingActive{};
 		{
-		ZoneScopedN("Window::scene-pass");
-		wgpu::RenderPassColorAttachment sceneColorAttachment
-		{
-			.view = targetView,
-			.depthSlice = wgpu::kDepthSliceUndefined,
-			.resolveTarget = nullptr,
-			.loadOp = wgpu::LoadOp::Clear,
-			.storeOp = wgpu::StoreOp::Store,
-			.clearValue = m_clearColor,
-		};
-		wgpu::RenderPassDepthStencilAttachment sceneDepthAttachment
-		{
-			.view = m_depthTextureView,
-			.depthLoadOp = wgpu::LoadOp::Clear,
-			.depthStoreOp = wgpu::StoreOp::Store,
-			.depthClearValue = 0.0f,
-			.depthReadOnly = false,
-			.stencilLoadOp = wgpu::LoadOp::Undefined,
-			.stencilStoreOp = wgpu::StoreOp::Undefined,
-			.stencilClearValue = 0,
-			.stencilReadOnly = true,
-		};
-		wgpu::RenderPassDescriptor scenePassDesc{};
-		scenePassDesc.colorAttachmentCount = 1;
-		scenePassDesc.colorAttachments = &sceneColorAttachment;
-		scenePassDesc.depthStencilAttachment = &sceneDepthAttachment;
-		auto scenePass = encoder.BeginRenderPass(&scenePassDesc);
-		{
-			std::lock_guard lock{ m_pendingTextureMutex };
-			m_pendingTextures.swap(m_queuedTextures);
-			m_queuedTextures.clear();
+			std::lock_guard lock{ m_lightingMutex };
+			lightingSettings = m_lightingSettings;
+			lightingActive = lighting_active(lightingSettings, m_queuedLights.size(), m_queuedGlows.size());
 		}
-		handle_render_pass(scenePass, delta);
-		scenePass.End();
-		}
+		if (lightingActive && !m_lightRenderer.init(m_device, m_surfaceFormat, m_sampleCount))
+			lightingActive = false;
+		m_lightingRan = lightingActive;
 
+		const auto beginScenePass{ [&](bool clear)
 		{
-		ZoneScopedN("Window::oit-pass");
-		wgpu::RenderPassColorAttachment oitColorAttachments[2]
-		{
+			wgpu::RenderPassColorAttachment colorAttachment
 			{
-				.view = m_oitAccumulationView,
+				.view = targetView,
 				.depthSlice = wgpu::kDepthSliceUndefined,
 				.resolveTarget = nullptr,
-				.loadOp = wgpu::LoadOp::Clear,
+				.loadOp = clear ? wgpu::LoadOp::Clear : wgpu::LoadOp::Load,
 				.storeOp = wgpu::StoreOp::Store,
-				.clearValue = { 0.0, 0.0, 0.0, 0.0 },
-			},
+				.clearValue = m_clearColor,
+			};
+			wgpu::RenderPassDepthStencilAttachment depthAttachment
 			{
-				.view = m_oitRevealageView,
+				.view = m_depthTextureView,
+				.depthLoadOp = clear ? wgpu::LoadOp::Clear : wgpu::LoadOp::Load,
+				.depthStoreOp = wgpu::StoreOp::Store,
+				.depthClearValue = 0.0f,
+				.depthReadOnly = false,
+				.stencilLoadOp = wgpu::LoadOp::Undefined,
+				.stencilStoreOp = wgpu::StoreOp::Undefined,
+				.stencilClearValue = 0,
+				.stencilReadOnly = true,
+			};
+			wgpu::RenderPassDescriptor passDesc{};
+			passDesc.colorAttachmentCount = 1;
+			passDesc.colorAttachments = &colorAttachment;
+			passDesc.depthStencilAttachment = &depthAttachment;
+			return encoder.BeginRenderPass(&passDesc);
+		} };
+
+		// Transparent sprites (and, with the lit sprites, particles) accumulate order independently and are then
+		// composited over the target.
+		const auto encodeTransparent{ [&](SpriteLayer layer)
+		{
+			{
+			ZoneScopedN("Window::oit-pass");
+			wgpu::RenderPassColorAttachment oitColorAttachments[2]
+			{
+				{
+					.view = m_oitAccumulationView,
+					.depthSlice = wgpu::kDepthSliceUndefined,
+					.resolveTarget = nullptr,
+					.loadOp = wgpu::LoadOp::Clear,
+					.storeOp = wgpu::StoreOp::Store,
+					.clearValue = { 0.0, 0.0, 0.0, 0.0 },
+				},
+				{
+					.view = m_oitRevealageView,
+					.depthSlice = wgpu::kDepthSliceUndefined,
+					.resolveTarget = nullptr,
+					.loadOp = wgpu::LoadOp::Clear,
+					.storeOp = wgpu::StoreOp::Store,
+					.clearValue = { 1.0, 1.0, 1.0, 1.0 },
+				},
+			};
+			wgpu::RenderPassDepthStencilAttachment oitDepthAttachment
+			{
+				.view = m_depthTextureView,
+				.depthLoadOp = wgpu::LoadOp::Undefined,
+				.depthStoreOp = wgpu::StoreOp::Undefined,
+				.depthClearValue = 0.0f,
+				.depthReadOnly = true,
+				.stencilLoadOp = wgpu::LoadOp::Undefined,
+				.stencilStoreOp = wgpu::StoreOp::Undefined,
+				.stencilClearValue = 0,
+				.stencilReadOnly = true,
+			};
+			wgpu::RenderPassDescriptor oitPassDesc{};
+			oitPassDesc.colorAttachmentCount = 2;
+			oitPassDesc.colorAttachments = oitColorAttachments;
+			oitPassDesc.depthStencilAttachment = &oitDepthAttachment;
+			auto oitPass = encoder.BeginRenderPass(&oitPassDesc);
+			draw_transparent_sprites(oitPass, layer);
+			if (layer != SpriteLayer::Unlit)
+				m_particleSystem.draw(oitPass);
+			oitPass.End();
+			}
+
+			{
+			ZoneScopedN("Window::composite-pass");
+			wgpu::RenderPassColorAttachment compositeColorAttachment
+			{
+				.view = targetView,
 				.depthSlice = wgpu::kDepthSliceUndefined,
 				.resolveTarget = nullptr,
-				.loadOp = wgpu::LoadOp::Clear,
+				.loadOp = wgpu::LoadOp::Load,
 				.storeOp = wgpu::StoreOp::Store,
-				.clearValue = { 1.0, 1.0, 1.0, 1.0 },
-			},
-		};
-		wgpu::RenderPassDepthStencilAttachment oitDepthAttachment
-		{
-			.view = m_depthTextureView,
-			.depthLoadOp = wgpu::LoadOp::Undefined,
-			.depthStoreOp = wgpu::StoreOp::Undefined,
-			.depthClearValue = 0.0f,
-			.depthReadOnly = true,
-			.stencilLoadOp = wgpu::LoadOp::Undefined,
-			.stencilStoreOp = wgpu::StoreOp::Undefined,
-			.stencilClearValue = 0,
-			.stencilReadOnly = true,
-		};
-		wgpu::RenderPassDescriptor oitPassDesc{};
-		oitPassDesc.colorAttachmentCount = 2;
-		oitPassDesc.colorAttachments = oitColorAttachments;
-		oitPassDesc.depthStencilAttachment = &oitDepthAttachment;
-		auto oitPass = encoder.BeginRenderPass(&oitPassDesc);
-		draw_transparent_sprites(oitPass);
-		m_particleSystem.draw(oitPass);
-		oitPass.End();
-		}
+			};
+			wgpu::RenderPassDescriptor compositePassDesc{};
+			compositePassDesc.colorAttachmentCount = 1;
+			compositePassDesc.colorAttachments = &compositeColorAttachment;
+			auto compositePass = encoder.BeginRenderPass(&compositePassDesc);
+			compositePass.SetPipeline(m_compositePipeline);
+			compositePass.SetBindGroup(0, m_compositeBindGroup);
+			compositePass.Draw(3, 1, 0, 0);
+			compositePass.End();
+			}
+		} };
 
+		const auto drawOverlay{ [&](const ShapeList& shapes)
 		{
-		ZoneScopedN("Window::composite-pass");
-		wgpu::RenderPassColorAttachment compositeColorAttachment
-		{
-			.view = targetView,
-			.depthSlice = wgpu::kDepthSliceUndefined,
-			.resolveTarget = nullptr,
-			.loadOp = wgpu::LoadOp::Load,
-			.storeOp = wgpu::StoreOp::Store,
-		};
-		wgpu::RenderPassDescriptor compositePassDesc{};
-		compositePassDesc.colorAttachmentCount = 1;
-		compositePassDesc.colorAttachments = &compositeColorAttachment;
-		auto compositePass = encoder.BeginRenderPass(&compositePassDesc);
-		compositePass.SetPipeline(m_compositePipeline);
-		compositePass.SetBindGroup(0, m_compositeBindGroup);
-		compositePass.Draw(3, 1, 0, 0);
-		compositePass.End();
-		}
-
-		auto overlayShapes = DebugShapes::take_queued();
-		if (!overlayShapes.empty())
-		{
+			if (shapes.empty())
+				return;
 			ZoneScopedN("Window::overlay-pass");
 			wgpu::RenderPassColorAttachment overlayColorAttachment
 			{
@@ -2274,9 +2290,70 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			overlayPassDesc.colorAttachments = &overlayColorAttachment;
 			overlayPassDesc.depthStencilAttachment = &overlayDepthAttachment;
 			auto overlayPass = encoder.BeginRenderPass(&overlayPassDesc);
-			ShapeRenderer::draw(overlayPass, overlayShapes);
+			ShapeRenderer::draw(overlayPass, shapes);
 			overlayPass.End();
+		} };
+
+		{
+		ZoneScopedN("Window::scene-pass");
+		auto scenePass{ beginScenePass(true) };
+		{
+			std::lock_guard lock{ m_pendingTextureMutex };
+			m_pendingTextures.swap(m_queuedTextures);
+			m_queuedTextures.clear();
 		}
+		handle_render_pass(scenePass, delta, lightingActive);
+		scenePass.End();
+		}
+
+		encodeTransparent(lightingActive ? SpriteLayer::Lit : SpriteLayer::All);
+
+		auto overlayShapes = DebugShapes::take_queued();
+		m_unlitOverlayShapes.clear();
+		if (lightingActive)
+		{
+			// Unlit shapes move out in order; lit ones close up behind them.
+			std::size_t lit{};
+			for (auto& shape : overlayShapes)
+			{
+				if (shape_unlit(shape)) m_unlitOverlayShapes.push_back(std::move(shape));
+				else if (&overlayShapes[lit++] != &shape) overlayShapes[lit - 1] = std::move(shape);
+			}
+			overlayShapes.resize(lit);
+		}
+		drawOverlay(overlayShapes);
+
+		{
+			std::lock_guard lock{ m_lightingMutex };
+			m_frameLights.swap(m_queuedLights);
+			m_frameGlows.swap(m_queuedGlows);
+			m_queuedLights.clear();
+			m_queuedGlows.clear();
+		}
+		if (lightingActive)
+		{
+			ZoneScopedN("Window::lighting");
+			m_lightRenderer.encode(m_device, m_queue, encoder, targetView, m_width, m_height,
+				{ .viewport = { static_cast<float>(m_width), static_cast<float>(m_height) },
+					.cameraPosition = cameraPosition, .zoom = zoom },
+				lightingSettings, m_frameLights, m_frameGlows);
+
+			{
+			ZoneScopedN("Window::unlit-scene-pass");
+			auto unlitPass{ beginScenePass(false) };
+			for (const auto& call : m_unlitShapes.calls())
+				ShapeRenderer::draw(unlitPass, call);
+			draw_sprite_batches(unlitPass, m_pipeline, SpriteLayer::Unlit);
+			unlitPass.End();
+			}
+			const bool unlitBatches{ std::ranges::any_of(m_staticSpriteBatches,
+				[](const auto& batch) { return batch->unlit() && batch->ready() && batch->visible(); }) };
+			if (!m_unlitSpriteGroupRanges.empty() || unlitBatches)
+				encodeTransparent(SpriteLayer::Unlit);
+			drawOverlay(m_unlitOverlayShapes);
+			m_unlitShapes.clear();
+		}
+		m_pendingTextures.clear();
 
 		wgpu::RenderPassColorAttachment uiColorAttachment
 		{
@@ -2385,11 +2462,18 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 }
 
 
-void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
+void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta, bool splitUnlit)
 {
 	{
 		ZoneScopedN("Window::render-event");
 
+		m_unlitShapes.clear();
+		// Stops capturing even if a handler throws.
+		struct Capture
+		{
+			explicit Capture(UnlitShapeCapture* capture) noexcept { ShapeRenderer::set_unlit_capture(capture); }
+			~Capture() { ShapeRenderer::set_unlit_capture(nullptr); }
+		} capture{ splitUnlit ? &m_unlitShapes : nullptr };
 		// Send out the draw event
 		m_renderEventHandler.fire
 		({
@@ -2405,6 +2489,7 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		{
 			ZoneScopedN("Window::sprite-grouping");
 			m_spriteGroupRanges.clear();
+			m_unlitSpriteGroupRanges.clear();
 			for (auto* sprite : m_activeSprites)
 			{
 				if (sprite->tex == sprite->groupedTexture)
@@ -2440,7 +2525,7 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 		m_spriteUploadData.reserve(spriteCount);
 
 		uint32_t instanceCursor = 0;
-		auto uploadGroup = [this, &instanceCursor](Texture* tex, const std::vector<const SpriteDefinition*>& activeSprites, const std::vector<const SpriteDefinition*>* pendingSprites)
+		auto uploadGroup = [this, &instanceCursor, splitUnlit](Texture* tex, const std::vector<const SpriteDefinition*>& activeSprites, const std::vector<const SpriteDefinition*>* pendingSprites)
 		{
 			ZoneScopedN("Window::sprite-upload-group");
 			m_spriteUploadData.clear();
@@ -2455,7 +2540,24 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 			if (count == 0)
 				return;
 
-			m_spriteGroupRanges.push_back({ tex, instanceCursor, count });
+			// Lit sprites first, so each kind is one contiguous range; both keep their order.
+			auto litCount{ count };
+			if (splitUnlit)
+			{
+				m_unlitUploadScratch.clear();
+				std::size_t lit{};
+				for (const auto& data : m_spriteUploadData)
+				{
+					if (sprite_unlit(data)) m_unlitUploadScratch.push_back(data);
+					else m_spriteUploadData[lit++] = data;
+				}
+				std::ranges::copy(m_unlitUploadScratch, m_spriteUploadData.begin() + static_cast<std::ptrdiff_t>(lit));
+				litCount = static_cast<uint32_t>(lit);
+			}
+			if (litCount > 0)
+				m_spriteGroupRanges.push_back({ tex, instanceCursor, litCount });
+			if (litCount < count)
+				m_unlitSpriteGroupRanges.push_back({ tex, instanceCursor + litCount, count - litCount });
 			m_queue.WriteBuffer
 			(
 				m_uniforms,
@@ -2478,13 +2580,13 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta)
 				uploadGroup(group.first, emptyGroup, &group.second);
 		}
 
-		draw_sprite_batches(pass, m_pipeline);
+		draw_sprite_batches(pass, m_pipeline, splitUnlit ? SpriteLayer::Lit : SpriteLayer::All);
 	}
 
 }
 
 
-void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline)
+void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline, SpriteLayer layer)
 {
 	ZoneScopedN("Window::sprite-draw");
 	pass.SetPipeline(pipeline);
@@ -2492,22 +2594,43 @@ void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::
 	// Static batches precede ordinary sprites in both passes, with stable caller-specified order.
 	for (const auto& batch : m_staticSpriteBatches)
 	{
-		if (!batch->ready() || !batch->visible())
+		if (!batch->ready() || !batch->visible()
+			|| (layer == SpriteLayer::Lit && batch->unlit()) || (layer == SpriteLayer::Unlit && !batch->unlit()))
 			continue;
 		pass.SetBindGroup(0, batch->m_bindGroup);
 		pass.Draw(6, static_cast<std::uint32_t>(batch->size()));
 	}
-	for (const auto& range : m_spriteGroupRanges)
+	for (const auto& range : layer == SpriteLayer::Unlit ? m_unlitSpriteGroupRanges : m_spriteGroupRanges)
 	{
 		pass.SetBindGroup(0, get_texture_bind_group(range.tex));
 		pass.Draw(6, range.count, 0, range.start);
 	}
 }
 
-void ax::Window::draw_transparent_sprites(wgpu::RenderPassEncoder& pass)
+void ax::Window::draw_transparent_sprites(wgpu::RenderPassEncoder& pass, SpriteLayer layer)
 {
-	draw_sprite_batches(pass, m_oitPipeline);
-	m_pendingTextures.clear();
+	draw_sprite_batches(pass, m_oitPipeline, layer);
+}
+
+void ax::Window::set_lighting(const LightingSettings& settings)
+{
+	std::lock_guard lock{ m_lightingMutex };
+	m_lightingSettings = settings;
+}
+
+ax::LightingSettings ax::Window::lighting() const
+{
+	std::lock_guard lock{ m_lightingMutex };
+	return m_lightingSettings;
+}
+
+void ax::Window::submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>& glows)
+{
+	std::lock_guard lock{ m_lightingMutex };
+	m_queuedLights.swap(lights);
+	m_queuedGlows.swap(glows);
+	lights.clear();
+	glows.clear();
 }
 
 void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)

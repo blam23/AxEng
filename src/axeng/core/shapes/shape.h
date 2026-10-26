@@ -3,6 +3,7 @@
 #include "glm/glm.hpp"
 
 #include <array>
+#include <span>
 #include <cstdint>
 #include <variant>
 #include <vector>
@@ -31,6 +32,7 @@ namespace ax
         float rotation{ 0.0f };
         float z{ 0.0f };
         bool screenSpace{ false };
+        bool unlit{ false };
         std::uint32_t segments{ 0 };
         glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
@@ -45,6 +47,7 @@ namespace ax
         float rotation{ 0.0f };
         float z{ 0.0f };
         bool screenSpace{ false };
+        bool unlit{ false };
         std::uint32_t segments{ 0 };
         glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
@@ -60,6 +63,7 @@ namespace ax
         float rotation{ 0.0f };
         float z{ 0.0f };
         bool screenSpace{ false };
+        bool unlit{ false };
         std::uint32_t segments{ 0 }; // per rounded corner
         glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
@@ -75,6 +79,7 @@ namespace ax
         float rotation{ 0.0f };
         float z{ 0.0f };
         bool screenSpace{ false };
+        bool unlit{ false };
         glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
 
@@ -91,6 +96,7 @@ namespace ax
         float rotation{ 0.0f };
         float z{ 0.0f };
         bool screenSpace{ false };
+        bool unlit{ false };
         std::uint32_t segments{ 0 }; // per round cap
         glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
@@ -107,9 +113,32 @@ namespace ax
         float rotation{ 0.0f };
         float z{ 0.0f };
         bool screenSpace{ false };
+        bool unlit{ false };
         glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
 
     using Shape = std::variant<Circle, Rectangle, Triangle, Line, Polygon, Ellipse>;
     using ShapeList = std::vector<Shape>;
+
+    // Unlit shapes held back by ShapeRenderer::draw, one list per draw call, so replaying the lists in order
+    // draws them as they would have been. Storage is kept between frames.
+    class UnlitShapeCapture
+    {
+    public:
+        void clear() noexcept { m_used = 0; }
+        std::span<const ShapeList> calls() const noexcept { return { m_calls.data(), m_used }; }
+        bool empty() const noexcept { return m_used == 0; }
+        // A fresh list for the next draw call's shapes.
+        ShapeList& next_call();
+
+    private:
+        std::vector<ShapeList> m_calls{};
+        std::size_t m_used{};
+    };
+
+    // Unlit shapes (and every screen space shape) are drawn after lighting is applied.
+    inline bool shape_unlit(const Shape& shape)
+    {
+        return std::visit([](const auto& s) { return s.screenSpace || s.unlit; }, shape);
+    }
 }

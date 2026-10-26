@@ -91,6 +91,7 @@ namespace
 	};
 
 	std::unique_ptr<State> s_state{};
+	ax::UnlitShapeCapture* s_unlit_capture{};
 
 	std::uint32_t pack_colour(const glm::vec4& colour)
 	{
@@ -784,6 +785,24 @@ void ax::ShapeRenderer::draw(wgpu::RenderPassEncoder& pass, const ShapeList& sha
 	// Back to front, so translucent shapes blend in z order; ties keep submission order.
 	state.order.resize(shapes.size());
 	std::iota(state.order.begin(), state.order.end(), std::size_t{ 0 });
+	if (s_unlit_capture && std::ranges::any_of(shapes, [](const Shape& shape) { return shape_unlit(shape); }))
+	{
+		auto& held{ s_unlit_capture->next_call() };
+		std::size_t count{};
+		std::erase_if(state.order, [&](std::size_t i)
+			{
+				if (!ax::shape_unlit(shapes[i]))
+					return false;
+				// Assigning over a kept shape reuses its storage (a polygon's points).
+				if (count < held.size()) held[count] = shapes[i];
+				else held.push_back(shapes[i]);
+				++count;
+				return true;
+			});
+		held.resize(count);
+		if (state.order.empty())
+			return;
+	}
 	std::stable_sort(state.order.begin(), state.order.end(), [&shapes](std::size_t a, std::size_t b)
 		{
 			const auto za{ std::visit([](const auto& s) { return s.z; }, shapes[a]) };
@@ -799,6 +818,18 @@ void ax::ShapeRenderer::draw(wgpu::RenderPassEncoder& pass, const ShapeList& sha
 	// Opaque first so translucent geometry can blend over it regardless of submission order.
 	draw_mesh(state, pass, state.opaque, state.opaquePipeline);
 	draw_mesh(state, pass, state.translucent, state.translucentPipeline);
+}
+
+ax::ShapeList& ax::UnlitShapeCapture::next_call()
+{
+	if (m_used == m_calls.size())
+		m_calls.emplace_back();
+	return m_calls[m_used++];
+}
+
+void ax::ShapeRenderer::set_unlit_capture(UnlitShapeCapture* capture) noexcept
+{
+	s_unlit_capture = capture;
 }
 
 ax::ShapeDrawStats ax::ShapeRenderer::last_draw_stats()

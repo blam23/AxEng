@@ -68,6 +68,13 @@ namespace ax
 	inline constexpr std::uint32_t sprite_flag_region{ 1u };
 	inline constexpr std::uint32_t sprite_flag_sdf{ 2u };
 	inline constexpr std::uint32_t sprite_flag_msdf{ 4u };
+	// Drawn after lighting is applied, like every screen space sprite.
+	inline constexpr std::uint32_t sprite_flag_unlit{ 8u };
+
+	inline bool sprite_unlit(const SpriteGpuData& data) noexcept
+	{
+		return data.screenSpace != 0 || (data.useRegion & sprite_flag_unlit) != 0;
+	}
 
 	struct SpriteDefinition
 	{

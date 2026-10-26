@@ -1508,3 +1508,48 @@ TEST_F(WindowPendingDrawTest, ComparesTemporaryRenderTargetsUsingGpuReadback)
 	EXPECT_TRUE(comparison.success);
 	EXPECT_TRUE(comparison.matches);
 }
+
+TEST_F(ShapeRendererTest, UnlitCaptureHoldsBackUnlitAndScreenSpaceShapes)
+{
+	const ax::ShapeView view{ .viewport = { static_cast<float>(s_size), static_cast<float>(s_size) },
+		.cameraPosition = { 64.0f, 64.0f } };
+	const ax::ShapeList shapes{
+		ax::Rectangle{ .position = { 0, 0 }, .size = { 16, 16 }, .fill = s_red },
+		ax::Rectangle{ .position = { 32, 0 }, .size = { 16, 16 }, .fill = s_green, .unlit = true },
+		ax::Rectangle{ .position = { 64, 0 }, .size = { 16, 16 }, .fill = s_blue, .screenSpace = true },
+	};
+	const ax::ShapeList litOnly{ ax::Rectangle{ .position = { 96, 0 }, .size = { 16, 16 }, .fill = s_red } };
+	const ax::ShapeList secondCall{
+		ax::Rectangle{ .position = { 32, 32 }, .size = { 16, 16 }, .fill = s_blue, .screenSpace = true } };
+	ax::UnlitShapeCapture captured;
+	ax::ShapeRenderer::set_unlit_capture(&captured);
+	const auto image{ render(std::vector<ax::ShapeList>{ shapes, litOnly, secondCall }, view) };
+	ax::ShapeRenderer::set_unlit_capture(nullptr);
+
+	EXPECT_PIXEL(image, 8, 8, s_red);
+	EXPECT_PIXEL(image, 40, 8, s_black);
+	EXPECT_PIXEL(image, 72, 8, s_black);
+	EXPECT_PIXEL(image, 40, 40, s_black);
+	// One list per draw call that held anything back, in call order.
+	ASSERT_EQ(captured.calls().size(), 2u);
+	const auto& first{ captured.calls()[0] };
+	ASSERT_EQ(first.size(), 2u);
+	EXPECT_TRUE(ax::shape_unlit(first[0]));
+	EXPECT_TRUE(std::get<ax::Rectangle>(first[1]).screenSpace);
+	EXPECT_EQ(captured.calls()[1].size(), 1u);
+
+	const auto later{ render(std::vector<ax::ShapeList>{ captured.calls().begin(), captured.calls().end() }, view) };
+	EXPECT_PIXEL(later, 40, 8, s_green);
+	EXPECT_PIXEL(later, 72, 8, s_blue);
+	EXPECT_PIXEL(later, 40, 40, s_blue);
+
+	// Storage is kept: a cleared capture refills the same lists.
+	const auto* storage{ captured.calls()[0].data() };
+	captured.clear();
+	EXPECT_TRUE(captured.empty());
+	ax::ShapeRenderer::set_unlit_capture(&captured);
+	render(shapes, view);
+	ax::ShapeRenderer::set_unlit_capture(nullptr);
+	ASSERT_EQ(captured.calls().size(), 1u);
+	EXPECT_EQ(captured.calls()[0].data(), storage);
+}

@@ -52,6 +52,14 @@ void ax::StaticSpriteBatch::set_visible(bool visible)
 	m_visible = visible;
 }
 
+void ax::StaticSpriteBatch::set_unlit(bool unlit)
+{
+	check_thread();
+	if (m_released)
+		throw sol::error("Sprite batch has been released");
+	m_unlit = unlit;
+}
+
 void ax::StaticSpriteBatch::set_staging(bool eligible, std::int64_t priority)
 {
 	check_thread();

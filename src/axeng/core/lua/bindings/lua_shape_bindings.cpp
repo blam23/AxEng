@@ -247,6 +247,8 @@ namespace
 				shape.z = *z;
 			if (const auto screenSpace{ opt_bool("screen_space") })
 				shape.screenSpace = *screenSpace;
+			if (const auto unlit{ opt_bool("unlit") })
+				shape.unlit = *unlit;
 			if (const auto clipRect{ opt_vec4("clip_rect") })
 				shape.clipRect = *clipRect;
 

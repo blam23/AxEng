@@ -151,6 +151,18 @@ void ax::ParticleEmitter::set_config(const ParticleConfig& config)
 		m_config = config;
 }
 
+void ax::ParticleEmitter::set_colors(glm::vec4 start, glm::vec4 end)
+{
+	check_thread();
+	auto config{ m_config };
+	config.colorStart = start;
+	config.colorEnd = end;
+	if (const auto error{ validate_particle_config(config) })
+		throw std::invalid_argument(*error);
+	m_config.colorStart = start;
+	m_config.colorEnd = end;
+}
+
 void ax::ParticleEmitter::set_position(glm::vec2 position)
 {
 	check_thread();

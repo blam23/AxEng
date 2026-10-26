@@ -34,6 +34,7 @@
 #include "axeng/core/texture.h"
 #include "axeng/core/retained_sprites.h"
 #include "axeng/core/shapes/shape.h"
+#include "axeng/core/lighting/light_renderer.h"
 #include "axeng/core/particles/particle_system.h"
 #include "axeng/core/window_events.h"
 
@@ -190,6 +191,17 @@ namespace ax
 			m_clearColor = color;
 		}
 
+		// Lit sprites and shapes are multiplied by the light map; unlit ones (sprite_flag_unlit, Shape::unlit and
+		// everything in screen space) are drawn over the result.
+		void set_lighting(const LightingSettings& settings);
+		LightingSettings lighting() const;
+		// Hands over the lights and glows for the next frame (they are used for one frame only) by swapping them
+		// in, so the vectors come back empty with the capacity of a previous frame's.
+		void submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>& glows);
+		// Whether the most recent frame ran the lighting passes, and what they drew.
+		bool lighting_ran() const noexcept { return m_lightingRan; }
+		LightRenderer::Stats lighting_stats() const noexcept { return m_lightRenderer.last_stats(); }
+
 		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view);
 		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view, const wgpu::Buffer& buffer);
 		void reload_pipeline();
@@ -226,6 +238,8 @@ namespace ax
 		void render_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive = {});
 		void render_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive = {});
 		void render_textures(std::vector<SpriteDefinition> sprites);
+		// Queues one sprite for this frame exactly as given (flags such as sprite_flag_unlit included).
+		void render_sprite(SpriteDefinition sprite);
 		void render_ui_texture(Texture* tex, glm::vec2 position, float z, std::shared_ptr<Texture> keepAlive = {}, glm::vec4 clipRect = { 0.0f, 0.0f, -1.0f, -1.0f });
 		void render_ui_texture(Texture* tex, glm::vec2 position, rectf region, float z, std::shared_ptr<Texture> keepAlive = {}, glm::vec4 clipRect = { 0.0f, 0.0f, -1.0f, -1.0f });
 
@@ -244,10 +258,14 @@ namespace ax
 		struct FrameImageRequest;
 
 		// Rendering
-		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta);
-		void draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline);
+		// With splitUnlit, unlit sprites and shapes are held back to be drawn after lighting.
+		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta, bool splitUnlit = false);
+		// Which sprites a draw covers: everything (no lighting), or the lit or unlit share of a lit frame.
+		enum class SpriteLayer : std::uint8_t { All, Lit, Unlit };
+		void draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline,
+			SpriteLayer layer = SpriteLayer::All);
 		void stage_sprite_batches();
-		void draw_transparent_sprites(wgpu::RenderPassEncoder& pass);
+		void draw_transparent_sprites(wgpu::RenderPassEncoder& pass, SpriteLayer layer = SpriteLayer::All);
 		void draw_pending_batch(const PendingDrawBatch& batch, const wgpu::TextureView& screenView);
 		wgpu::BindGroup get_texture_bind_group(Texture* texture);
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
@@ -370,6 +388,17 @@ namespace ax
 		std::unordered_map<Texture*, std::vector<const SpriteDefinition*>> m_pendingSpriteGroups;
 		std::vector<SpriteGpuData> m_spriteUploadData;
 		std::vector<SpriteGroupRange> m_spriteGroupRanges;
+		std::vector<SpriteGroupRange> m_unlitSpriteGroupRanges;
+		UnlitShapeCapture m_unlitShapes;
+		ShapeList m_unlitOverlayShapes;
+		std::vector<SpriteGpuData> m_unlitUploadScratch;
+
+		LightRenderer m_lightRenderer;
+		mutable std::mutex m_lightingMutex{};
+		LightingSettings m_lightingSettings{};
+		std::vector<Light2D> m_queuedLights, m_frameLights;
+		std::vector<Glow2D> m_queuedGlows, m_frameGlows;
+		bool m_lightingRan{};
 		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };
 		uint32_t m_uniformsCapacity{ 1024 };
 
