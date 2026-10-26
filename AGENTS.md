@@ -92,7 +92,7 @@ DO NOT Update the README for anything except build changes that are relevant to 
 - Everything lives in namespace `ax`. Helpers go in an anonymous namespace in the `.cpp`, and inside it you must qualify `ax::` types.
 - Avoid `sol::overload` in Lua bindings; its overload resolution has significant runtime overhead. Prefer one callback with optional arguments, or explicit argument-count/type dispatch where multiple call forms must be preserved.
 - Only comment code that needs clarification.
-
+- Only mutex members may be `mutable`.
 ## Gotchas learned the hard way
 
 - sol2: never store a `const sol::table&` that might refer to a temporary. Store `sol::table` by value, or it crashes.

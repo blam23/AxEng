@@ -17,6 +17,9 @@
 #include <imgui.h>
 #include <dawn/native/DawnNative.h>
 #include <windows.h>
+#include <timeapi.h>
+
+#pragma comment(lib, "winmm.lib")
 
 #include <algorithm>
 #include <array>
@@ -1850,6 +1853,34 @@ void ax::Window::run_loop()
 		~ApplicationScope() { release(); }
 	};
 	ApplicationScope application{ *this };
+	// Timed waits only end on a system timer tick, 15.6 ms apart by default: a 14 ms wait for the next frame would
+	// last 15 to 31 ms. Ask for 1 ms ticks while the loop runs.
+	struct TimerResolution
+	{
+		TimerResolution() { timeBeginPeriod(1); }
+		~TimerResolution() { timeEndPeriod(1); }
+	} timerResolution;
+	// Waits for the next frame on a high-resolution timer, which ends within a fraction of a millisecond, and also ends
+	// when a window message arrives. Without one (before Windows 10 1803) it falls back to GLFW's coarser wait.
+	struct FrameTimer
+	{
+		HANDLE handle{ CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS) };
+		FrameTimer() = default;
+		FrameTimer(const FrameTimer&) = delete;
+		FrameTimer& operator=(const FrameTimer&) = delete;
+		~FrameTimer() { if (handle) CloseHandle(handle); }
+		void wait(double seconds) const
+		{
+			LARGE_INTEGER due{};
+			due.QuadPart = -static_cast<LONGLONG>(seconds * 1e7);
+			if (!handle || !SetWaitableTimer(handle, &due, 0, nullptr, nullptr, FALSE))
+			{
+				glfwWaitEventsTimeout(seconds);
+				return;
+			}
+			MsgWaitForMultipleObjects(1, &handle, FALSE, INFINITE, QS_ALLINPUT);
+		}
+	} frameTimer;
 	register_window_events();
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
 
@@ -1963,7 +1994,7 @@ void ax::Window::run_loop()
 			if (wait > 0.0)
 			{
 				ZoneScopedN("Window::idle-wait");
-				glfwWaitEventsTimeout(wait);
+				frameTimer.wait(wait);
 			}
 		}
 	}
