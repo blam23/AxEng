@@ -5,6 +5,7 @@
 #include <array>
 #include <span>
 #include <cstdint>
+#include <optional>
 #include <variant>
 #include <vector>
 
@@ -52,7 +53,9 @@ namespace ax
         glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
     };
 
-    // Position is the top-left corner (like sprites); rotation is around the centre.
+    // Position is the top-left corner (like sprites); rotation is around the centre. cornerColours (top left, top
+    // right, bottom left, bottom right) blends the fill between four colours instead; it is ignored with an outline or
+    // rounded corners.
     struct Rectangle
     {
         glm::vec2 position{ 0.0f };
@@ -66,6 +69,7 @@ namespace ax
         bool unlit{ false };
         std::uint32_t segments{ 0 }; // per rounded corner
         glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
+        std::optional<std::array<glm::vec4, 4>> cornerColours{};
     };
 
     // Points are relative to position, scaled by scale and then rotated around position.

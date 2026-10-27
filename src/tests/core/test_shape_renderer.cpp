@@ -512,6 +512,22 @@ TEST_F(ShapeRendererTest, SmallCirclesFarFromTheOriginAreStillDrawn)
 		EXPECT_PIXEL(image, centre.x, centre.y, s_red);
 }
 
+TEST_F(ShapeRendererTest, RectangleBlendsBetweenItsCornerColours)
+{
+	ax::Rectangle rectangle{ .position = { 32, 32 }, .size = { 64, 64 }, .screenSpace = true };
+	rectangle.cornerColours = std::array<glm::vec4, 4>{ s_red, s_blue, s_red, s_blue };
+	const auto image{ render({ rectangle }) };
+
+	const auto left{ image.at(33, 64) }, middle{ image.at(64, 64) }, right{ image.at(94, 64) };
+	EXPECT_GT(left[0], 220);
+	EXPECT_LT(left[2], 35);
+	EXPECT_GT(right[2], 220);
+	EXPECT_LT(right[0], 35);
+	EXPECT_NEAR(middle[0], 128, 12);
+	EXPECT_NEAR(middle[2], 128, 12);
+	EXPECT_EQ(image.at(20, 64), to_pixel(s_black));
+}
+
 TEST_F(ShapeRendererTest, CircleOutline)
 {
 	const auto image{ render({ ax::Circle{

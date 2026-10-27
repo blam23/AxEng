@@ -476,6 +476,36 @@ namespace
 		return alpha_of(colour) == 255 ? state.opaque : state.translucent;
 	}
 
+	// A rectangle whose fill blends between its four corner colours: the vertices carry them and the rasteriser
+	// interpolates.
+	void emit_gradient(State& state, const ax::Rectangle& rectangle, const ShapeParams& params)
+	{
+		const auto& colours{ *rectangle.cornerColours };
+		const glm::vec2 size{ glm::abs(rectangle.size) };
+		if (size.x <= 0.0f || size.y <= 0.0f)
+			return;
+		const auto centre{ rectangle.position + rectangle.size * 0.5f };
+		const float c{ std::cos(rectangle.rotation) }, s{ std::sin(rectangle.rotation) };
+		bool translucent{};
+		for (const auto& colour : colours)
+			translucent = translucent || alpha_of(pack_colour(colour)) != 255;
+		auto& mesh{ translucent ? state.translucent : state.opaque };
+		begin_element(mesh);
+		const auto base{ static_cast<std::uint32_t>(mesh.vertices.size()) };
+		// Corners in the order of the loop (right/bottom first, then left/bottom, left/top, right/top).
+		for (const glm::vec2 corner : { glm::vec2{ 0.5f, 0.5f }, glm::vec2{ -0.5f, 0.5f }, glm::vec2{ -0.5f, -0.5f }, glm::vec2{ 0.5f, -0.5f } })
+		{
+			const auto u{ corner.x + 0.5f }, v{ corner.y + 0.5f };
+			const auto colour{ (colours[0] * (1.0f - u) + colours[1] * u) * (1.0f - v)
+				+ (colours[2] * (1.0f - u) + colours[3] * u) * v };
+			const auto local{ corner * size };
+			const glm::vec2 position{ centre.x + local.x * c - local.y * s, centre.y + local.x * s + local.y * c };
+			mesh.vertices.push_back({ position, params.z, params.screenSpace ? 1u : 0u, pack_colour(colour), params.clipRect });
+		}
+		mesh.indices.insert(mesh.indices.end(), { base, base + 1, base + 2, base, base + 2, base + 3 });
+		end_element(mesh);
+	}
+
 	void tessellate(State& state, const ax::Shape& shape)
 	{
 		const auto params{ params_of(shape) };
@@ -493,6 +523,12 @@ namespace
 
 		if (!hasOutline)
 		{
+			if (const auto* rectangle{ std::get_if<ax::Rectangle>(&shape) };
+				rectangle && rectangle->cornerColours && rectangle->cornerRadius <= 0.0f)
+			{
+				emit_gradient(state, *rectangle, params);
+				return;
+			}
 			if (alpha_of(fillColour) == 0)
 				return;
 			triangulate(state.outer, convex, state.triangulation);
