@@ -63,8 +63,20 @@ vcpkg_cmake_configure(
         ImGui_SOURCE_DIR
 )
 vcpkg_cmake_install()
+# The debug archive is installed as debug/lib/Debug/TracyClient.lib. The engine links every .lib directly inside the
+# triplet's lib directories, so a debug build never saw Tracy and failed to link. Keep it beside the other libraries.
+file(GLOB tracy_debug_libs "${CURRENT_PACKAGES_DIR}/debug/lib/Debug/*.lib")
+if(tracy_debug_libs)
+    file(COPY ${tracy_debug_libs} DESTINATION "${CURRENT_PACKAGES_DIR}/debug/lib")
+    file(REMOVE_RECURSE "${CURRENT_PACKAGES_DIR}/debug/lib/Debug")
+endif()
 vcpkg_copy_pdbs()
 vcpkg_cmake_config_fixup(PACKAGE_NAME Tracy CONFIG_PATH "lib/cmake/Tracy")
+# The exported debug target must point at the moved archive.
+file(GLOB tracy_debug_targets "${CURRENT_PACKAGES_DIR}/share/tracy/*-debug.cmake")
+foreach(tracy_targets IN LISTS tracy_debug_targets)
+    vcpkg_replace_string("${tracy_targets}" "/debug/lib/Debug/" "/debug/lib/")
+endforeach()
 
 function(tracy_copy_tool tool_name tool_dir)
     vcpkg_copy_tools(
