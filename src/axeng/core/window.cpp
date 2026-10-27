@@ -93,6 +93,7 @@ ax::Window::~Window()
 			if (s_windows.size() == 0)
 			{
 				ShapeRenderer::shutdown();
+				MaterialRenderer::shutdown();
 				if (s_imgui_initialized)
 				{
 					ImGui_ImplGlfw_Shutdown();
@@ -2165,6 +2166,17 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			.cameraPosition = m_camera.position(),
 			.zoom = m_camera.zoom(),
 		});
+		MaterialRenderer::init(m_device, {
+			.colourFormat = m_surfaceFormat,
+			.depthFormat = m_depthTextureFormat,
+			.sampleCount = m_sampleCount,
+		});
+		MaterialRenderer::begin_frame({
+			.viewport = { static_cast<float>(m_width), static_cast<float>(m_height) },
+			.cameraPosition = m_camera.position(),
+			.zoom = m_camera.zoom(),
+			.time = glfwGetTime(),
+		});
 		}
 		const auto zoom{ std::max(m_camera.zoom(), 0.001f) };
 		const auto halfWidth{ static_cast<float>(m_width) / (2.0f * zoom) };
@@ -2185,8 +2197,9 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		{
 			std::lock_guard lock{ m_lightingMutex };
 			lightingSettings = m_lightingSettings;
-			lightingActive = lighting_active(lightingSettings, m_queuedLights.size()
-				+ m_particleSystem.lights().size() + m_particleSystem.emission_light_emitters(), m_queuedGlows.size());
+			const auto particleLights{ lightingSettings.particleLights
+				? m_particleSystem.lights().size() + m_particleSystem.emission_light_emitters() : std::size_t{} };
+			lightingActive = lighting_active(lightingSettings, m_queuedLights.size() + particleLights, m_queuedGlows.size());
 		}
 		if (lightingActive && !m_lightRenderer.init(m_device, m_surfaceFormat, m_sampleCount))
 			lightingActive = false;
@@ -2326,6 +2339,27 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		} };
 
 		{
+			std::lock_guard lock{ m_materialMutex };
+			m_frameMaterials.swap(m_queuedMaterials);
+			m_queuedMaterials.clear();
+		}
+		// Which of this frame's material draws go in a pass: world space ones that light (or all of them when
+		// there is no lighting), the unlit ones after lighting, or the screen space ones.
+		enum class MaterialPass { Scene, Unlit, Screen };
+		const auto drawMaterials{ [&](wgpu::RenderPassEncoder& target, MaterialPass which)
+		{
+			for (const auto& call : m_frameMaterials)
+			{
+				const bool wanted{ which == MaterialPass::Screen ? call.screenSpace
+					: !call.screenSpace && (which == MaterialPass::Unlit
+						? lightingActive && MaterialRenderer::is_unlit(call.material)
+						: !(lightingActive && MaterialRenderer::is_unlit(call.material))) };
+				if (wanted)
+					MaterialRenderer::draw(target, call);
+			}
+		} };
+
+		{
 		ZoneScopedN("Window::scene-pass");
 		auto scenePass{ beginScenePass(true) };
 		{
@@ -2334,6 +2368,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_queuedTextures.clear();
 		}
 		handle_render_pass(scenePass, delta, lightingActive);
+		drawMaterials(scenePass, MaterialPass::Scene);
 		scenePass.End();
 		}
 
@@ -2353,6 +2388,39 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			overlayShapes.resize(lit);
 		}
 		drawOverlay(overlayShapes);
+		// After the overlay shapes: depth decides what covers what, so panels sit under a screen space material and
+		// popups over it.
+		if (std::ranges::any_of(m_frameMaterials, [](const MaterialDraw& call) { return call.screenSpace; }))
+		{
+			ZoneScopedN("Window::screen-materials");
+			wgpu::RenderPassColorAttachment materialColour
+			{
+				.view = targetView,
+				.depthSlice = wgpu::kDepthSliceUndefined,
+				.resolveTarget = nullptr,
+				.loadOp = wgpu::LoadOp::Load,
+				.storeOp = wgpu::StoreOp::Store,
+			};
+			wgpu::RenderPassDepthStencilAttachment materialDepth
+			{
+				.view = m_depthTextureView,
+				.depthLoadOp = wgpu::LoadOp::Load,
+				.depthStoreOp = wgpu::StoreOp::Store,
+				.depthClearValue = 0.0f,
+				.depthReadOnly = false,
+				.stencilLoadOp = wgpu::LoadOp::Undefined,
+				.stencilStoreOp = wgpu::StoreOp::Undefined,
+				.stencilClearValue = 0,
+				.stencilReadOnly = true,
+			};
+			wgpu::RenderPassDescriptor materialDesc{};
+			materialDesc.colorAttachmentCount = 1;
+			materialDesc.colorAttachments = &materialColour;
+			materialDesc.depthStencilAttachment = &materialDepth;
+			auto materialPass = encoder.BeginRenderPass(&materialDesc);
+			drawMaterials(materialPass, MaterialPass::Screen);
+			materialPass.End();
+		}
 
 		{
 			std::lock_guard lock{ m_lightingMutex };
@@ -2364,13 +2432,19 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		if (lightingActive)
 		{
 			ZoneScopedN("Window::lighting");
-			const auto particleLights{ m_particleSystem.lights() };
-			m_frameLights.insert(m_frameLights.end(), particleLights.begin(), particleLights.end());
+			if (lightingSettings.particleLights)
+			{
+				const auto particleLights{ m_particleSystem.lights() };
+				m_frameLights.insert(m_frameLights.end(), particleLights.begin(), particleLights.end());
+			}
 			m_lightRenderer.encode(m_device, m_queue, encoder, targetView, m_width, m_height,
 				{ .viewport = { static_cast<float>(m_width), static_cast<float>(m_height) },
 					.cameraPosition = cameraPosition, .zoom = zoom },
 				lightingSettings, m_frameLights, m_frameGlows,
-				[this](wgpu::RenderPassEncoder& pass) { m_particleSystem.draw_lights(pass); });
+				[this, &lightingSettings](wgpu::RenderPassEncoder& pass)
+				{
+					if (lightingSettings.particleLights) m_particleSystem.draw_lights(pass);
+				});
 
 			{
 			ZoneScopedN("Window::unlit-scene-pass");
@@ -2378,6 +2452,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			for (const auto& call : m_unlitShapes.calls())
 				ShapeRenderer::draw(unlitPass, call);
 			draw_sprite_batches(unlitPass, m_pipeline, SpriteLayer::Unlit);
+			drawMaterials(unlitPass, MaterialPass::Unlit);
 			unlitPass.End();
 			}
 			const bool unlitBatches{ std::ranges::any_of(m_staticSpriteBatches,
@@ -2656,6 +2731,12 @@ ax::LightingSettings ax::Window::lighting() const
 {
 	std::lock_guard lock{ m_lightingMutex };
 	return m_lightingSettings;
+}
+
+void ax::Window::submit_material_draw(MaterialDraw draw)
+{
+	std::lock_guard lock{ m_materialMutex };
+	m_queuedMaterials.push_back(std::move(draw));
 }
 
 void ax::Window::submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>& glows)

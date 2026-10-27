@@ -64,6 +64,9 @@ namespace ax
 		std::uint32_t resolutionDivisor{ 2 };
 		// Total light is clamped to this (at most 2), so lights brighten a fully lit scene by at most this much.
 		float maxExposure{ 1.0f };
+		// False leaves out the lights of particle emitters (their own and each particle's), as when zoomed out too far to
+		// see them.
+		bool particleLights{ true };
 
 		bool operator==(const LightingSettings&) const = default;
 	};

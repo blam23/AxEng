@@ -35,6 +35,7 @@
 #include "axeng/core/retained_sprites.h"
 #include "axeng/core/shapes/shape.h"
 #include "axeng/core/lighting/light_renderer.h"
+#include "axeng/core/materials/material_renderer.h"
 #include "axeng/core/particles/particle_system.h"
 #include "axeng/core/window_events.h"
 
@@ -200,6 +201,9 @@ namespace ax
 		// Hands over the lights and glows for the next frame (they are used for one frame only) by swapping them
 		// in, so the vectors come back empty with the capacity of a previous frame's.
 		void submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>& glows);
+		// Queues a material draw for the next frame (see MaterialRenderer). World space draws land in the scene, or after
+		// lighting for an unlit material; screen space draws land with the overlays. Thread safe.
+		void submit_material_draw(MaterialDraw draw);
 		// Whether the most recent frame ran the lighting passes, and what they drew.
 		bool lighting_ran() const noexcept { return m_lightingRan; }
 		LightRenderer::Stats lighting_stats() const noexcept { return m_lightRenderer.last_stats(); }
@@ -397,6 +401,8 @@ namespace ax
 
 		LightRenderer m_lightRenderer;
 		mutable std::mutex m_lightingMutex{};
+		std::mutex m_materialMutex{};
+		std::vector<MaterialDraw> m_queuedMaterials, m_frameMaterials;
 		LightingSettings m_lightingSettings{};
 		std::vector<Light2D> m_queuedLights, m_frameLights;
 		std::vector<Glow2D> m_queuedGlows, m_frameGlows;

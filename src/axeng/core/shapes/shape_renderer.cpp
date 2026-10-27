@@ -108,11 +108,14 @@ namespace
 
 	float cross(const glm::vec2& a, const glm::vec2& b) { return a.x * b.y - a.y * b.x; }
 
+	// Measured from the first point: far from the origin the products of the raw coordinates are so large that a
+	// small shape's area is lost in their rounding, and its winding comes out wrong.
 	float signed_area(const Loop& loop)
 	{
 		float area{ 0.0f };
+		const auto origin{ loop.front() };
 		for (std::size_t i = 0, j = loop.size() - 1; i < loop.size(); j = i++)
-			area += cross(loop[j], loop[i]);
+			area += cross(loop[j] - origin, loop[i] - origin);
 		return area * 0.5f;
 	}
 

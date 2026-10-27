@@ -54,7 +54,10 @@ fn fs_light(in_: InstanceOut) -> @location(0) vec4<f32> {
 	if (in_.cone.w > -1.0) {
 		let len = sqrt(d2);
 		let facing = select(1.0, dot(in_.local / max(len, 0.0001), in_.cone.xy), len > 0.0001);
-		attenuation *= smoothstep(in_.cone.w, in_.cone.z, facing);
+		// Right at the apex the angle is meaningless and the cone's edges sweep across whatever the light sits on, so
+		// a cone light is a plain light there and only becomes a cone further out.
+		let cone = smoothstep(in_.cone.w, in_.cone.z, facing);
+		attenuation *= mix(1.0, cone, smoothstep(0.0, 0.12, len));
 	}
 	return vec4<f32>(in_.colour.rgb * attenuation, 0.0);
 }

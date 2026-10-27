@@ -490,6 +490,28 @@ TEST_F(ShapeRendererTest, CircleCoversRadius)
 	EXPECT_PIXEL(image, 64 + 15.5f, 64 + 15.5f, s_black);
 }
 
+TEST_F(ShapeRendererTest, SmallCirclesFarFromTheOriginAreStillDrawn)
+{
+	// Far from the origin the raw coordinates' products swamp a small shape's area, which once gave it the wrong winding
+	// and no triangles (a player's eyes in the world, 6000 pixels out).
+	ax::ShapeView view{ .viewport = { static_cast<float>(s_size), static_cast<float>(s_size) },
+		.cameraPosition = { -5840.37f, -6440.61f }, .zoom = 4.0f };
+	ax::ShapeList shapes{};
+	std::vector<glm::vec2> centres{};
+	for (int j = 0; j < 4; ++j)
+		for (int i = 0; i < 4; ++i)
+		{
+			const glm::vec2 screen{ 16.0f + 32.0f * static_cast<float>(i), 16.0f + 32.0f * static_cast<float>(j) };
+			const auto world{ view.cameraPosition + (screen - view.viewport * 0.5f) / view.zoom
+				+ glm::vec2{ 0.0037f * static_cast<float>(i * 7 + j), 0.0051f * static_cast<float>(j * 5 + i) } };
+			shapes.push_back(ax::Circle{ .position = world, .radius = 0.96f, .fill = s_red });
+			centres.push_back(screen);
+		}
+	const auto image{ render(shapes, view) };
+	for (const auto& centre : centres)
+		EXPECT_PIXEL(image, centre.x, centre.y, s_red);
+}
+
 TEST_F(ShapeRendererTest, CircleOutline)
 {
 	const auto image{ render({ ax::Circle{
