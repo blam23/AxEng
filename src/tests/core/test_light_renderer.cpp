@@ -3,12 +3,14 @@
 #include <windows.h>
 
 #include "axeng/core/lighting/light_renderer.h"
+#include "axeng/core/particles/particle_system.h"
 
 #include <array>
 #include <chrono>
 #include <cstdio>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <numbers>
 #include <string>
 #include <vector>
@@ -120,7 +122,9 @@ protected:
 
 	// Clears a target to `clear`, lights it and reads it back.
 	static Image render(glm::vec4 clear, const ax::LightingSettings& lighting, std::span<const ax::Light2D> lights,
-		std::span<const ax::Glow2D> glows = {}, std::uint32_t samples = 1, const ax::LightView& view = centred_view())
+		std::span<const ax::Glow2D> glows = {}, std::uint32_t samples = 1, const ax::LightView& view = centred_view(),
+		const std::function<void(wgpu::CommandEncoder&)>& before = {},
+		const std::function<void(wgpu::RenderPassEncoder&)>& extra = {})
 	{
 		constexpr auto format{ wgpu::TextureFormat::RGBA8Unorm };
 		const auto makeTexture = [](std::uint32_t sampleCount, wgpu::TextureUsage usage)
@@ -152,8 +156,10 @@ protected:
 			passDesc.colorAttachments = &colour;
 			encoder.BeginRenderPass(&passDesc).End();
 		}
+		if (before)
+			before(encoder);
 		renderer.encode(s_device, s_device.GetQueue(), encoder, targetView, s_size, s_size, view, lighting,
-			lights, glows);
+			lights, glows, extra);
 		if (samples > 1)
 		{
 			wgpu::RenderPassColorAttachment colour{};
@@ -315,6 +321,53 @@ TEST_F(LightRendererTest, DrawsOntoMultisampledTargets)
 	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, settings({ 0.5f, 0.5f, 0.5f }), lights, glows, 4) };
 	EXPECT_TRUE(close_to(image.at(64, 64), { 128, 128, 255, 255 }, 3));
 	EXPECT_TRUE(close_to(image.at(4, 4), { 128, 128, 128, 255 }, 3));
+}
+
+TEST_F(LightRendererTest, ParticlesLightTheSceneAroundThem)
+{
+	ax::ParticleSystem particles;
+	ax::ParticleConfig config{};
+	config.capacity = 4;
+	config.emissionRate = 1;
+	config.duration = 1.0f;
+	config.explosiveness = 1.0f;
+	config.lifetimeMin = 10.0f;
+	config.lifetimeMax = 10.0f;
+	config.speedMin = 0.0f;
+	config.speedMax = 0.0f;
+	config.sizeStart = 4.0f;
+	config.sizeEnd = 4.0f;
+	config.spawnRadius = 0.0f;
+	config.colorStart = { 0.0f, 1.0f, 0.0f, 1.0f };
+	config.colorEnd = { 0.0f, 1.0f, 0.0f, 1.0f };
+	config.particleLight = { .enabled = true, .radiusScale = 8.0f, .intensity = 1.0f, .falloff = 1.0f };
+	config.position = { 0.0f, 0.0f };
+	const auto emitter{ particles.create(config) };
+	emitter->play();
+	// A particle just off screen still lights the edge of the view: it is 80 from the centre of a 128 wide view, with
+	// a light radius of 32.
+	auto offscreen{ config };
+	offscreen.position = { 80.0f, 0.0f };
+	offscreen.colorStart = offscreen.colorEnd = { 1.0f, 0.0f, 0.0f, 1.0f };
+	const auto offscreenEmitter{ particles.create(offscreen) };
+	offscreenEmitter->play();
+
+	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, settings({ 0.0f, 0.0f, 0.0f }), {}, {}, 1, centred_view(),
+		[&](wgpu::CommandEncoder& encoder)
+		{
+			auto queue{ s_device.GetQueue() };
+			particles.encode_compute(s_device, queue, encoder, 0.1, { -64.0f, -64.0f, 64.0f, 64.0f },
+				{ static_cast<float>(s_size), static_cast<float>(s_size) }, 1.0f, wgpu::TextureFormat::RGBA8Unorm, 1);
+		},
+		[&](wgpu::RenderPassEncoder& pass) { particles.draw_lights(pass); }) };
+	EXPECT_EQ(particles.emission_light_emitters(), 2u);
+	EXPECT_GT(image.at(64, 64)[1], 240);
+	EXPECT_EQ(image.at(64, 64)[0], 0);
+	EXPECT_GT(image.at(64 + 15, 64)[1], 0);
+	EXPECT_EQ(image.at(64 + 40, 64)[1], 0);
+	EXPECT_GT(image.at(127, 64)[0], 0) << "an off screen particle's light reaches into the view";
+	EXPECT_EQ(image.at(64, 64 + 40)[1], 0);
+	particles.shutdown();
 }
 
 // Run with --gtest_also_run_disabled_tests to time the lighting passes at 1080p with 4x MSAA.

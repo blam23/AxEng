@@ -5,10 +5,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 
 namespace ax
 {
+	// The light map is a single sample target of this format.
+	constexpr wgpu::TextureFormat light_map_format{ wgpu::TextureFormat::RGBA16Float };
+
 	// A light in world pixels. It adds colour * intensity, fading to nothing at radius with
 	// (1 - d^2)^falloff. A cone limits it to directions within coneOuter of direction, fully lit within
 	// coneInner (both cosines of half angles); coneOuter <= -1 lights every direction.
@@ -84,10 +88,12 @@ namespace ax
 		bool init(const wgpu::Device&, wgpu::TextureFormat targetFormat, std::uint32_t sampleCount);
 		bool initialised() const noexcept { return m_lightPipeline != nullptr; }
 
-		// Records the light map, apply and glow passes onto target, which is width x height.
+		// Records the light map, apply and glow passes onto target, which is width x height. extraLights, if given,
+		// draws more additive lights into the light map pass.
 		void encode(const wgpu::Device&, const wgpu::Queue&, wgpu::CommandEncoder&, const wgpu::TextureView& target,
 			std::uint32_t width, std::uint32_t height, const LightView&, const LightingSettings&,
-			std::span<const Light2D>, std::span<const Glow2D>);
+			std::span<const Light2D>, std::span<const Glow2D>,
+			const std::function<void(wgpu::RenderPassEncoder&)>& extraLights = {});
 
 		struct Stats
 		{

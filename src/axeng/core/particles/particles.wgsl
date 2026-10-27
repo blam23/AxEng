@@ -19,6 +19,8 @@ struct Parameters
 	colorEnd: vec4<f32>,
 	gravity: vec4<f32>,
 	misc: vec4<u32>,
+	// Per-particle light: radius scale, intensity, falloff.
+	light: vec4<f32>,
 };
 
 struct DrawArguments
@@ -205,6 +207,50 @@ fn render_particle(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_in
 	output.uv = corner * 2.0;
 	output.color = mix(renderParameters.colorStart, renderParameters.colorEnd, ageRatio);
 	return output;
+}
+
+struct LightParticle
+{
+	@builtin(position) position: vec4<f32>,
+	@location(0) local: vec2<f32>,
+	@location(1) @interpolate(flat) color: vec4<f32>,
+};
+
+// Each live particle adds a light to the light map, a square of its radius around the particle. The light map is
+// not depth tested, and has the same viewport as the particle's camera.
+@vertex
+fn render_particle_light(@builtin(vertex_index) vertexIndex: u32, @builtin(instance_index) instanceIndex: u32) -> LightParticle
+{
+	let particleIndex = renderVisibleIndices[instanceIndex];
+	let particle = renderParticles[particleIndex];
+	let age = particle_age(particle, renderParameters.time.x);
+	let ageRatio = clamp(age / particle.ageLifeRotationAngular.y, 0.0, 1.0);
+	let size = mix(renderParameters.directionSpreadRadiusSize.w, renderParameters.appearance.x, ageRatio);
+	let radius = max(size * renderParameters.light.x, 0.001);
+	let local = array<vec2<f32>, 6>(
+		vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(-1.0, 1.0),
+		vec2<f32>(-1.0, 1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0)
+	);
+	let corner = local[vertexIndex];
+	let worldPosition = particle_position(particle, age, renderParameters) + corner * radius;
+	let cameraCenter = (renderParameters.cameraBounds.xy + renderParameters.cameraBounds.zw) * 0.5;
+	let screenPosition = (worldPosition - cameraCenter) * renderParameters.appearance.w
+		+ renderParameters.appearance.yz * 0.5;
+	let ndc = vec2<f32>(screenPosition.x / renderParameters.appearance.y * 2.0 - 1.0,
+		1.0 - screenPosition.y / renderParameters.appearance.z * 2.0);
+	let color = mix(renderParameters.colorStart, renderParameters.colorEnd, ageRatio);
+	var output: LightParticle;
+	output.position = vec4<f32>(ndc, 0.0, 1.0);
+	output.local = corner;
+	output.color = vec4<f32>(color.rgb * color.a * renderParameters.light.y, renderParameters.light.z);
+	return output;
+}
+
+@fragment
+fn render_particle_light_fragment(input: LightParticle) -> @location(0) vec4<f32>
+{
+	let attenuation = pow(max(1.0 - dot(input.local, input.local), 0.0), input.color.w);
+	return vec4<f32>(input.color.rgb * attenuation, 0.0);
 }
 
 struct OitOutput

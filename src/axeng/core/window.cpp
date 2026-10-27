@@ -2155,7 +2155,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		{
 			std::lock_guard lock{ m_lightingMutex };
 			lightingSettings = m_lightingSettings;
-			lightingActive = lighting_active(lightingSettings, m_queuedLights.size(), m_queuedGlows.size());
+			lightingActive = lighting_active(lightingSettings, m_queuedLights.size()
+				+ m_particleSystem.lights().size() + m_particleSystem.emission_light_emitters(), m_queuedGlows.size());
 		}
 		if (lightingActive && !m_lightRenderer.init(m_device, m_surfaceFormat, m_sampleCount))
 			lightingActive = false;
@@ -2333,10 +2334,13 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		if (lightingActive)
 		{
 			ZoneScopedN("Window::lighting");
+			const auto particleLights{ m_particleSystem.lights() };
+			m_frameLights.insert(m_frameLights.end(), particleLights.begin(), particleLights.end());
 			m_lightRenderer.encode(m_device, m_queue, encoder, targetView, m_width, m_height,
 				{ .viewport = { static_cast<float>(m_width), static_cast<float>(m_height) },
 					.cameraPosition = cameraPosition, .zoom = zoom },
-				lightingSettings, m_frameLights, m_frameGlows);
+				lightingSettings, m_frameLights, m_frameGlows,
+				[this](wgpu::RenderPassEncoder& pass) { m_particleSystem.draw_lights(pass); });
 
 			{
 			ZoneScopedN("Window::unlit-scene-pass");

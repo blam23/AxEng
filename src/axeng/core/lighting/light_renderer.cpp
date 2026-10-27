@@ -14,7 +14,7 @@ namespace
 #embed "lighting.wgsl"
 	};
 
-	constexpr wgpu::TextureFormat s_light_map_format{ wgpu::TextureFormat::RGBA16Float };
+	constexpr auto s_light_map_format{ ax::light_map_format };
 	// Each instance is an octagon drawn as six triangles (see corner() in lighting.wgsl).
 	constexpr std::uint32_t s_instance_vertices{ 18 };
 
@@ -216,7 +216,8 @@ void ax::LightRenderer::ensure_buffer(const wgpu::Device& device, InstanceBuffer
 
 void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
 	const wgpu::TextureView& target, std::uint32_t width, std::uint32_t height, const LightView& view,
-	const LightingSettings& settings, std::span<const Light2D> lights, std::span<const Glow2D> glows)
+	const LightingSettings& settings, std::span<const Light2D> lights, std::span<const Glow2D> glows,
+	const std::function<void(wgpu::RenderPassEncoder&)>& extraLights)
 {
 	ZoneScopedN("LightRenderer::encode");
 	m_stats = {};
@@ -256,6 +257,8 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 			pass.SetBindGroup(0, m_lights.bindGroup);
 			pass.Draw(s_instance_vertices, static_cast<std::uint32_t>(lights.size()));
 		}
+		if (extraLights)
+			extraLights(pass);
 		pass.End();
 	}
 

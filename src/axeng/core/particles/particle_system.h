@@ -1,11 +1,15 @@
 #pragma once
 
+#include "axeng/core/lighting/light_renderer.h"
+
 #include <webgpu/webgpu_cpp.h>
 #include <glm/glm.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -17,6 +21,43 @@ namespace ax
 		Point,
 		Circle,
 		Rectangle,
+	};
+
+	// value + amplitude * sin(2 * pi * frequency * t + phase), with t the seconds the emitter has existed.
+	struct ParticleWave
+	{
+		float amplitude{};
+		float frequency{ 1.0f };
+		float phase{};
+
+		bool operator==(const ParticleWave&) const = default;
+	};
+
+	// A light at the emitter. It is on while the emitter plays and fades out over the longest particle lifetime after
+	// it stops. The waves modulate it over time: the radius and intensity by adding to them, the colour by blending
+	// from colour towards colourB by (0.5 + 0.5 * wave) * amplitude.
+	struct ParticleLightConfig
+	{
+		bool enabled{ false };
+		glm::vec3 colour{ 1.0f, 0.8f, 0.5f };
+		glm::vec3 colourB{ 1.0f };
+		float radius{ 96.0f };
+		float intensity{ 1.0f };
+		float falloff{ 2.0f };
+		glm::vec2 offset{};
+		ParticleWave radiusWave{};
+		ParticleWave intensityWave{};
+		ParticleWave colourWave{};
+	};
+
+	// Every live particle is a light of its own: its colour, with alpha scaling the intensity, and a radius of its
+	// current size times radiusScale.
+	struct ParticleEmissionLightConfig
+	{
+		bool enabled{ false };
+		float radiusScale{ 8.0f };
+		float intensity{ 1.0f };
+		float falloff{ 2.0f };
 	};
 
 	struct ParticleConfig
@@ -51,6 +92,8 @@ namespace ax
 		glm::vec4 colorEnd{ 1.0f, 1.0f, 1.0f, 0.0f };
 		glm::vec2 gravity{};
 		float z{};
+		ParticleLightConfig light{};
+		ParticleEmissionLightConfig particleLight{};
 	};
 
 	class ParticleEmitter
@@ -73,12 +116,17 @@ namespace ax
 		explicit ParticleEmitter(ParticleConfig config);
 		std::uint32_t advance(double delta);
 		void update_world_bounds();
+		// The emitter's own light this frame, if it is on.
+		bool static_light(Light2D& light) const;
+		float particle_light_reach() const noexcept;
 
 		ParticleConfig m_config;
 		std::thread::id m_thread{ std::this_thread::get_id() };
 		double m_elapsed{};
 		double m_systemTime{};
 		double m_sinceLastCompute{};
+		double m_lightTime{};
+		double m_lightTail{};
 		double m_emissionRemainder{};
 		std::uint32_t m_spawnCount{};
 		std::uint32_t m_frame{};
@@ -115,6 +163,12 @@ namespace ax
 			double delta, glm::vec4 cameraBounds, glm::vec2 viewport, float zoom,
 			wgpu::TextureFormat colourFormat, std::uint32_t sampleCount);
 		void draw(wgpu::RenderPassEncoder& pass);
+		// Emitter lights as of the last compute pass; submit them with the frame's other lights.
+		std::span<const Light2D> lights() const noexcept { return m_frameLights; }
+		// How many emitters will draw per-particle lights in draw_lights.
+		std::size_t emission_light_emitters() const noexcept { return m_emissionLightEmitters; }
+		// Adds every live particle's light to the light map, which is an RGBA16F single sample target.
+		void draw_lights(wgpu::RenderPassEncoder& pass);
 		void shutdown();
 
 	private:
@@ -124,6 +178,7 @@ namespace ax
 		wgpu::Device m_device;
 		wgpu::ComputePipeline m_computePipeline;
 		wgpu::RenderPipeline m_renderPipeline;
+		wgpu::RenderPipeline m_lightPipeline;
 		wgpu::BindGroupLayout m_computeLayout;
 		wgpu::BindGroupLayout m_emptyLayout;
 		wgpu::BindGroupLayout m_renderLayout;
@@ -132,6 +187,8 @@ namespace ax
 		wgpu::PipelineLayout m_renderPipelineLayout;
 		std::vector<std::weak_ptr<ParticleEmitter>> m_emitters;
 		std::vector<std::shared_ptr<ParticleEmitter>> m_frameEmitters;
+		std::vector<Light2D> m_frameLights;
+		std::size_t m_emissionLightEmitters{};
 		bool m_paused{};
 		bool m_render_enabled{ true };
 		wgpu::TextureFormat m_colourFormat{ wgpu::TextureFormat::Undefined };

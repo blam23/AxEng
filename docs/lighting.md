@@ -36,6 +36,8 @@ window.submit_lights(lights, glows);
 cone limits it to `coneOuter` (cosine of the half angle) around `direction`, fully lit within `coneInner`;
 `coneOuter <= -1` lights every direction. `Glow2D` is a soft radial halo with a bright core.
 
+Particle emitters add lights of their own, which are included automatically: see [particles.md](particles.md#lights).
+
 `lighting_active(settings, lights, glows)` says whether a frame needs the passes. `Window::lighting_ran()` and
 `lighting_stats()` (`app.window.lighting_stats()` in Lua) report what the last frame drew.
 

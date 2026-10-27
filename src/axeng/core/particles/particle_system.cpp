@@ -38,6 +38,7 @@ namespace
 		std::array<float, 4> colorEnd{};
 		std::array<float, 4> gravity{};
 		std::array<std::uint32_t, 4> misc{};
+		std::array<float, 4> light{};
 	};
 
 	struct DrawArguments
@@ -49,7 +50,7 @@ namespace
 	};
 
 	static_assert(sizeof(ParticleGpu) == 48);
-	static_assert(sizeof(ParticleParametersGpu) == 192);
+	static_assert(sizeof(ParticleParametersGpu) == 208);
 	static_assert(sizeof(DrawArguments) == 16);
 
 	wgpu::Buffer create_buffer(const wgpu::Device& device, std::uint64_t size, wgpu::BufferUsage usage, const char* label)
@@ -74,6 +75,47 @@ namespace
 	bool intersects(const glm::vec4& a, const glm::vec4& b)
 	{
 		return a.x <= b.z && a.z >= b.x && a.y <= b.w && a.w >= b.y;
+	}
+
+	glm::vec4 expanded(const glm::vec4& bounds, float margin)
+	{
+		return { bounds.x - margin, bounds.y - margin, bounds.z + margin, bounds.w + margin };
+	}
+
+	float wave_value(const ax::ParticleWave& wave, double time)
+	{
+		const auto cycles{ std::fmod(static_cast<double>(wave.frequency) * time, 1.0) };
+		return std::sin(static_cast<float>(cycles) * s_tau + wave.phase);
+	}
+
+	bool valid_wave(const ax::ParticleWave& wave)
+	{
+		return std::isfinite(wave.amplitude) && std::isfinite(wave.frequency) && wave.frequency >= 0.0f
+			&& std::isfinite(wave.phase);
+	}
+
+	std::optional<std::string> validate_light(const ax::ParticleLightConfig& light,
+		const ax::ParticleEmissionLightConfig& particleLight)
+	{
+		for (const auto& colour : { light.colour, light.colourB })
+			for (const auto value : { colour.r, colour.g, colour.b })
+				if (!std::isfinite(value) || value < 0.0f || value > 16.0f)
+					return "light colour components must be between 0 and 16";
+		if (!std::isfinite(light.radius) || light.radius < 0.0f || light.radius > 100000.0f
+			|| !std::isfinite(light.intensity) || light.intensity < 0.0f || light.intensity > 1000.0f
+			|| !std::isfinite(light.falloff) || light.falloff < 0.0f || light.falloff > 64.0f)
+			return "light radius, intensity and falloff must be finite, non-negative and within range";
+		if (!std::isfinite(light.offset.x) || !std::isfinite(light.offset.y))
+			return "light offset must be finite numbers";
+		if (!valid_wave(light.radiusWave) || !valid_wave(light.intensityWave) || !valid_wave(light.colourWave))
+			return "light waves must have finite amplitude and phase and a non-negative frequency";
+		if (!std::isfinite(particleLight.radiusScale) || particleLight.radiusScale < 0.0f
+			|| particleLight.radiusScale > 1000.0f
+			|| !std::isfinite(particleLight.intensity) || particleLight.intensity < 0.0f
+			|| particleLight.intensity > 1000.0f
+			|| !std::isfinite(particleLight.falloff) || particleLight.falloff < 0.0f || particleLight.falloff > 64.0f)
+			return "particle_light radius_scale, intensity and falloff must be finite, non-negative and within range";
+		return std::nullopt;
 	}
 
 }
@@ -117,7 +159,7 @@ std::optional<std::string> ax::validate_particle_config(const ParticleConfig& co
 		config.colorEnd.r, config.colorEnd.g, config.colorEnd.b, config.colorEnd.a })
 		if (!finite(value) || value < 0.0f || value > 1.0f)
 			return "particle color components must be between 0 and 1";
-	return std::nullopt;
+	return validate_light(config.light, config.particleLight);
 }
 
 ax::ParticleEmitter::ParticleEmitter(ParticleConfig config)
@@ -199,6 +241,7 @@ void ax::ParticleEmitter::stop() noexcept
 void ax::ParticleEmitter::clear() noexcept
 {
 	m_clearRequested = true;
+	m_lightTail = 0.0;
 }
 
 void ax::ParticleEmitter::set_visible(bool visible) noexcept
@@ -212,6 +255,40 @@ void ax::ParticleEmitter::set_visible(bool visible) noexcept
 bool ax::ParticleEmitter::finished() const noexcept
 {
 	return !m_config.loop && !m_config.playing && m_elapsed >= m_config.duration;
+}
+
+bool ax::ParticleEmitter::static_light(Light2D& light) const
+{
+	const auto& config{ m_config.light };
+	if (!config.enabled || !m_config.visible)
+		return false;
+	const auto fade{ m_config.playing ? 1.0f
+		: static_cast<float>(std::clamp(m_lightTail / m_config.lifetimeMax, 0.0, 1.0)) };
+	if (fade <= 0.0f)
+		return false;
+	const auto radius{ config.radius + config.radiusWave.amplitude * wave_value(config.radiusWave, m_lightTime) };
+	const auto intensity{ (config.intensity
+		+ config.intensityWave.amplitude * wave_value(config.intensityWave, m_lightTime)) * fade };
+	if (radius <= 0.0f || intensity <= 0.0f)
+		return false;
+	const auto blend{ std::clamp((0.5f + 0.5f * wave_value(config.colourWave, m_lightTime))
+		* config.colourWave.amplitude, 0.0f, 1.0f) };
+	const auto offset{ glm::vec2{ std::cos(m_config.rotation), std::sin(m_config.rotation) } * config.offset.x
+		+ glm::vec2{ -std::sin(m_config.rotation), std::cos(m_config.rotation) } * config.offset.y };
+	light = {};
+	light.position = m_config.position + offset;
+	light.radius = radius;
+	light.intensity = intensity;
+	light.colour = glm::mix(config.colour, config.colourB, blend);
+	light.falloff = config.falloff;
+	return true;
+}
+
+float ax::ParticleEmitter::particle_light_reach() const noexcept
+{
+	if (!m_config.particleLight.enabled)
+		return 0.0f;
+	return (std::max)(m_config.sizeStart, m_config.sizeEnd) * m_config.particleLight.radiusScale;
 }
 
 void ax::ParticleEmitter::update_world_bounds()
@@ -366,7 +443,10 @@ void ax::ParticleSystem::initialise(wgpu::Device& device, wgpu::TextureFormat co
 		}
 	}
 	m_frameEmitters.clear();
+	m_frameLights.clear();
+	m_emissionLightEmitters = 0;
 	m_renderPipeline = nullptr;
+	m_lightPipeline = nullptr;
 	m_computePipeline = nullptr;
 	m_renderPipelineLayout = nullptr;
 	m_computePipelineLayout = nullptr;
@@ -482,6 +562,31 @@ void ax::ParticleSystem::initialise(wgpu::Device& device, wgpu::TextureFormat co
 	renderPipelineDesc.fragment = &fragment;
 	renderPipelineDesc.label = "ParticleRenderPipeline";
 	m_renderPipeline = device.CreateRenderPipeline(&renderPipelineDesc);
+
+	// Per-particle lights add into the light map, which has no depth and a single sample.
+	wgpu::BlendState lightBlend{};
+	lightBlend.color = { wgpu::BlendOperation::Add, wgpu::BlendFactor::One, wgpu::BlendFactor::One };
+	lightBlend.alpha = { wgpu::BlendOperation::Add, wgpu::BlendFactor::Zero, wgpu::BlendFactor::One };
+	wgpu::ColorTargetState lightTarget{};
+	lightTarget.format = light_map_format;
+	lightTarget.blend = &lightBlend;
+	lightTarget.writeMask = wgpu::ColorWriteMask::All;
+	wgpu::FragmentState lightFragment{};
+	lightFragment.module = shader;
+	lightFragment.entryPoint = "render_particle_light_fragment";
+	lightFragment.targetCount = 1;
+	lightFragment.targets = &lightTarget;
+	wgpu::RenderPipelineDescriptor lightPipelineDesc{};
+	lightPipelineDesc.layout = m_renderPipelineLayout;
+	lightPipelineDesc.vertex.module = shader;
+	lightPipelineDesc.vertex.entryPoint = "render_particle_light";
+	lightPipelineDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+	lightPipelineDesc.primitive.cullMode = wgpu::CullMode::None;
+	lightPipelineDesc.multisample.count = 1;
+	lightPipelineDesc.multisample.mask = ~0u;
+	lightPipelineDesc.fragment = &lightFragment;
+	lightPipelineDesc.label = "ParticleLightPipeline";
+	m_lightPipeline = device.CreateRenderPipeline(&lightPipelineDesc);
 }
 
 void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
@@ -495,6 +600,8 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 	if (m_paused)
 		return;
 	m_frameEmitters.clear();
+	m_frameLights.clear();
+	m_emissionLightEmitters = 0;
 
 	for (auto it{ m_emitters.begin() }; it != m_emitters.end();)
 	{
@@ -569,16 +676,33 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 		const auto frameDelta{ m_paused ? 0.0 : std::clamp(delta, 0.0, s_max_frame_delta) };
 		emitter->m_systemTime = std::fmod(emitter->m_systemTime + frameDelta, s_particle_clock_period);
 		emitter->m_sinceLastCompute += frameDelta;
+		const auto wasPlaying{ emitter->m_config.playing };
 		emitter->m_spawnCount = emitter->advance(frameDelta);
 		const auto& config{ emitter->m_config };
 		emitter->update_world_bounds();
-		if (!config.visible || !intersects(emitter->m_worldBounds, cameraBounds))
+
+		emitter->m_lightTime += frameDelta;
+		if (wasPlaying || config.playing)
+			emitter->m_lightTail = config.lifetimeMax;
+		else
+			emitter->m_lightTail = (std::max)(0.0, emitter->m_lightTail - frameDelta);
+		if (Light2D light; emitter->static_light(light)
+			&& intersects(expanded(cameraBounds, light.radius), { light.position.x, light.position.y,
+				light.position.x, light.position.y }))
+			m_frameLights.push_back(light);
+
+		if (!config.visible)
+			continue;
+		// Particle lights reach beyond their particles, so particles that are just off screen still count.
+		const auto lightReach{ emitter->particle_light_reach() };
+		const auto emitterCamera{ expanded(cameraBounds, lightReach) };
+		if (!intersects(emitter->m_worldBounds, emitterCamera))
 			continue;
 		if (emitter->m_sinceLastCompute >= s_particle_clock_period)
 			emitter->m_clearRequested = true;
 
 		ParticleParametersGpu params{};
-		params.cameraBounds = { cameraBounds.x, cameraBounds.y, cameraBounds.z, cameraBounds.w };
+		params.cameraBounds = { emitterCamera.x, emitterCamera.y, emitterCamera.z, emitterCamera.w };
 		params.transform = { config.position.x, config.position.y, config.rotation, config.z };
 		params.time = {
 			static_cast<float>(emitter->m_systemTime),
@@ -599,6 +723,10 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 			| (config.localSpace ? 2u : 0u)
 			| (static_cast<std::uint32_t>(config.spawnShape) << 2u) };
 		params.misc = { config.capacity, config.seed, emitter->m_frame++, flags };
+		params.light = { config.particleLight.radiusScale, config.particleLight.intensity,
+			config.particleLight.falloff, 0.0f };
+		if (config.particleLight.enabled)
+			++m_emissionLightEmitters;
 
 		queue.WriteBuffer(emitter->m_uniformBuffer, 0, &params, sizeof(params));
 		const std::uint32_t zero{};
@@ -642,6 +770,28 @@ void ax::ParticleSystem::draw(wgpu::RenderPassEncoder& pass)
 	}
 }
 
+void ax::ParticleSystem::draw_lights(wgpu::RenderPassEncoder& pass)
+{
+	if (m_thread != std::this_thread::get_id())
+		throw std::runtime_error("Particle systems belong to the renderer thread");
+	if (m_lightPipeline.Get() == nullptr)
+		return;
+	bool bound{};
+	for (const auto& emitter : m_frameEmitters)
+	{
+		if (!emitter->m_config.visible || !emitter->m_config.particleLight.enabled)
+			continue;
+		if (!bound)
+		{
+			pass.SetPipeline(m_lightPipeline);
+			pass.SetBindGroup(0, m_emptyBindGroup);
+			bound = true;
+		}
+		pass.SetBindGroup(1, emitter->m_renderBindGroup);
+		pass.DrawIndirect(emitter->m_drawArgumentsBuffer, 0);
+	}
+}
+
 void ax::ParticleSystem::shutdown()
 {
 	for (const auto& weakEmitter : m_emitters)
@@ -658,8 +808,11 @@ void ax::ParticleSystem::shutdown()
 		}
 	}
 	m_frameEmitters.clear();
+	m_frameLights.clear();
+	m_emissionLightEmitters = 0;
 	m_emitters.clear();
 	m_renderPipeline = nullptr;
+	m_lightPipeline = nullptr;
 	m_computePipeline = nullptr;
 	m_renderPipelineLayout = nullptr;
 	m_computePipelineLayout = nullptr;

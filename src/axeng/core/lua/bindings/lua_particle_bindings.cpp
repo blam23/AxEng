@@ -94,6 +94,60 @@ namespace
 		color.a = number_field(value, "a", array_number_field(value, 4, color.a));
 	}
 
+	void colour3_field(const sol::table& table, std::string_view key, glm::vec3& colour)
+	{
+		glm::vec4 value{ colour, 1.0f };
+		color_field(table, key, value);
+		colour = { value.r, value.g, value.b };
+	}
+
+	void wave_field(const sol::table& table, std::string_view key, ax::ParticleWave& wave)
+	{
+		const sol::object object{ table[key] };
+		if (object == sol::nil)
+			return;
+		if (object.get_type() != sol::type::table)
+			throw sol::error(std::format("particle parameter '{}' must be a table with amplitude, frequency and phase numbers", key));
+		const auto value{ object.as<sol::table>() };
+		wave.amplitude = number_field(value, "amplitude", wave.amplitude);
+		wave.frequency = number_field(value, "frequency", wave.frequency);
+		wave.phase = number_field(value, "phase", wave.phase);
+	}
+
+	sol::table sub_table(const sol::table& table, std::string_view key)
+	{
+		const sol::object object{ table[key] };
+		if (object.get_type() != sol::type::table)
+			throw sol::error(std::format("particle parameter '{}' must be a table", key));
+		return object.as<sol::table>();
+	}
+
+	void parse_light(const sol::table& table, ax::ParticleLightConfig& light)
+	{
+		light.enabled = boolean_field(table, "enabled", light.enabled);
+		light.radius = number_field(table, "radius", light.radius);
+		light.intensity = number_field(table, "intensity", light.intensity);
+		light.falloff = number_field(table, "falloff", light.falloff);
+		colour3_field(table, "color", light.colour);
+		vector2_field(table, "offset", light.offset);
+		wave_field(table, "radius_wave", light.radiusWave);
+		wave_field(table, "intensity_wave", light.intensityWave);
+		// The colour wave blends towards its own colour; its amplitude (0..1) is how far.
+		if (const sol::object colourWave{ table["color_wave"] }; colourWave != sol::nil)
+		{
+			colour3_field(sub_table(table, "color_wave"), "color", light.colourB);
+			wave_field(table, "color_wave", light.colourWave);
+		}
+	}
+
+	void parse_particle_light(const sol::table& table, ax::ParticleEmissionLightConfig& light)
+	{
+		light.enabled = boolean_field(table, "enabled", light.enabled);
+		light.radiusScale = number_field(table, "radius_scale", light.radiusScale);
+		light.intensity = number_field(table, "intensity", light.intensity);
+		light.falloff = number_field(table, "falloff", light.falloff);
+	}
+
 	ax::ParticleConfig parse_config(const sol::table& table, ax::ParticleConfig config)
 	{
 		config.capacity = uint_field(table, "capacity", config.capacity);
@@ -144,10 +198,19 @@ namespace
 		}
 		color_field(table, "start_color", config.colorStart);
 		color_field(table, "end_color", config.colorEnd);
+		if (const sol::object light{ table["light"] }; light != sol::nil)
+			parse_light(sub_table(table, "light"), config.light);
+		if (const sol::object light{ table["particle_light"] }; light != sol::nil)
+			parse_particle_light(sub_table(table, "particle_light"), config.particleLight);
 		if (const auto error{ ax::validate_particle_config(config) })
 			throw sol::error(*error);
 		return config;
 	}
+}
+
+ax::ParticleConfig ax::lua::bindings::parse_particle_config(const sol::table& table, ax::ParticleConfig base)
+{
+	return parse_config(table, std::move(base));
 }
 
 void ax::lua::bindings::setup_particle_bindings(ax::Application& app, sol::state& state)

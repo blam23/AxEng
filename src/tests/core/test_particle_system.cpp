@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <atomic>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -210,5 +211,100 @@ TEST(ParticleSystemTests, ComputesAndDrawsWithGpuResidentState)
 		for (const auto& message : s_errorMessages)
 			ADD_FAILURE() << message;
 	}
+	particles.shutdown();
+}
+
+TEST(ParticleSystemTests, ValidatesLightParameters)
+{
+	ax::ParticleConfig config{};
+	config.light.enabled = true;
+	config.particleLight.enabled = true;
+	EXPECT_FALSE(ax::validate_particle_config(config));
+	config.light.radius = -1.0f;
+	EXPECT_TRUE(ax::validate_particle_config(config));
+	config.light.radius = 96.0f;
+	config.light.radiusWave.frequency = -1.0f;
+	EXPECT_TRUE(ax::validate_particle_config(config));
+	config.light.radiusWave.frequency = 2.0f;
+	config.light.colour.g = 17.0f;
+	EXPECT_TRUE(ax::validate_particle_config(config));
+	config.light.colour.g = 1.0f;
+	config.particleLight.radiusScale = std::numeric_limits<float>::infinity();
+	EXPECT_TRUE(ax::validate_particle_config(config));
+	config.particleLight.radiusScale = 8.0f;
+	EXPECT_FALSE(ax::validate_particle_config(config));
+}
+
+TEST(ParticleSystemTests, EmitterLightFollowsWavesAndFadesAfterStopping)
+{
+	if (!s_instance)
+		initialise_device();
+	if (!s_device)
+		GTEST_SKIP() << "No D3D12 WebGPU device is available";
+
+	ax::ParticleSystem particles;
+	ax::ParticleConfig config{};
+	config.capacity = 8;
+	config.emissionRate = 8;
+	config.loop = true;
+	config.lifetimeMin = 1.0f;
+	config.lifetimeMax = 1.0f;
+	config.light.enabled = true;
+	config.light.colour = { 1.0f, 0.0f, 0.0f };
+	config.light.colourB = { 0.0f, 0.0f, 1.0f };
+	config.light.radius = 32.0f;
+	config.light.intensity = 2.0f;
+	config.light.offset = { 4.0f, 0.0f };
+	config.light.radiusWave = { .amplitude = 10.0f, .frequency = 1.0f, .phase = 0.0f };
+	config.light.colourWave = { .amplitude = 1.0f, .frequency = 1.0f, .phase = 0.0f };
+	auto emitter{ particles.create(config) };
+	auto queue{ s_device.GetQueue() };
+	const auto step{ [&](double delta)
+	{
+		auto encoder{ s_device.CreateCommandEncoder() };
+		particles.encode_compute(s_device, queue, encoder, delta, { -16.0f, -16.0f, 16.0f, 16.0f },
+			{ 32.0f, 32.0f }, 1.0f, wgpu::TextureFormat::RGBA8Unorm, 1);
+		auto command{ encoder.Finish() };
+		queue.Submit(1, &command);
+	} };
+
+	step(0.0);
+	EXPECT_TRUE(particles.lights().empty()) << "a stopped emitter has no light";
+
+	emitter->play();
+	step(0.25);
+	ASSERT_EQ(particles.lights().size(), 1u);
+	auto light{ particles.lights()[0] };
+	EXPECT_NEAR(light.radius, 42.0f, 0.01f);
+	EXPECT_NEAR(light.intensity, 2.0f, 0.001f);
+	EXPECT_NEAR(light.position.x, 4.0f, 0.001f);
+	EXPECT_NEAR(light.colour.b, 1.0f, 0.001f);
+	EXPECT_NEAR(light.colour.r, 0.0f, 0.001f);
+
+	step(0.25);
+	EXPECT_NEAR(particles.lights()[0].radius, 32.0f, 0.01f);
+	EXPECT_NEAR(particles.lights()[0].colour.r, 0.5f, 0.01f);
+
+	emitter->stop();
+	step(0.25);
+	ASSERT_EQ(particles.lights().size(), 1u);
+	EXPECT_NEAR(particles.lights()[0].intensity, 2.0f * 0.75f, 0.01f);
+	step(1.0);
+	EXPECT_TRUE(particles.lights().empty()) << "the light is gone once the last particle would have died";
+
+	emitter->play();
+	step(0.1);
+	EXPECT_EQ(particles.lights().size(), 1u);
+	emitter->stop();
+	emitter->clear();
+	step(0.1);
+	EXPECT_TRUE(particles.lights().empty()) << "clearing an emitter ends its light at once";
+
+	auto hidden{ emitter->config() };
+	hidden.playing = true;
+	hidden.visible = false;
+	emitter->set_config(hidden);
+	step(0.1);
+	EXPECT_TRUE(particles.lights().empty());
 	particles.shutdown();
 }
