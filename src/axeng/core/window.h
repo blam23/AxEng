@@ -50,6 +50,7 @@ namespace ax
 		std::string title{ "AxEng" };
 		bool vsync{ true };
 		bool resizable{ true };
+		bool background{ false };	// shown without focus, behind other windows
 	};
 
 	struct WindowFrameImageEvent
@@ -93,7 +94,8 @@ namespace ax
 		bool init_webgpu(wgpu::BackendType backendType = wgpu::BackendType::Undefined);
 		bool init_imgui();
 		void run_loop();
-		// Zero retains the legacy variable-update loop. Configure before run_loop().
+		// Zero retains the legacy variable-update loop. Normally configured before run_loop(); an update callback can
+		// change the rate of a running loop, which restarts the loop's timing.
 		void set_fixed_update_rate(double rate);
 		const WindowLoopStatistics& loop_statistics() const noexcept { return m_loopStatistics; }
 		// Called on the window thread: `acquire` before the loop runs fixed updates (and the input events handled

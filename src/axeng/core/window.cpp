@@ -18,6 +18,8 @@
 #include <dawn/native/DawnNative.h>
 #include <windows.h>
 #include <timeapi.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
 
 #pragma comment(lib, "winmm.lib")
 
@@ -53,7 +55,27 @@ ax::Window::Window(const WindowDefinition& def)
 
 	glfwWindowHint(GLFW_RESIZABLE, def.resizable ? GLFW_TRUE : GLFW_FALSE);
 
+	// A background window is shown without taking focus and put behind every other window, so automated runs do not
+	// interrupt whatever the user is doing.
+	const bool background = def.background;
+	if (background)
+	{
+		glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
+		glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
+	}
+
 	m_window = glfwCreateWindow(m_width, m_height, def.title.data(), NULL, NULL);
+
+	if (background)
+	{
+		glfwWindowHint(GLFW_FOCUSED, GLFW_TRUE);
+		glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
+		if (m_window)
+		{
+			HWND handle = glfwGetWin32Window(m_window);
+			SetWindowPos(handle, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+		}
+	}
 
 	std::lock_guard lock{ s_windows_mutex };
 	s_windows.emplace(m_window, this);
@@ -1893,6 +1915,7 @@ void ax::Window::run_loop()
 	auto previous{ Clock::now() };
 	auto previousRender{ previous };
 	FixedUpdateScheduler scheduler{ m_fixedUpdateRate > 0.0 ? m_fixedUpdateRate : 60.0 };
+	auto schedulerRate{ m_fixedUpdateRate };
 	bool suspended{};
 	m_loopStatistics = {};
 
@@ -1900,6 +1923,13 @@ void ax::Window::run_loop()
 	{
 		glfwPollEvents();
 		if (glfwWindowShouldClose(m_window)) break;
+		// The rate can be changed while the loop runs (from an update callback).
+		if (m_fixedUpdateRate != schedulerRate)
+		{
+			schedulerRate = m_fixedUpdateRate;
+			scheduler = FixedUpdateScheduler{ schedulerRate > 0.0 ? schedulerRate : 60.0 };
+			previousRender = Clock::now();
+		}
 		const auto now{ Clock::now() };
 		const auto elapsed{ std::chrono::duration<double>(now - previous).count() };
 		previous = now;

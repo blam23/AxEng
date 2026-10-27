@@ -4,6 +4,10 @@
 `run_loop()`. The default rate is zero, preserving variable updates for existing applications.
 Positive rates up to 1000 Hz are supported. The loop uses a steady clock and event-aware waits.
 
+An update callback may change the rate of a running loop (Lua `app.window.set_update_rate(hz)`, 1 to 1000), which
+restarts the loop's timing. Presentation is independent: `app.window.set_vsync(enabled)` rebuilds the surface with or
+without vsync, and `app.window.set_position(x, y)` / `set_size(width, height)` place the window.
+
 For each due update, callbacks run in this order:
 
 1. `get_update_event_handler()` / Lua `app.on_update`: input and commands.

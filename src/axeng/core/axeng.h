@@ -24,7 +24,8 @@ namespace ax
 		Application&&,
 		wgpu::BackendType backendType,
 		const std::filesystem::path& userDirectory = {},
-		const std::optional<audio::AudioSystem::Config>& audioConfig = std::nullopt
+		const std::optional<audio::AudioSystem::Config>& audioConfig = std::nullopt,
+		bool backgroundWindow = false
 	);
 	ax::Error run_from_directory
 	(
@@ -35,7 +36,8 @@ namespace ax
 		std::string_view sourceDirectory = {},
 		std::unique_ptr<NativeApplicationModule> nativeModule = {},
 		std::filesystem::path userDirectory = {},
-		std::optional<audio::AudioSystem::Config> audioConfig = std::nullopt
+		std::optional<audio::AudioSystem::Config> audioConfig = std::nullopt,
+			bool backgroundWindow = false
 	);
 	ax::Error run_from_zip
 	(
@@ -45,6 +47,7 @@ namespace ax
 		wgpu::BackendType backendType = wgpu::BackendType::Undefined,
 		std::unique_ptr<NativeApplicationModule> nativeModule = {},
 		std::filesystem::path userDirectory = {},
-		std::optional<audio::AudioSystem::Config> audioConfig = std::nullopt
+		std::optional<audio::AudioSystem::Config> audioConfig = std::nullopt,
+			bool backgroundWindow = false
 	);
 }

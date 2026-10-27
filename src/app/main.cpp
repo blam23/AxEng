@@ -129,6 +129,12 @@ int main(int argc, char* argv[])
 		.flag()
 		.help("Allows the application to perform Threads operations");
 
+	bool backgroundWindow{ false };
+	program.add_argument("--background-window")
+		.store_into(backgroundWindow)
+		.flag()
+		.help("Shows the window behind other windows without taking focus");
+
 	const std::vector<std::string> in_args{ argv, argv + argc };
 	std::vector<std::string> out_args{};
 	flag_set<ax::lua::Permission> permissions{};
@@ -297,7 +303,8 @@ int main(int argc, char* argv[])
 				backendType,
 				std::move(nativeModule),
 				userDirectory,
-				audioConfig
+				audioConfig,
+				backgroundWindow
 			) };
 			if (err != ax::Error::Success)
 				return RET(err);
@@ -313,7 +320,8 @@ int main(int argc, char* argv[])
 				inDirectory,
 				std::move(nativeModule),
 				userDirectory,
-				audioConfig
+				audioConfig,
+				backgroundWindow
 			) };
 			if (err != ax::Error::Success)
 				return RET(err);

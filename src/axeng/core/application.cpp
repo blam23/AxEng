@@ -53,6 +53,7 @@ bool ax::Application::init_window(wgpu::BackendType backendType)
 		.title = window["title"],
 		.vsync = window["vsync"],
 		.resizable = window["resizable"].get_or(true),
+		.background = m_backgroundWindow,
 	});
 
 	bool success{ true };

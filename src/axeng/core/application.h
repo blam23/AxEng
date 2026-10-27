@@ -107,6 +107,8 @@ namespace ax
 
 		void set_headless() noexcept { m_create_window = false; }
 		void set_user_directory(std::filesystem::path user_directory) { m_userDirectory = std::move(user_directory); }
+		// Show the window without taking focus and behind other windows (for unattended runs).
+		void set_background_window(bool background) noexcept { m_backgroundWindow = background; }
 		void set_audio_config(audio::AudioSystem::Config config) noexcept { m_audioConfig = config; }
 
 		void call_deferred(std::function<void()>);
@@ -155,6 +157,7 @@ namespace ax
 		ResourceLoader m_loader;
 		std::filesystem::path m_projectSourceDirectory{};
 		std::filesystem::path m_userDirectory{};
+		bool m_backgroundWindow{ false };
 		audio::AudioSystem::Config m_audioConfig{ audio::AudioSystem::default_config() };
 		lua::ScriptManager m_scripts;
 		TextureManager m_textures;

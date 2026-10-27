@@ -6,6 +6,7 @@
 #include "axeng/core/texture.h"
 #include "axeng/core/window.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <filesystem>
 #include <format>
@@ -520,6 +521,40 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 		[&app](float r, float g, float b)
 		{
 			app.window()->set_clear_color({ r, g, b });
+		};
+
+	window_table["set_vsync"] =
+		[&app](bool enabled)
+		{
+			app.call_deferred([&app, enabled]
+			{
+				if (app.window()->vsync() == enabled)
+					return;
+				app.window()->set_vsync(enabled);
+				app.window()->create_surfaces();
+			});
+		};
+	window_table["get_vsync"] =
+		[&app]() -> bool
+		{
+			return app.window()->vsync();
+		};
+	// Updates per second of the fixed update loop (1 to 1000). Frames are rendered at most once per update, so a high
+	// rate lets a script that needs no real time run as fast as the machine allows (the self-tests do).
+	window_table["set_update_rate"] =
+		[&app](double rate)
+		{
+			app.window()->set_fixed_update_rate(std::clamp(rate, 1.0, 1000.0));
+		};
+	window_table["set_position"] =
+		[&app](int x, int y)
+		{
+			glfwSetWindowPos(app.window()->glfw_handle(), x, y);
+		};
+	window_table["set_size"] =
+		[&app](int width, int height)
+		{
+			glfwSetWindowSize(app.window()->glfw_handle(), std::max(width, 1), std::max(height, 1));
 		};
 
 	window_table["set_msaa_enabled"] =
