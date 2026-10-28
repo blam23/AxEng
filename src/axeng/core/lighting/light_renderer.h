@@ -6,7 +6,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <span>
+
+#include "axeng/core/texture.h"
 
 namespace ax
 {
@@ -103,7 +106,6 @@ namespace ax
 			std::uint32_t lights{}, glows{}, lightMapWidth{}, lightMapHeight{};
 		};
 		Stats last_stats() const noexcept { return m_stats; }
-
 	private:
 		struct InstanceBuffer
 		{
@@ -121,8 +123,7 @@ namespace ax
 		wgpu::BindGroupLayout m_instanceLayout{}, m_applyLayout{};
 		wgpu::Buffer m_uniforms{};
 		InstanceBuffer m_lights{}, m_glows{};
-		wgpu::Texture m_lightMap{};
-		wgpu::TextureView m_lightMapView{};
+		std::unique_ptr<Texture> m_lightMap{};
 		wgpu::Sampler m_sampler{};
 		wgpu::BindGroup m_applyBindGroup{};
 		Stats m_stats{};

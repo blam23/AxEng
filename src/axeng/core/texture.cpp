@@ -100,6 +100,7 @@ ax::Error ax::write_png
 ax::Texture::Texture(Badge<TextureManager>, const std::string& name, const std::vector<uint8_t> imageData, wgpu::Device* device)
 	: Asset{ name }
 {
+	register_live();
 	int iwidth, iheight, channels;
 	void* data{ nullptr };
 	data = stbi_load_from_memory(imageData.data(), (int)imageData.size(), &iwidth, &iheight, &channels, 0);
@@ -125,6 +126,7 @@ ax::Texture::Texture(Badge<TextureManager>, const std::string& name, const std::
 ax::Texture::Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, std::vector<uint8_t> rgbaPixels, wgpu::Device* device)
 	: Asset{ name }, m_pixels{ std::move(rgbaPixels) }, m_width{ width }, m_height{ height }
 {
+	register_live();
 	if (width == 0 || height == 0 || m_pixels.size() != static_cast<size_t>(width) * height * 4)
 	{
 		spdlog::error("Failed to create texture '{}', pixel data does not match {}x{} RGBA.", name, width, height);
@@ -140,6 +142,7 @@ ax::Texture::Texture(Badge<TextureManager>, const std::string& name, uint32_t wi
 ax::Texture::Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, wgpu::Device* device)
 	: Asset{ name }, m_width{ width }, m_height{ height }
 {
+	register_live();
 	if (width == 0 || height == 0 || device == nullptr)
 	{
 		spdlog::error("Failed to create temporary texture '{}', invalid dimensions or device.", name);
@@ -155,6 +158,38 @@ ax::Texture::Texture(Badge<TextureManager>, const std::string& name, uint32_t wi
 	m_loaded = true;
 }
 
+ax::Texture::Texture(Badge<LightRenderer>, const std::string& name, uint32_t width, uint32_t height, wgpu::TextureFormat format, wgpu::Device* device)
+	: Asset{ name }, m_format{ format }, m_width{ width }, m_height{ height }
+{
+	register_live();
+	if (width == 0 || height == 0 || device == nullptr)
+	{
+		spdlog::error("Failed to create render target '{}', invalid dimensions or device.", name);
+		return;
+	}
+
+	upload(name, nullptr, 0, *device);
+	if (m_texture.Get() == nullptr || m_view.Get() == nullptr)
+	{
+		spdlog::error("Failed to create render target '{}'.", name);
+		return;
+	}
+	m_loaded = true;
+}
+
+void ax::Texture::register_live()
+{
+	std::lock_guard lock{ s_liveMutex };
+	s_live.push_back(this);
+}
+
+void ax::Texture::for_each_live(const std::function<void(Texture&)>& callback)
+{
+	std::lock_guard lock{ s_liveMutex };
+	for (auto* texture : s_live)
+		callback(*texture);
+}
+
 void ax::Texture::upload(const std::string& name, const void* rgbaPixels, uint32_t bytesPerRow, wgpu::Device& device)
 {
 	m_device = device;
@@ -167,7 +202,7 @@ void ax::Texture::upload(const std::string& name, const void* rgbaPixels, uint32
 			| wgpu::TextureUsage::CopySrc | wgpu::TextureUsage::RenderAttachment,
 		.dimension = wgpu::TextureDimension::e2D,
 		.size = { .width = m_width, .height = m_height, .depthOrArrayLayers = 1 },
-		.format = wgpu::TextureFormat::RGBA8Unorm,
+		.format = m_format,
 		.mipLevelCount = 1,
 		.sampleCount = 1,
 	};
@@ -177,7 +212,7 @@ void ax::Texture::upload(const std::string& name, const void* rgbaPixels, uint32
 	wgpu::TextureViewDescriptor viewDesc
 	{
 		.label = name.data(),
-		.format = wgpu::TextureFormat::RGBA8Unorm,
+		.format = m_format,
 		.dimension = wgpu::TextureViewDimension::e2D,
 		.baseMipLevel = 0,
 		.mipLevelCount = 1,
@@ -229,6 +264,10 @@ void ax::Texture::upload(const std::string& name, const void* rgbaPixels, uint32
 
 ax::Texture::~Texture()
 {
+	{
+		std::lock_guard lock{ s_liveMutex };
+		std::erase(s_live, this);
+	}
 	if(m_stbiPtr)
 		stbi_image_free(m_stbiPtr);
 }
@@ -248,6 +287,11 @@ ax::Error ax::Texture::save_png(const std::filesystem::path& path) const
 	if (!m_loaded || m_width == 0 || m_height == 0)
 	{
 		spdlog::error("Cannot save texture '{}', no pixel data available.", m_name);
+		return Error::InvalidTexture;
+	}
+	if (m_format != wgpu::TextureFormat::RGBA8Unorm)
+	{
+		spdlog::error("Cannot save texture '{}', only RGBA8 textures can be saved.", m_name);
 		return Error::InvalidTexture;
 	}
 

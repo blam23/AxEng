@@ -52,8 +52,7 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	m_device = device;
 	m_targetFormat = targetFormat;
 	m_sampleCount = sampleCount;
-	m_lightMap = {};
-	m_lightMapView = {};
+	m_lightMap.reset();
 	m_applyBindGroup = {};
 	m_lights = {};
 	m_glows = {};
@@ -157,27 +156,21 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 
 bool ax::LightRenderer::ensure_light_map(const wgpu::Device& device, std::uint32_t width, std::uint32_t height)
 {
-	if (m_lightMap && m_lightMap.GetWidth() == width && m_lightMap.GetHeight() == height)
+	if (m_lightMap && m_lightMap->width() == width && m_lightMap->height() == height)
 		return true;
-	wgpu::TextureDescriptor desc{};
-	desc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
-	desc.dimension = wgpu::TextureDimension::e2D;
-	desc.size = { width, height };
-	desc.format = s_light_map_format;
-	desc.mipLevelCount = 1;
-	desc.sampleCount = 1;
-	desc.label = "Light map";
-	m_lightMap = device.CreateTexture(&desc);
-	if (!m_lightMap)
+	m_lightMap = std::make_unique<Texture>(Badge<LightRenderer>{}, "light_map", width, height, s_light_map_format, &m_device);
+	if (!m_lightMap->is_loaded())
+	{
+		m_lightMap.reset();
 		return false;
-	m_lightMapView = m_lightMap.CreateView();
+	}
 
 	std::array<wgpu::BindGroupEntry, 3> entries{};
 	entries[0].binding = 0;
 	entries[0].buffer = m_uniforms;
 	entries[0].size = sizeof(Uniforms);
 	entries[1].binding = 1;
-	entries[1].textureView = m_lightMapView;
+	entries[1].textureView = m_lightMap->view();
 	entries[2].binding = 2;
 	entries[2].sampler = m_sampler;
 	wgpu::BindGroupDescriptor groupDesc{};
@@ -239,7 +232,7 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 	{
 		ZoneScopedN("LightRenderer::light-map");
 		wgpu::RenderPassColorAttachment attachment{};
-		attachment.view = m_lightMapView;
+		attachment.view = m_lightMap->view();
 		attachment.depthSlice = wgpu::kDepthSliceUndefined;
 		attachment.loadOp = wgpu::LoadOp::Clear;
 		attachment.storeOp = wgpu::StoreOp::Store;

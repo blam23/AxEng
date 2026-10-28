@@ -591,63 +591,58 @@ void ax::debug::ViewManager::debug_view_callback(Debugger& debugger, Application
 
 	ImGui::Begin(ICON_FA_IMAGE " Texture View");
 	{
-		static Texture* texture{ nullptr };
-		static std::string label{ "Pick a texture to inspect" };
+		static std::string selected{};
 		static bool filter{ false };
 		static ImGuiImage::State zoomState;
 
-		if (ImGui::BeginCombo("##textures", label.c_str()))
-		{
-			static size_t current{ 0 };
-			size_t n{ 0 };
-			app.textures().for_each_name
-			(
-				[&n, &app](const std::string& name)
-				{
-					if (ImGui::Selectable(name.c_str(), current == n))
-					{
-						texture = app.textures().get(name);
-						current = n;
-						label = name;
-						zoomState = {};
-						zoomState.textureSize = ImVec2((float)texture->width(), (float)texture->height());
-						zoomState.maintainAspectRatio = true;
-					}
-					n++;
-				}
-			);
-
-			for(const auto& [name, textureLease] : debugger.get_temp_textures())
+		std::vector<std::string> names{};
+		Texture::for_each_live
+		(
+			[&names](Texture& live)
 			{
-				if (ImGui::Selectable(name.c_str(), current == n))
+				if (live.is_loaded() && live.view().Get() != nullptr)
+					names.push_back(live.asset_name());
+			}
+		);
+		std::sort(names.begin(), names.end());
+		names.erase(std::unique(names.begin(), names.end()), names.end());
+
+		if (ImGui::BeginCombo("##textures", selected.empty() ? "Pick a texture to inspect" : selected.c_str()))
+		{
+			for (const auto& name : names)
+			{
+				if (ImGui::Selectable(name.c_str(), name == selected))
 				{
-					texture = textureLease->texture.get();
-					current = n;
-					label = name;
+					selected = name;
 					zoomState = {};
-					zoomState.textureSize = ImVec2((float)texture->width(), (float)texture->height());
 					zoomState.maintainAspectRatio = true;
 				}
-				n++;
 			}
 
 			ImGui::EndCombo();
-
 		}
 		ImGui::SameLine();
 		ImGui::Checkbox("Filter", &filter);
 
-
-		if (texture != nullptr)
+		if (!selected.empty())
 		{
-			if (!filter)
-				ImGui::GetWindowDrawList()->AddCallback(ImGui::GetPlatformIO().DrawCallback_SetSamplerNearest);
-
-			ImVec2 displaySize = ImGui::GetContentRegionAvail();
-			if (texture == nullptr)
-				spdlog::error("Unable to load texture 'tower'");
-			else
-				ImGuiImage::Zoomable((ImTextureID)(intptr_t)texture->view().Get(), displaySize, &zoomState);
+			const ImVec2 displaySize{ ImGui::GetContentRegionAvail() };
+			bool found{ false };
+			Texture::for_each_live
+			(
+				[&](Texture& live)
+				{
+					if (found || live.asset_name() != selected || !live.is_loaded() || live.view().Get() == nullptr)
+						return;
+					found = true;
+					zoomState.textureSize = ImVec2((float)live.width(), (float)live.height());
+					if (!filter)
+						ImGui::GetWindowDrawList()->AddCallback(ImGui::GetPlatformIO().DrawCallback_SetSamplerNearest);
+					ImGuiImage::Zoomable(live.imgui_view(), displaySize, &zoomState);
+				}
+			);
+			if (!found)
+				ImGui::TextUnformatted("Texture no longer exists");
 		}
 	}
 	ImGui::End();

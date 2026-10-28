@@ -3,8 +3,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -27,6 +29,7 @@
 namespace ax
 {
 	class SpriteGroup;
+	class LightRenderer;
 	using rectf = glm::vec4;
 
 	Error encode_png
@@ -114,7 +117,13 @@ namespace ax
 		Texture(Badge<TextureManager>, const std::string& name, const std::vector<uint8_t> data, wgpu::Device* device);
 		Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, std::vector<uint8_t> rgbaPixels, wgpu::Device* device);
 		Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, wgpu::Device* device);
+		// A GPU-only render target in a non-default format.
+		Texture(Badge<LightRenderer>, const std::string& name, uint32_t width, uint32_t height, wgpu::TextureFormat format, wgpu::Device* device);
 		~Texture();
+
+		// Calls the callback for every live texture, for the debug texture viewer. The registry is locked while the
+		// callback runs, so it must not create or destroy textures.
+		static void for_each_live(const std::function<void(Texture&)>& callback);
 
 		const wgpu::Texture& texture() const { return m_texture; }
 		const wgpu::TextureView& view() const { return m_view; }
@@ -150,7 +159,12 @@ namespace ax
 
 	private:
 		void upload(const std::string& name, const void* rgbaPixels, uint32_t bytesPerRow, wgpu::Device& device);
+		void register_live();
 
+		inline static std::mutex s_liveMutex{};
+		inline static std::vector<Texture*> s_live{};
+
+		wgpu::TextureFormat m_format{ wgpu::TextureFormat::RGBA8Unorm };
 		wgpu::Texture m_texture;
 		wgpu::TextureView m_view;
 		wgpu::Device m_device;
