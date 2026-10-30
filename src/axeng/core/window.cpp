@@ -2328,7 +2328,10 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			lightingSettings = m_lightingSettings;
 			const auto particleLights{ lightingSettings.particleLights
 				? m_particleSystem.lights().size() + m_particleSystem.emission_light_emitters() : std::size_t{} };
-			lightingActive = lighting_active(lightingSettings, m_queuedLights.size() + particleLights, m_queuedGlows.size());
+			const auto hasNegativeLights{ std::any_of(m_queuedLights.begin(), m_queuedLights.end(),
+				[](const Light2D& light) { return light.intensity < 0.0f; }) };
+			lightingActive = lighting_active(lightingSettings, m_queuedLights.size() + particleLights,
+				m_queuedGlows.size(), hasNegativeLights || (m_queuedNoiseShadow && m_queuedNoiseShadow->darkness > 0.0f));
 		}
 		if (lightingActive && !m_lightRenderer.init(m_device, m_surfaceFormat, m_sampleCount))
 			lightingActive = false;
@@ -2559,10 +2562,12 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			materialPass.End();
 		}
 
+		std::optional<NoiseShadow2D> frameNoiseShadow{};
 		{
 			std::lock_guard lock{ m_lightingMutex };
 			m_frameLights.swap(m_queuedLights);
 			m_frameGlows.swap(m_queuedGlows);
+			frameNoiseShadow = std::exchange(m_queuedNoiseShadow, std::nullopt);
 			m_queuedLights.clear();
 			m_queuedGlows.clear();
 		}
@@ -2581,7 +2586,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				[this, &lightingSettings](wgpu::RenderPassEncoder& pass)
 				{
 					if (lightingSettings.particleLights) m_particleSystem.draw_lights(pass);
-				});
+				}, frameNoiseShadow ? &*frameNoiseShadow : nullptr);
 
 			{
 			ZoneScopedN("Window::unlit-scene-pass");
@@ -2939,6 +2944,12 @@ void ax::Window::submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>
 	m_queuedGlows.swap(glows);
 	lights.clear();
 	glows.clear();
+}
+
+void ax::Window::submit_noise_shadow(std::optional<NoiseShadow2D> shadow)
+{
+	std::lock_guard lock{ m_lightingMutex };
+	m_queuedNoiseShadow = std::move(shadow);
 }
 
 void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)

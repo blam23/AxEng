@@ -2,6 +2,8 @@ struct Uniforms {
 	viewport: vec4<f32>, // width, height
 	camera: vec4<f32>, // x, y, zoom
 	ambient: vec4<f32>, // rgb, max exposure
+	noiseTransform: vec4<f32>, // scale xy, offset xy
+	noiseShape: vec4<f32>, // coverage, softness, darkness, seed
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -15,6 +17,10 @@ struct InstanceOut {
 	@location(0) local: vec2<f32>,
 	@location(1) @interpolate(flat) colour: vec4<f32>,
 	@location(2) @interpolate(flat) cone: vec4<f32>,
+};
+
+struct FullscreenOut {
+	@builtin(position) pos: vec4<f32>,
 };
 
 // Instances are octagons around the unit circle, a fan of six triangles (18 vertices): about 17% fewer pixels than a
@@ -62,6 +68,54 @@ fn fs_light(in_: InstanceOut) -> @location(0) vec4<f32> {
 	return vec4<f32>(in_.colour.rgb * attenuation, 0.0);
 }
 
+fn hash21(p : vec2<f32>) -> f32 {
+	var q = fract(p * vec2<f32>(123.34, 456.21));
+	q = q + dot(q, q + 45.32);
+	return fract(q.x * q.y);
+}
+
+fn value_noise(p : vec2<f32>) -> f32 {
+	let i = floor(p);
+	let f = fract(p);
+	let u = f * f * (3.0 - 2.0 * f);
+	return mix(
+		mix(hash21(i), hash21(i + vec2<f32>(1.0, 0.0)), u.x),
+		mix(hash21(i + vec2<f32>(0.0, 1.0)), hash21(i + vec2<f32>(1.0, 1.0)), u.x),
+		u.y);
+}
+
+fn fbm(p : vec2<f32>) -> f32 {
+	var sum = 0.0;
+	var amplitude = 0.5;
+	var q = p;
+	for (var i = 0; i < 4; i = i + 1) {
+		sum = sum + value_noise(q) * amplitude;
+		q = q * 2.03 + vec2<f32>(17.1, 9.7);
+		amplitude = amplitude * 0.5;
+	}
+	return sum / 0.9375;
+}
+
+@vertex
+fn vs_shadow(@builtin(vertex_index) vertex: u32) -> FullscreenOut {
+	var positions = array<vec2<f32>, 3>(vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+	var out: FullscreenOut;
+	out.pos = vec4<f32>(positions[vertex], 0.0, 1.0);
+	return out;
+}
+
+@fragment
+fn fs_shadow(in_: FullscreenOut) -> @location(0) vec4<f32> {
+	let screen = in_.pos.xy * max(u.camera.w, 1.0);
+	let world = (screen - u.viewport.xy * 0.5) / u.camera.z + u.camera.xy;
+	let noiseUv = world / max(u.noiseTransform.xy, vec2<f32>(1.0)) + u.noiseTransform.zw
+		+ vec2<f32>(u.noiseShape.w * 0.73, u.noiseShape.w * 1.17);
+	let noise = fbm(noiseUv);
+	let cloud = smoothstep(u.noiseShape.x, u.noiseShape.x + max(u.noiseShape.y, 0.001), noise);
+	let light = 1.0 - cloud * u.noiseShape.z;
+	return vec4<f32>(light, light, light, 1.0);
+}
+
 @vertex
 fn vs_glow(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> InstanceOut {
 	let a = items[instance * 2u];
@@ -85,10 +139,6 @@ fn fs_glow(in_: InstanceOut) -> @location(0) vec4<f32> {
 
 @group(0) @binding(1) var lightMap: texture_2d<f32>;
 @group(0) @binding(2) var lightSampler: sampler;
-
-struct FullscreenOut {
-	@builtin(position) pos: vec4<f32>,
-};
 
 @vertex
 fn vs_apply(@builtin(vertex_index) vertex: u32) -> FullscreenOut {

@@ -16,7 +16,7 @@ namespace ax
 	// The light map is a single sample target of this format.
 	constexpr wgpu::TextureFormat light_map_format{ wgpu::TextureFormat::RGBA16Float };
 
-	// A light in world pixels. It adds colour * intensity, fading to nothing at radius with
+	// A light in world pixels. It adds colour * intensity (a negative intensity subtracts light), fading to nothing at radius with
 	// (1 - d^2)^falloff. A cone limits it to directions within coneOuter of direction, fully lit within
 	// coneInner (both cosines of half angles); coneOuter <= -1 lights every direction.
 	struct Light2D
@@ -56,6 +56,17 @@ namespace ax
 	static_assert(offsetof(Glow2D, colour) == 16);
 	static_assert(sizeof(Glow2D) == Glow2D::gpuDataSize);
 
+	// A drifting, thresholded noise mask that darkens the light map over world space.
+	struct NoiseShadow2D
+	{
+		glm::vec2 scale{ 320.0f };
+		glm::vec2 offset{};
+		float coverage{ 0.48f };
+		float softness{ 0.16f };
+		float darkness{ 0.18f };
+		float seed{ 17.0f };
+	};
+
 	struct LightingSettings
 	{
 		// When disabled, or when ambient is full white with nothing to light, frames render exactly as without
@@ -82,7 +93,7 @@ namespace ax
 	};
 
 	// Whether a frame with these settings and lights needs the lighting passes at all.
-	bool lighting_active(const LightingSettings&, std::size_t lights, std::size_t glows) noexcept;
+	bool lighting_active(const LightingSettings&, std::size_t lights, std::size_t glows, bool hasShadows = false) noexcept;
 
 	// Accumulates every light into a reduced resolution light map in one instanced draw, multiplies the target by
 	// it in one fullscreen pass and adds glows in one more instanced draw.
@@ -99,7 +110,7 @@ namespace ax
 		void encode(const wgpu::Device&, const wgpu::Queue&, wgpu::CommandEncoder&, const wgpu::TextureView& target,
 			std::uint32_t width, std::uint32_t height, const LightView&, const LightingSettings&,
 			std::span<const Light2D>, std::span<const Glow2D>,
-			const std::function<void(wgpu::RenderPassEncoder&)>& extraLights = {});
+		const std::function<void(wgpu::RenderPassEncoder&)>& extraLights = {}, const NoiseShadow2D* noiseShadow = nullptr);
 
 		struct Stats
 		{
@@ -119,7 +130,7 @@ namespace ax
 		wgpu::Device m_device{};
 		wgpu::TextureFormat m_targetFormat{ wgpu::TextureFormat::Undefined };
 		std::uint32_t m_sampleCount{};
-		wgpu::RenderPipeline m_lightPipeline{}, m_applyPipeline{}, m_brightApplyPipeline{}, m_glowPipeline{};
+		wgpu::RenderPipeline m_lightPipeline{}, m_shadowPipeline{}, m_applyPipeline{}, m_brightApplyPipeline{}, m_glowPipeline{};
 		wgpu::BindGroupLayout m_instanceLayout{}, m_applyLayout{};
 		wgpu::Buffer m_uniforms{};
 		InstanceBuffer m_lights{}, m_glows{};

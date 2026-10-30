@@ -124,7 +124,7 @@ protected:
 	static Image render(glm::vec4 clear, const ax::LightingSettings& lighting, std::span<const ax::Light2D> lights,
 		std::span<const ax::Glow2D> glows = {}, std::uint32_t samples = 1, const ax::LightView& view = centred_view(),
 		const std::function<void(wgpu::CommandEncoder&)>& before = {},
-		const std::function<void(wgpu::RenderPassEncoder&)>& extra = {})
+		const std::function<void(wgpu::RenderPassEncoder&)>& extra = {}, const ax::NoiseShadow2D* noiseShadow = nullptr)
 	{
 		constexpr auto format{ wgpu::TextureFormat::RGBA8Unorm };
 		const auto makeTexture = [](std::uint32_t sampleCount, wgpu::TextureUsage usage)
@@ -159,7 +159,7 @@ protected:
 		if (before)
 			before(encoder);
 		renderer.encode(s_device, s_device.GetQueue(), encoder, targetView, s_size, s_size, view, lighting,
-			lights, glows, extra);
+			lights, glows, extra, noiseShadow);
 		if (samples > 1)
 		{
 			wgpu::RenderPassColorAttachment colour{};
@@ -224,6 +224,7 @@ TEST(LightingActive, SkipsDisabledAndFullyLitFrames)
 	EXPECT_FALSE(ax::lighting_active(lighting, 10, 10));
 	lighting.enabled = true;
 	EXPECT_FALSE(ax::lighting_active(lighting, 10, 0));
+	EXPECT_TRUE(ax::lighting_active(lighting, 10, 0, true));
 	EXPECT_TRUE(ax::lighting_active(lighting, 0, 1));
 	lighting.maxExposure = 1.5f;
 	EXPECT_TRUE(ax::lighting_active(lighting, 1, 0));
@@ -238,6 +239,34 @@ TEST_F(LightRendererTest, AmbientMultipliesTarget)
 	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, settings({ 0.5f, 0.25f, 1.0f }), {}) };
 	EXPECT_TRUE(close_to(image.at(10, 10), { 128, 64, 255, 255 }, 2));
 	EXPECT_TRUE(close_to(image.at(100, 90), { 128, 64, 255, 255 }, 2));
+}
+
+TEST_F(LightRendererTest, NegativeLightCastsAShadowOnFullyLitAmbient)
+{
+	const std::array lights{ ax::Light2D{ .position = { 0.0f, 0.0f }, .radius = 40.0f, .intensity = -0.5f,
+		.colour = { 1.0f, 1.0f, 1.0f }, .falloff = 2.0f } };
+	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), lights) };
+	EXPECT_LT(image.at(64, 64)[0], 255);
+	EXPECT_TRUE(close_to(image.at(10, 10), { 255, 255, 255, 255 }, 2));
+}
+
+TEST_F(LightRendererTest, NoiseShadowDarkensLightMapAcrossTheScene)
+{
+	const ax::NoiseShadow2D shadow{ .scale = { 36.0f, 36.0f }, .coverage = 0.45f, .softness = 0.12f,
+		.darkness = 0.35f, .seed = 17.0f };
+	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), {}, {}, 1,
+		centred_view(), {}, {}, &shadow) };
+	int darkest{ 255 };
+	int brightest{};
+	for (std::uint32_t y = 8; y < s_size - 8; ++y)
+		for (std::uint32_t x = 8; x < s_size - 8; ++x)
+		{
+			const auto value{ image.at(x, y)[0] };
+			darkest = std::min(darkest, value);
+			brightest = std::max(brightest, value);
+		}
+	EXPECT_LT(darkest, 230);
+	EXPECT_GT(brightest, 245);
 }
 
 TEST_F(LightRendererTest, LightBrightensOnlyWithinItsRadius)

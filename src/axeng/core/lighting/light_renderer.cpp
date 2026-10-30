@@ -23,8 +23,10 @@ namespace
 		glm::vec4 viewport{};
 		glm::vec4 camera{};
 		glm::vec4 ambient{};
+		glm::vec4 noiseTransform{};
+		glm::vec4 noiseShape{};
 	};
-	static_assert(sizeof(Uniforms) == 48);
+	static_assert(sizeof(Uniforms) == 80);
 
 	wgpu::BlendState additive_blend()
 	{
@@ -33,15 +35,23 @@ namespace
 		blend.alpha = { wgpu::BlendOperation::Add, wgpu::BlendFactor::Zero, wgpu::BlendFactor::One };
 		return blend;
 	}
+
+	wgpu::BlendState noise_shadow_blend()
+	{
+		wgpu::BlendState blend{};
+		blend.color = { wgpu::BlendOperation::Add, wgpu::BlendFactor::Zero, wgpu::BlendFactor::Src };
+		blend.alpha = { wgpu::BlendOperation::Add, wgpu::BlendFactor::Zero, wgpu::BlendFactor::One };
+		return blend;
+	}
 }
 
-bool ax::lighting_active(const LightingSettings& settings, std::size_t lights, std::size_t glows) noexcept
+bool ax::lighting_active(const LightingSettings& settings, std::size_t lights, std::size_t glows, bool hasShadows) noexcept
 {
 	if (!settings.enabled)
 		return false;
 	const bool fullAmbient{ settings.ambient.r >= 1.0f && settings.ambient.g >= 1.0f && settings.ambient.b >= 1.0f };
 	// Lights only show below the exposure limit, so a fully lit scene with no glows is left untouched.
-	return !fullAmbient || (settings.maxExposure > 1.0f && lights > 0) || glows > 0;
+	return !fullAmbient || (settings.maxExposure > 1.0f && lights > 0) || hasShadows || glows > 0;
 }
 
 bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat targetFormat, std::uint32_t sampleCount)
@@ -128,6 +138,7 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	wgpu::BlendState doubled{ multiply };
 	doubled.color.dstFactor = wgpu::BlendFactor::Src;
 	m_lightPipeline = pipeline(m_instanceLayout, "vs_light", "fs_light", s_light_map_format, 1, additive);
+	m_shadowPipeline = pipeline(m_instanceLayout, "vs_shadow", "fs_shadow", s_light_map_format, 1, noise_shadow_blend());
 	m_glowPipeline = pipeline(m_instanceLayout, "vs_glow", "fs_glow", targetFormat, sampleCount, additive);
 	m_applyPipeline = pipeline(m_applyLayout, "vs_apply", "fs_apply", targetFormat, sampleCount, multiply);
 	m_brightApplyPipeline = pipeline(m_applyLayout, "vs_apply", "fs_apply_bright", targetFormat, sampleCount, doubled);
@@ -145,7 +156,7 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	samplerDesc.minFilter = wgpu::FilterMode::Linear;
 	m_sampler = device.CreateSampler(&samplerDesc);
 
-	if (!m_lightPipeline || !m_glowPipeline || !m_applyPipeline || !m_brightApplyPipeline)
+	if (!m_lightPipeline || !m_shadowPipeline || !m_glowPipeline || !m_applyPipeline || !m_brightApplyPipeline)
 	{
 		spdlog::error("Failed to create the lighting pipelines.");
 		m_lightPipeline = {};
@@ -210,7 +221,7 @@ void ax::LightRenderer::ensure_buffer(const wgpu::Device& device, InstanceBuffer
 void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
 	const wgpu::TextureView& target, std::uint32_t width, std::uint32_t height, const LightView& view,
 	const LightingSettings& settings, std::span<const Light2D> lights, std::span<const Glow2D> glows,
-	const std::function<void(wgpu::RenderPassEncoder&)>& extraLights)
+	const std::function<void(wgpu::RenderPassEncoder&)>& extraLights, const NoiseShadow2D* noiseShadow)
 {
 	ZoneScopedN("LightRenderer::encode");
 	m_stats = {};
@@ -226,8 +237,19 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		.viewport = { view.viewport.x, view.viewport.y, 0.0f, 0.0f },
 		.camera = { view.cameraPosition.x, view.cameraPosition.y, std::max(view.zoom, 0.001f), 0.0f },
 		.ambient = { settings.ambient, std::clamp(settings.maxExposure, 0.0f, 2.0f) },
+		.noiseTransform = noiseShadow ? glm::vec4{ noiseShadow->scale, noiseShadow->offset } : glm::vec4{},
+		.noiseShape = noiseShadow ? glm::vec4{ noiseShadow->coverage, noiseShadow->softness,
+			noiseShadow->darkness, noiseShadow->seed } : glm::vec4{},
 	};
-	queue.WriteBuffer(m_uniforms, 0, &uniforms, sizeof(uniforms));
+	// The light map is lower resolution than the scene; retain the scale for converting its fragment coordinates
+	// back to the full-resolution screen before transforming them into world space.
+	const auto mappedUniforms{ [&]
+	{
+		auto mapped{ uniforms };
+		mapped.camera.w = static_cast<float>(divisor);
+		return mapped;
+	}() };
+	queue.WriteBuffer(m_uniforms, 0, &mappedUniforms, sizeof(mappedUniforms));
 
 	{
 		ZoneScopedN("LightRenderer::light-map");
@@ -252,6 +274,13 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		}
 		if (extraLights)
 			extraLights(pass);
+		if (noiseShadow && noiseShadow->darkness > 0.0f)
+		{
+			if (m_lights.buffer == nullptr) ensure_buffer(device, m_lights, sizeof(Light2D), "Noise shadow binding");
+			pass.SetPipeline(m_shadowPipeline);
+			pass.SetBindGroup(0, m_lights.bindGroup);
+			pass.Draw(3);
+		}
 		pass.End();
 	}
 
