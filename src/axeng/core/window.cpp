@@ -872,6 +872,19 @@ void ax::Window::reload_pipeline()
 	pipelineDesc.layout = layout;
 	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
 
+	wgpu::BlendState spriteBlend{};
+	spriteBlend.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
+	spriteBlend.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+	spriteBlend.color.operation = wgpu::BlendOperation::Add;
+	spriteBlend.alpha.srcFactor = wgpu::BlendFactor::One;
+	spriteBlend.alpha.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+	spriteBlend.alpha.operation = wgpu::BlendOperation::Add;
+	colorTarget.blend = &spriteBlend;
+	fragmentState.entryPoint = "fs_main";
+	m_screenSpacePipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+	colorTarget.blend = nullptr;
+	fragmentState.entryPoint = "fs_opaque";
+
 	ShapeRenderer::init(m_device, {
 		.colourFormat = m_surfaceFormat,
 		.depthFormat = m_depthTextureFormat,
@@ -2369,6 +2382,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		}
 		handle_render_pass(scenePass, delta, lightingActive);
 		drawMaterials(scenePass, MaterialPass::Scene);
+		m_postSceneRenderEventHandler.fire({ .delta = delta, .pass = scenePass });
 		scenePass.End();
 		}
 
@@ -2388,6 +2402,13 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			overlayShapes.resize(lit);
 		}
 		drawOverlay(overlayShapes);
+		if (!lightingActive && !m_screenSpaceSpriteGroupRanges.empty())
+		{
+			ZoneScopedN("Window::screen-space-sprites");
+			auto screenSpacePass{ beginScenePass(false) };
+			draw_sprite_batches(screenSpacePass, m_screenSpacePipeline, SpriteLayer::ScreenSpace);
+			screenSpacePass.End();
+		}
 		// After the overlay shapes: depth decides what covers what, so panels sit under a screen space material and
 		// popups over it.
 		if (std::ranges::any_of(m_frameMaterials, [](const MaterialDraw& call) { return call.screenSpace; }))
@@ -2460,6 +2481,13 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			if (!m_unlitSpriteGroupRanges.empty() || unlitBatches)
 				encodeTransparent(SpriteLayer::Unlit);
 			drawOverlay(m_unlitOverlayShapes);
+			if (!m_screenSpaceSpriteGroupRanges.empty())
+			{
+				ZoneScopedN("Window::screen-space-sprites");
+				auto screenSpacePass{ beginScenePass(false) };
+				draw_sprite_batches(screenSpacePass, m_screenSpacePipeline, SpriteLayer::ScreenSpace);
+				screenSpacePass.End();
+			}
 			m_unlitShapes.clear();
 		}
 		m_pendingTextures.clear();
@@ -2599,6 +2627,7 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 			ZoneScopedN("Window::sprite-grouping");
 			m_spriteGroupRanges.clear();
 			m_unlitSpriteGroupRanges.clear();
+			m_screenSpaceSpriteGroupRanges.clear();
 			for (auto* sprite : m_activeSprites)
 			{
 				if (sprite->tex == sprite->groupedTexture)
@@ -2631,6 +2660,7 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 
 		ensure_uniform_capacity(static_cast<uint32_t>(spriteCount));
 		m_spriteGroupRanges.reserve(m_spriteGroups.size());
+		m_screenSpaceSpriteGroupRanges.reserve(m_spriteGroups.size());
 		m_spriteUploadData.reserve(spriteCount);
 
 		uint32_t instanceCursor = 0;
@@ -2649,24 +2679,39 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 			if (count == 0)
 				return;
 
-			// Lit sprites first, so each kind is one contiguous range; both keep their order.
-			auto litCount{ count };
-			if (splitUnlit)
+			// Keep screen-space sprites after scene rendering even when no lighting split is active.
+			m_unlitUploadScratch.clear();
+			m_screenSpaceUploadScratch.clear();
+			std::uint32_t litCount{};
+			for (const auto& data : m_spriteUploadData)
 			{
-				m_unlitUploadScratch.clear();
-				std::size_t lit{};
-				for (const auto& data : m_spriteUploadData)
+				if (data.screenSpace != 0)
 				{
-					if (sprite_unlit(data)) m_unlitUploadScratch.push_back(data);
-					else m_spriteUploadData[lit++] = data;
+					m_screenSpaceUploadScratch.push_back(data);
 				}
-				std::ranges::copy(m_unlitUploadScratch, m_spriteUploadData.begin() + static_cast<std::ptrdiff_t>(lit));
-				litCount = static_cast<uint32_t>(lit);
+				else if (splitUnlit && sprite_unlit(data))
+				{
+					m_unlitUploadScratch.push_back(data);
+				}
+				else
+				{
+					m_spriteUploadData[litCount++] = data;
+				}
 			}
 			if (litCount > 0)
 				m_spriteGroupRanges.push_back({ tex, instanceCursor, litCount });
-			if (litCount < count)
-				m_unlitSpriteGroupRanges.push_back({ tex, instanceCursor + litCount, count - litCount });
+			const auto unlitStart{ instanceCursor + litCount };
+			std::ranges::copy(m_unlitUploadScratch,
+				m_spriteUploadData.begin() + static_cast<std::ptrdiff_t>(litCount));
+			const auto unlitCount{ static_cast<std::uint32_t>(m_unlitUploadScratch.size()) };
+			if (unlitCount > 0)
+				m_unlitSpriteGroupRanges.push_back({ tex, unlitStart, unlitCount });
+			const auto screenSpaceStart{ unlitStart + unlitCount };
+			std::ranges::copy(m_screenSpaceUploadScratch,
+				m_spriteUploadData.begin() + static_cast<std::ptrdiff_t>(litCount + m_unlitUploadScratch.size()));
+			const auto screenSpaceCount{ static_cast<std::uint32_t>(m_screenSpaceUploadScratch.size()) };
+			if (screenSpaceCount > 0)
+				m_screenSpaceSpriteGroupRanges.push_back({ tex, screenSpaceStart, screenSpaceCount });
 			m_queue.WriteBuffer
 			(
 				m_uniforms,
@@ -2704,12 +2749,15 @@ void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::
 	for (const auto& batch : m_staticSpriteBatches)
 	{
 		if (!batch->ready() || !batch->visible()
+			|| layer == SpriteLayer::ScreenSpace
 			|| (layer == SpriteLayer::Lit && batch->unlit()) || (layer == SpriteLayer::Unlit && !batch->unlit()))
 			continue;
 		pass.SetBindGroup(0, batch->m_bindGroup);
 		pass.Draw(6, static_cast<std::uint32_t>(batch->size()));
 	}
-	for (const auto& range : layer == SpriteLayer::Unlit ? m_unlitSpriteGroupRanges : m_spriteGroupRanges)
+	const auto& ranges{ layer == SpriteLayer::Unlit ? m_unlitSpriteGroupRanges
+		: layer == SpriteLayer::ScreenSpace ? m_screenSpaceSpriteGroupRanges : m_spriteGroupRanges };
+	for (const auto& range : ranges)
 	{
 		pass.SetBindGroup(0, get_texture_bind_group(range.tex));
 		pass.Draw(6, range.count, 0, range.start);

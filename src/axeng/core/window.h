@@ -136,6 +136,11 @@ namespace ax
 		{
 			return m_renderEventHandler;
 		}
+		// Fires after the scene pass has drawn its queued materials, while that pass is still open.
+		RenderEventHandler& get_post_scene_render_event_handler()
+		{
+			return m_postSceneRenderEventHandler;
+		}
 
 		using UIEventHandler = EventHandler<WindowUIEvent>;
 		UIEventHandler& get_ui_event_handler()
@@ -168,6 +173,8 @@ namespace ax
 		const wgpu::Device& device() const noexcept { return m_device; }
 		wgpu::Queue& queue() noexcept { return m_queue; }
 		const wgpu::Queue& queue() const noexcept { return m_queue; }
+		wgpu::TextureFormat surface_format() const noexcept { return m_surfaceFormat; }
+		std::uint32_t sample_count() const noexcept { return m_sampleCount; }
 		ParticleSystem& particle_system() noexcept { return m_particleSystem; }
 
 		std::uint32_t width() const noexcept { return m_width; }
@@ -267,7 +274,7 @@ namespace ax
 		// With splitUnlit, unlit sprites and shapes are held back to be drawn after lighting.
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta, bool splitUnlit = false);
 		// Which sprites a draw covers: everything (no lighting), or the lit or unlit share of a lit frame.
-		enum class SpriteLayer : std::uint8_t { All, Lit, Unlit };
+		enum class SpriteLayer : std::uint8_t { All, Lit, Unlit, ScreenSpace };
 		void draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline,
 			SpriteLayer layer = SpriteLayer::All);
 		void stage_sprite_batches();
@@ -312,6 +319,7 @@ namespace ax
 		PreRenderEventHandler m_preRenderEventHandler;
 		PreRenderEventHandler m_prepareFrameEventHandler;
 		RenderEventHandler m_renderEventHandler;
+		RenderEventHandler m_postSceneRenderEventHandler;
 		UIEventHandler m_uiEventHandler;
 		RequestCloseEventHandler m_requestCloseEventHandler;
 		ResizeEventHandler m_resizeEventHandler;
@@ -338,6 +346,7 @@ namespace ax
 		wgpu::ShaderModule m_shader;
 		wgpu::ShaderModule m_compositeShader;
 		wgpu::RenderPipeline m_pipeline;
+		wgpu::RenderPipeline m_screenSpacePipeline;
 		wgpu::RenderPipeline m_oitPipeline;
 		wgpu::RenderPipeline m_compositePipeline;
 		wgpu::Texture m_oitAccumulationTexture;
@@ -395,9 +404,11 @@ namespace ax
 		std::vector<SpriteGpuData> m_spriteUploadData;
 		std::vector<SpriteGroupRange> m_spriteGroupRanges;
 		std::vector<SpriteGroupRange> m_unlitSpriteGroupRanges;
+		std::vector<SpriteGroupRange> m_screenSpaceSpriteGroupRanges;
 		UnlitShapeCapture m_unlitShapes;
 		ShapeList m_unlitOverlayShapes;
 		std::vector<SpriteGpuData> m_unlitUploadScratch;
+		std::vector<SpriteGpuData> m_screenSpaceUploadScratch;
 
 		LightRenderer m_lightRenderer;
 		mutable std::mutex m_lightingMutex{};
