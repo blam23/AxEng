@@ -8,6 +8,8 @@ struct Uniforms {
 	use_region: u32, // flags: 1 = use region, 2 = SDF, 4 = MSDF (distance edge at 0.5)
 	screen_space: u32,
 	clip_rect: vec4<f32>, // min x/y and max x/y in screen pixels; max < min disables clipping
+	effect_params: vec4<f32>, // kind, thickness, softness, reserved
+	effect_offset: vec4<f32>, // screen pixels in xy
 };
 
 @group(0) @binding(0) var<storage, read> sprites : array<Uniforms>;
@@ -27,6 +29,8 @@ struct VSOut {
 	@location(2) @interpolate(flat) texelBounds : vec4<f32>,
 	@location(3) @interpolate(flat) sdf : u32,
 	@location(4) @interpolate(flat) clip_rect : vec4<f32>,
+	@location(5) @interpolate(flat) effectParams : vec4<f32>,
+	@location(6) @interpolate(flat) effectOffset : vec4<f32>,
 };
 
 @vertex
@@ -80,6 +84,8 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	out.tint = u.tint;
 	out.sdf = (u.use_region >> 1u) & 3u;
 	out.clip_rect = u.clip_rect;
+	out.effectParams = u.effect_params;
+	out.effectOffset = u.effect_offset;
 	let texelMin = select(vec2<f32>(0.0), u.region.xy, useRegion);
 	let texelMax = select(textureSize, u.region.xy + u.region.zw, useRegion) - vec2<f32>(1.0);
 	out.texelBounds = clamp(vec4<f32>(texelMin, texelMax),
@@ -125,20 +131,25 @@ fn sprite_color(in_: VSOut) -> vec4<f32> {
 	// Clamp each tap to the sprite region, not just the full atlas. Distance fields aren't premultiplied:
 	// their alpha is a distance, not coverage.
 	let premultiply = !sdf;
-	let pixel = sample_texture(uv, in_.texelBounds, premultiply);
+	let effectUv = uv - dpdx(uv) * in_.effectOffset.x - dpdy(uv) * in_.effectOffset.y;
+	let pixel = sample_texture(effectUv, in_.texelBounds, premultiply);
 	let distance = select(pixel.a, median3(pixel.rgb), msdf);
 	// Four quarter-pixel samples approximate 2x render-and-downsample for distance-field sprites.
 	let distanceWidth = max(fwidth(distance) * 0.25, 0.0001);
-	let lowerEdge = 0.5 - distanceWidth;
-	let upperEdge = 0.5 + distanceWidth;
+	let effect = in_.effectParams.x > 0.0;
+	let effectDistanceWidth = fwidth(distance);
+	let softness = max(in_.effectParams.z, 0.0) * effectDistanceWidth;
+	let expansion = max(in_.effectParams.y, 0.0) * effectDistanceWidth;
+	let lowerEdge = select(0.5 - distanceWidth, 0.5 - expansion - distanceWidth - softness, effect);
+	let upperEdge = select(0.5 + distanceWidth, 0.5 - expansion + distanceWidth + softness, effect);
 	var sdfAlpha = smoothstep(lowerEdge, upperEdge, distance);
-	let sampleOffsetX = dpdx(in_.uv) * 0.25;
-	let sampleOffsetY = dpdy(in_.uv) * 0.25;
+	let sampleOffsetX = dpdx(effectUv) * 0.25;
+	let sampleOffsetY = dpdy(effectUv) * 0.25;
 	if (sdf) {
-		let sample0 = sample_texture(uv - sampleOffsetX - sampleOffsetY, in_.texelBounds, false);
-		let sample1 = sample_texture(uv + sampleOffsetX - sampleOffsetY, in_.texelBounds, false);
-		let sample2 = sample_texture(uv - sampleOffsetX + sampleOffsetY, in_.texelBounds, false);
-		let sample3 = sample_texture(uv + sampleOffsetX + sampleOffsetY, in_.texelBounds, false);
+		let sample0 = sample_texture(effectUv - sampleOffsetX - sampleOffsetY, in_.texelBounds, false);
+		let sample1 = sample_texture(effectUv + sampleOffsetX - sampleOffsetY, in_.texelBounds, false);
+		let sample2 = sample_texture(effectUv - sampleOffsetX + sampleOffsetY, in_.texelBounds, false);
+		let sample3 = sample_texture(effectUv + sampleOffsetX + sampleOffsetY, in_.texelBounds, false);
 		sdfAlpha = (smoothstep(lowerEdge, upperEdge, select(sample0.a, median3(sample0.rgb), msdf))
 			+ smoothstep(lowerEdge, upperEdge, select(sample1.a, median3(sample1.rgb), msdf))
 			+ smoothstep(lowerEdge, upperEdge, select(sample2.a, median3(sample2.rgb), msdf))

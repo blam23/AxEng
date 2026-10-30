@@ -64,8 +64,12 @@ namespace ax
 		std::uint32_t useRegion{ 0 };
 		std::uint32_t screenSpace{ 0 };
 		glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
+		// Distance-field effect: kind (0 none, 1 outline, 2 shadow), thickness, softness, reserved.
+		glm::vec4 effectParams{ 0.0f };
+		// Screen-pixel sampling offset for drop shadows.
+		glm::vec4 effectOffset{ 0.0f };
 
-		static constexpr std::size_t gpuDataSize{ 80 };
+		static constexpr std::size_t gpuDataSize{ 112 };
 	};
 
 	inline constexpr std::uint32_t sprite_flag_region{ 1u };
@@ -103,6 +107,8 @@ namespace ax
 	static_assert(offsetof(SpriteGpuData, useRegion) == 56);
 	static_assert(offsetof(SpriteGpuData, screenSpace) == 60);
 	static_assert(offsetof(SpriteGpuData, clipRect) == 64);
+	static_assert(offsetof(SpriteGpuData, effectParams) == 80);
+	static_assert(offsetof(SpriteGpuData, effectOffset) == 96);
 	static_assert(sizeof(SpriteGpuData) == SpriteGpuData::gpuDataSize);
 	static_assert(offsetof(SpriteDefinition, gpuData) == 0);
 	static_assert(offsetof(SpriteDefinition, tex) == SpriteGpuData::gpuDataSize);

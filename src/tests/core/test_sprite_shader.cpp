@@ -411,6 +411,34 @@ TEST_F(SpriteShaderTest, DistanceFieldSpritesHaveSharpAntialiasedEdges)
 	EXPECT_GT(countPartial(plain), 20);
 }
 
+TEST_F(SpriteShaderTest, MsdfEffectsExpandAndOffsetGlyphCoverage)
+{
+	std::vector<Pixel> ramp{};
+	for (std::uint8_t i{ 0 }; i < 4; ++i)
+	{
+		const auto distance{ static_cast<std::uint8_t>(32 + i * 64) };
+		ramp.push_back({ distance, distance, distance, 255 });
+	}
+	ax::SpriteGpuData sprite{};
+	sprite.pos = { 0, 16 };
+	sprite.scale = { 16, 16 };
+	sprite.screenSpace = 1;
+	sprite.useRegion = ax::sprite_flag_msdf;
+	const auto plain{ render(ramp, 4, 1, { sprite }) };
+	sprite.effectParams = { 1, 4.0f, 0.0f, 0.0f };
+	const auto outline{ render(ramp, 4, 1, { sprite }) };
+	const auto coverage = [](const std::vector<Pixel>& image)
+	{
+		return std::ranges::count_if(image, [](const Pixel& pixel) { return pixel[3] > 0; });
+	};
+	ASSERT_EQ(plain.size(), s_size * s_size);
+	EXPECT_GT(coverage(outline), coverage(plain));
+	sprite.effectParams = { 2, 0.0f, 0.0f, 0.0f };
+	sprite.effectOffset = { 2.0f, 0.0f, 0.0f, 0.0f };
+	const auto shadow{ render(ramp, 4, 1, { sprite }) };
+	EXPECT_NE(shadow, plain);
+}
+
 TEST_F(SpriteShaderTest, WritesSdfFontRenderSamples)
 {
 	char* settingValue{};
