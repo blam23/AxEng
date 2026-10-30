@@ -37,6 +37,7 @@
 #include "axeng/core/retained_sprites.h"
 #include "axeng/core/shapes/shape.h"
 #include "axeng/core/lighting/light_renderer.h"
+#include "axeng/core/materials/backdrop_blur.h"
 #include "axeng/core/materials/material_renderer.h"
 #include "axeng/core/particles/particle_system.h"
 #include "axeng/core/window_events.h"
@@ -213,6 +214,10 @@ namespace ax
 		void submit_noise_shadow(std::optional<NoiseShadow2D> shadow);
 		// Queues a material draw for the next frame (see MaterialRenderer). World space draws land in the scene, or after
 		// lighting for an unlit material; screen space draws land with the overlays. Thread safe.
+		//
+		// A frame with a screen space draw of a backdrop material gets an interface pass: everything else is drawn
+		// first, lighting included, and copied and blurred for the backdrop, and then all screen space shapes, sprites
+		// and materials are drawn over it with depth of their own, backdrop materials first.
 		void submit_material_draw(MaterialDraw draw);
 		// Whether the most recent frame ran the lighting passes, and what they drew.
 		bool lighting_ran() const noexcept { return m_lightingRan; }
@@ -419,6 +424,10 @@ namespace ax
 		std::vector<SpriteGroupRange> m_screenSpaceSpriteGroupRanges;
 		UnlitShapeCapture m_unlitShapes;
 		ShapeList m_unlitOverlayShapes;
+		UnlitShapeCapture m_interfaceShapes;
+		ShapeList m_interfaceOverlayShapes;
+		BackdropBlur m_backdropBlur;
+		bool m_interfaceActive{};
 		std::vector<const SpriteDefinition*> m_litUploadScratch;
 		std::vector<const SpriteDefinition*> m_unlitUploadScratch;
 		std::vector<const SpriteDefinition*> m_screenSpaceUploadScratch;

@@ -27,12 +27,23 @@ namespace ax
 	//     zoom   : f32        pixels on screen per world pixel
 	//
 	// The result is straight alpha blended over what is already drawn.
+	//
+	// A `backdrop` material also gets
+	//
+	//     fn backdrop(screen: vec2<f32>, lod: f32) -> vec3<f32>
+	//
+	// which reads a copy of everything drawn before the interface, in screen pixels, at a blur level from 0 (sharp)
+	// up to MaterialRenderer's backdrop level count (each level halves the resolution).
 	struct MaterialDefinition
 	{
 		std::string name;
 		std::string fragment;
 		// Drawn after lighting, so the lights do not darken it (for something that glows).
 		bool unlit{ false };
+		// Reads the backdrop (see above). Only screen space draws make sense for it: the window draws them first in
+		// its interface pass, ahead of the interface's other shapes, and they write depth so what is covered stays
+		// covered. Drawn without a backdrop it is skipped.
+		bool backdrop{ false };
 	};
 
 	struct MaterialQuad
@@ -75,12 +86,18 @@ namespace ax
 	{
 	public:
 		static constexpr std::size_t parameterCount{ 128 };
+		// The sharpest blur level is 0, the blurriest this many halvings down.
+		static constexpr std::uint32_t backdropLevels{ 5 };
 
 		// Adds or replaces a material. Returns false for an empty name or source. A source the GPU rejects is
 		// reported when the material is first drawn (and the draw is skipped).
 		static bool define(MaterialDefinition definition);
 		static bool is_defined(const std::string& name);
 		static bool is_unlit(const std::string& name);
+		static bool is_backdrop(const std::string& name);
+
+		// The mip chain `backdrop()` reads, for this frame's draws. Pass an empty view to have them skipped.
+		static void set_backdrop(const wgpu::TextureView& view);
 
 		// Creates the arenas and layouts. Calling again with the same device and config is a no-op; a new config
 		// rebuilds the pipelines on next use.

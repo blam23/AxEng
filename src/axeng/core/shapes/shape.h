@@ -140,6 +140,11 @@ namespace ax
         std::size_t m_used{};
     };
 
+    inline bool shape_screen_space(const Shape& shape)
+    {
+        return std::visit([](const auto& s) { return s.screenSpace; }, shape);
+    }
+
     // Unlit shapes (and every screen space shape) are drawn after lighting is applied.
     inline bool shape_unlit(const Shape& shape)
     {

@@ -47,6 +47,10 @@ namespace ax
         // can be drawn after lighting. Pass nullptr to draw everything again.
         static void set_unlit_capture(UnlitShapeCapture* capture) noexcept;
 
+        // While set, draw() holds screen space shapes back in capture, ahead of set_unlit_capture, so the interface
+        // can be drawn in a pass of its own. Pass nullptr to stop.
+        static void set_screen_capture(UnlitShapeCapture* capture) noexcept;
+
         // Statistics for the most recent draw() call.
         static ShapeDrawStats last_draw_stats();
     };

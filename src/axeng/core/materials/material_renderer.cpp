@@ -76,6 +76,16 @@ fn vs_main(in_ : VSIn) -> VSOut {
 }
 )WGSL";
 
+	constexpr const char* s_backdropPrelude = R"WGSL(
+@group(1) @binding(0) var backdrop_texture : texture_2d<f32>;
+@group(1) @binding(1) var backdrop_sampler : sampler;
+
+fn backdrop(screen : vec2<f32>, lod : f32) -> vec3<f32> {
+	let uv = clamp(screen / globals.viewport.xy, vec2<f32>(0.0), vec2<f32>(1.0));
+	return textureSampleLevel(backdrop_texture, backdrop_sampler, uv, lod).rgb;
+}
+)WGSL";
+
 	constexpr const char* s_epilogue = R"WGSL(
 @fragment
 fn fs_main(in_ : VSOut) -> @location(0) vec4<f32> {
@@ -122,6 +132,10 @@ fn fs_main(in_ : VSOut) -> @location(0) vec4<f32> {
 		ax::MaterialRendererConfig config;
 		wgpu::BindGroupLayout groupLayout;
 		wgpu::PipelineLayout pipelineLayout;
+		wgpu::BindGroupLayout backdropLayout;
+		wgpu::PipelineLayout backdropPipelineLayout;
+		wgpu::Sampler backdropSampler;
+		wgpu::BindGroup backdropBindGroup;
 		wgpu::Buffer uniforms;
 		wgpu::BindGroup bindGroup;
 		wgpu::Buffer quads;
@@ -146,7 +160,8 @@ fn fs_main(in_ : VSOut) -> @location(0) vec4<f32> {
 
 	wgpu::RenderPipeline build_pipeline(State& state, const ax::MaterialDefinition& definition)
 	{
-		const auto source{ std::string{ s_prelude } + "\n" + definition.fragment + "\n" + s_epilogue };
+		const auto source{ std::string{ s_prelude } + (definition.backdrop ? s_backdropPrelude : "") + "\n"
+			+ definition.fragment + "\n" + s_epilogue };
 		wgpu::ShaderSourceWGSL wgsl{};
 		wgsl.code = { source.data(), source.size() };
 		wgpu::ShaderModuleDescriptor shaderDesc{};
@@ -182,16 +197,16 @@ fn fs_main(in_ : VSOut) -> @location(0) vec4<f32> {
 		fragment.targetCount = 1;
 		fragment.targets = &colourTarget;
 
-		// Reverse depth like the shapes and sprites. Never written, so the same pipeline also draws into a pass
-		// whose depth attachment is read only.
+		// Reverse depth like the shapes and sprites. Only backdrop materials write it, so the others also draw into a
+		// pass whose depth attachment is read only.
 		wgpu::DepthStencilState depth{};
 		depth.format = state.config.depthFormat;
-		depth.depthWriteEnabled = wgpu::OptionalBool::False;
+		depth.depthWriteEnabled = definition.backdrop ? wgpu::OptionalBool::True : wgpu::OptionalBool::False;
 		depth.depthCompare = wgpu::CompareFunction::GreaterEqual;
 
 		wgpu::RenderPipelineDescriptor desc{};
 		desc.label = definition.name.c_str();
-		desc.layout = state.pipelineLayout;
+		desc.layout = definition.backdrop ? state.backdropPipelineLayout : state.pipelineLayout;
 		desc.vertex.module = shader;
 		desc.vertex.entryPoint = "vs_main";
 		desc.vertex.bufferCount = 1;
@@ -230,6 +245,34 @@ bool ax::MaterialRenderer::is_unlit(const std::string& name)
 	return found != definitions().end() && found->second.definition.unlit;
 }
 
+bool ax::MaterialRenderer::is_backdrop(const std::string& name)
+{
+	const auto found{ definitions().find(name) };
+	return found != definitions().end() && found->second.definition.backdrop;
+}
+
+void ax::MaterialRenderer::set_backdrop(const wgpu::TextureView& view)
+{
+	if (!s_state)
+		return;
+	if (view == nullptr)
+	{
+		s_state->backdropBindGroup = {};
+		return;
+	}
+	wgpu::BindGroupEntry bindings[2]{};
+	bindings[0].binding = 0;
+	bindings[0].textureView = view;
+	bindings[1].binding = 1;
+	bindings[1].sampler = s_state->backdropSampler;
+	wgpu::BindGroupDescriptor desc{};
+	desc.label = "MaterialBackdrop";
+	desc.layout = s_state->backdropLayout;
+	desc.entryCount = 2;
+	desc.entries = bindings;
+	s_state->backdropBindGroup = s_state->device.CreateBindGroup(&desc);
+}
+
 bool ax::MaterialRenderer::init(const wgpu::Device& device, const MaterialRendererConfig& config)
 {
 	if (device == nullptr || config.colourFormat == wgpu::TextureFormat::Undefined)
@@ -264,6 +307,31 @@ bool ax::MaterialRenderer::init(const wgpu::Device& device, const MaterialRender
 	layoutDesc.bindGroupLayoutCount = 1;
 	layoutDesc.bindGroupLayouts = &state->groupLayout;
 	state->pipelineLayout = device.CreatePipelineLayout(&layoutDesc);
+
+	wgpu::BindGroupLayoutEntry backdropEntries[2]{};
+	backdropEntries[0].binding = 0;
+	backdropEntries[0].visibility = wgpu::ShaderStage::Fragment;
+	backdropEntries[0].texture.sampleType = wgpu::TextureSampleType::Float;
+	backdropEntries[0].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+	backdropEntries[1].binding = 1;
+	backdropEntries[1].visibility = wgpu::ShaderStage::Fragment;
+	backdropEntries[1].sampler.type = wgpu::SamplerBindingType::Filtering;
+	wgpu::BindGroupLayoutDescriptor backdropGroupDesc{};
+	backdropGroupDesc.entryCount = 2;
+	backdropGroupDesc.entries = backdropEntries;
+	state->backdropLayout = device.CreateBindGroupLayout(&backdropGroupDesc);
+	const wgpu::BindGroupLayout backdropLayouts[2]{ state->groupLayout, state->backdropLayout };
+	wgpu::PipelineLayoutDescriptor backdropLayoutDesc{};
+	backdropLayoutDesc.bindGroupLayoutCount = 2;
+	backdropLayoutDesc.bindGroupLayouts = backdropLayouts;
+	state->backdropPipelineLayout = device.CreatePipelineLayout(&backdropLayoutDesc);
+
+	wgpu::SamplerDescriptor samplerDesc{};
+	samplerDesc.addressModeU = samplerDesc.addressModeV = wgpu::AddressMode::ClampToEdge;
+	samplerDesc.magFilter = samplerDesc.minFilter = wgpu::FilterMode::Linear;
+	samplerDesc.mipmapFilter = wgpu::MipmapFilterMode::Linear;
+	samplerDesc.maxAnisotropy = 1;
+	state->backdropSampler = device.CreateSampler(&samplerDesc);
 
 	wgpu::BufferDescriptor uniformDesc{};
 	uniformDesc.label = "MaterialUniforms";
@@ -356,6 +424,11 @@ void ax::MaterialRenderer::draw(wgpu::RenderPassEncoder& pass, const MaterialDra
 		return;
 	}
 	auto& entry{ found->second };
+	if (entry.definition.backdrop && state.backdropBindGroup == nullptr)
+	{
+		++state.skipped;
+		return;
+	}
 	if (!entry.built)
 	{
 		entry.pipeline = build_pipeline(state, entry.definition);
@@ -405,6 +478,8 @@ void ax::MaterialRenderer::draw(wgpu::RenderPassEncoder& pass, const MaterialDra
 	const std::uint32_t offsets[2]{ static_cast<std::uint32_t>(globalsOffset), static_cast<std::uint32_t>(paramsOffset) };
 	pass.SetPipeline(entry.pipeline);
 	pass.SetBindGroup(0, state.bindGroup, 2, offsets);
+	if (entry.definition.backdrop)
+		pass.SetBindGroup(1, state.backdropBindGroup);
 	pass.SetVertexBuffer(0, state.quads, quadOffset, quadBytes);
 	pass.Draw(6, static_cast<std::uint32_t>(draw.quads.size()));
 }

@@ -2477,12 +2477,13 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		}
 		// Which of this frame's material draws go in a pass: world space ones that light (or all of them when
 		// there is no lighting), the unlit ones after lighting, or the screen space ones.
-		enum class MaterialPass { Scene, Unlit, Screen };
+		enum class MaterialPass { Scene, Unlit, Screen, Backdrop };
 		const auto drawMaterials{ [&](wgpu::RenderPassEncoder& target, MaterialPass which)
 		{
 			for (const auto& call : m_frameMaterials)
 			{
-				const bool wanted{ which == MaterialPass::Screen ? call.screenSpace
+				const bool wanted{ which == MaterialPass::Backdrop ? call.screenSpace && MaterialRenderer::is_backdrop(call.material)
+					: which == MaterialPass::Screen ? call.screenSpace && !(m_interfaceActive && MaterialRenderer::is_backdrop(call.material))
 					: !call.screenSpace && (which == MaterialPass::Unlit
 						? lightingActive && MaterialRenderer::is_unlit(call.material)
 						: !(lightingActive && MaterialRenderer::is_unlit(call.material))) };
@@ -2490,6 +2491,12 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 					MaterialRenderer::draw(target, call);
 			}
 		} };
+
+		const bool interfaceActive{ std::ranges::any_of(m_frameMaterials, [](const MaterialDraw& call)
+			{ return call.screenSpace && MaterialRenderer::is_backdrop(call.material); })
+			&& (multisampled || m_surfaceSupportsCopySource)
+			&& m_backdropBlur.init(m_device, m_surfaceFormat, MaterialRenderer::backdropLevels) };
+		m_interfaceActive = interfaceActive;
 
 		{
 		ZoneScopedN("Window::scene-pass");
@@ -2509,19 +2516,21 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 
 		auto overlayShapes = DebugShapes::take_queued();
 		m_unlitOverlayShapes.clear();
-		if (lightingActive)
+		m_interfaceOverlayShapes.clear();
+		if (lightingActive || interfaceActive)
 		{
-			// Unlit shapes move out in order; lit ones close up behind them.
+			// Interface and unlit shapes move out in order; lit ones close up behind them.
 			std::size_t lit{};
 			for (auto& shape : overlayShapes)
 			{
-				if (shape_unlit(shape)) m_unlitOverlayShapes.push_back(std::move(shape));
+				if (interfaceActive && shape_screen_space(shape)) m_interfaceOverlayShapes.push_back(std::move(shape));
+				else if (lightingActive && shape_unlit(shape)) m_unlitOverlayShapes.push_back(std::move(shape));
 				else if (&overlayShapes[lit++] != &shape) overlayShapes[lit - 1] = std::move(shape);
 			}
 			overlayShapes.resize(lit);
 		}
 		drawOverlay(overlayShapes);
-		if (!lightingActive && !m_screenSpaceSpriteGroupRanges.empty())
+		if (!lightingActive && !interfaceActive && !m_screenSpaceSpriteGroupRanges.empty())
 		{
 			ZoneScopedN("Window::screen-space-sprites");
 			auto screenSpacePass{ beginScenePass(false) };
@@ -2530,7 +2539,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		}
 		// After the overlay shapes: depth decides what covers what, so panels sit under a screen space material and
 		// popups over it.
-		if (std::ranges::any_of(m_frameMaterials, [](const MaterialDraw& call) { return call.screenSpace; }))
+		if (!interfaceActive && std::ranges::any_of(m_frameMaterials, [](const MaterialDraw& call) { return call.screenSpace; }))
 		{
 			ZoneScopedN("Window::screen-materials");
 			wgpu::RenderPassColorAttachment materialColour
@@ -2602,7 +2611,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			if (!m_unlitSpriteGroupRanges.empty() || unlitBatches)
 				encodeTransparent(SpriteLayer::Unlit);
 			drawOverlay(m_unlitOverlayShapes);
-			if (!m_screenSpaceSpriteGroupRanges.empty())
+			if (!interfaceActive && !m_screenSpaceSpriteGroupRanges.empty())
 			{
 				ZoneScopedN("Window::screen-space-sprites");
 				auto screenSpacePass{ beginScenePass(false) };
@@ -2612,6 +2621,52 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_unlitShapes.clear();
 		}
 		m_pendingTextures.clear();
+
+		if (interfaceActive)
+		{
+			ZoneScopedN("Window::interface");
+			const auto blurred{ m_backdropBlur.encode(encoder, multisampled ? targetView : wgpu::TextureView{},
+				surfaceTexture.texture, m_width, m_height) };
+			MaterialRenderer::set_backdrop(blurred ? m_backdropBlur.view() : wgpu::TextureView{});
+
+			// Depth starts over, so the interface covers the world whatever the depths in either.
+			wgpu::RenderPassColorAttachment interfaceColour
+			{
+				.view = targetView,
+				.depthSlice = wgpu::kDepthSliceUndefined,
+				.resolveTarget = nullptr,
+				.loadOp = wgpu::LoadOp::Load,
+				.storeOp = wgpu::StoreOp::Store,
+			};
+			wgpu::RenderPassDepthStencilAttachment interfaceDepth
+			{
+				.view = m_depthTextureView,
+				.depthLoadOp = wgpu::LoadOp::Clear,
+				.depthStoreOp = wgpu::StoreOp::Store,
+				.depthClearValue = 0.0f,
+				.depthReadOnly = false,
+				.stencilLoadOp = wgpu::LoadOp::Undefined,
+				.stencilStoreOp = wgpu::StoreOp::Undefined,
+				.stencilClearValue = 0,
+				.stencilReadOnly = true,
+			};
+			wgpu::RenderPassDescriptor interfaceDesc{};
+			interfaceDesc.label = "interface pass";
+			interfaceDesc.colorAttachmentCount = 1;
+			interfaceDesc.colorAttachments = &interfaceColour;
+			interfaceDesc.depthStencilAttachment = &interfaceDepth;
+			auto interfacePass{ encoder.BeginRenderPass(&interfaceDesc) };
+			drawMaterials(interfacePass, MaterialPass::Backdrop);
+			for (const auto& call : m_interfaceShapes.calls())
+				ShapeRenderer::draw(interfacePass, call);
+			if (!m_interfaceOverlayShapes.empty())
+				ShapeRenderer::draw(interfacePass, m_interfaceOverlayShapes);
+			draw_sprite_batches(interfacePass, m_screenSpacePipeline, m_sdfScreenSpacePipeline, SpriteLayer::ScreenSpace);
+			drawMaterials(interfacePass, MaterialPass::Screen);
+			interfacePass.End();
+			MaterialRenderer::set_backdrop({});
+			m_interfaceShapes.clear();
+		}
 
 		wgpu::RenderPassColorAttachment uiColorAttachment
 		{
@@ -2726,12 +2781,21 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 		ZoneScopedN("Window::render-event");
 
 		m_unlitShapes.clear();
+		m_interfaceShapes.clear();
 		// Stops capturing even if a handler throws.
 		struct Capture
 		{
-			explicit Capture(UnlitShapeCapture* capture) noexcept { ShapeRenderer::set_unlit_capture(capture); }
-			~Capture() { ShapeRenderer::set_unlit_capture(nullptr); }
-		} capture{ splitUnlit ? &m_unlitShapes : nullptr };
+			Capture(UnlitShapeCapture* unlit, UnlitShapeCapture* screen) noexcept
+			{
+				ShapeRenderer::set_unlit_capture(unlit);
+				ShapeRenderer::set_screen_capture(screen);
+			}
+			~Capture()
+			{
+				ShapeRenderer::set_unlit_capture(nullptr);
+				ShapeRenderer::set_screen_capture(nullptr);
+			}
+		} capture{ splitUnlit ? &m_unlitShapes : nullptr, m_interfaceActive ? &m_interfaceShapes : nullptr };
 		// Send out the draw event
 		m_renderEventHandler.fire
 		({
