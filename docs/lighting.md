@@ -7,7 +7,7 @@ off, or with full-white ambient light and nothing to draw, frames render exactly
 
 Lighting multiplies the world by a light map, so overlays and the interface must be drawn after it. Content is
 **unlit** when it is in screen space, when a shape has `unlit = true` (`Shape::unlit`, or `unlit` in a Lua shape
-description), or when a sprite has `sprite_flag_unlit` in `SpriteGpuData::useRegion`. Everything else is lit. Static
+description), or when a sprite has `sprite_flag_unlit` in `SpriteData::useRegion`. Everything else is lit. Static
 sprite batches are always lit.
 
 While lighting runs, `ShapeRenderer::draw` holds back unlit shapes drawn in the render event

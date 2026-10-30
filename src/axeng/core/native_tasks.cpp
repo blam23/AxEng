@@ -134,7 +134,7 @@ void ax::bind_task_buffers(sol::state& state, sol::table bg, std::shared_ptr<Tas
 				check_finite(value);
 			if (rw <= 0 || rh <= 0)
 				throw sol::error("Sprite region size must be positive");
-			SpriteGpuData data;
+			SpriteData data;
 			data.pos = { x, y };
 			data.z = z;
 			data.region = { rx, ry, rw, rh };

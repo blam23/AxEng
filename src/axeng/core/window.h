@@ -12,6 +12,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <tuple>
 #include <string_view>
 #include <unordered_map>
 #include <vector>
@@ -276,7 +277,7 @@ namespace ax
 		// Which sprites a draw covers: everything (no lighting), or the lit or unlit share of a lit frame.
 		enum class SpriteLayer : std::uint8_t { All, Lit, Unlit, ScreenSpace };
 		void draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline,
-			SpriteLayer layer = SpriteLayer::All);
+			const wgpu::RenderPipeline& sdfPipeline, SpriteLayer layer = SpriteLayer::All);
 		void stage_sprite_batches();
 		void draw_transparent_sprites(wgpu::RenderPassEncoder& pass, SpriteLayer layer = SpriteLayer::All);
 		void draw_pending_batch(const PendingDrawBatch& batch, const wgpu::TextureView& screenView);
@@ -296,8 +297,9 @@ namespace ax
 			uint32_t bytesPerRow
 		);
 		void ensure_uniform_capacity(uint32_t required);
+		void ensure_sdf_uniform_capacity(uint32_t required);
 		void create_composite_bind_group();
-		wgpu::RenderPipeline setup_pending_pipeline(wgpu::TextureFormat format);
+		wgpu::RenderPipeline setup_pending_pipeline(wgpu::TextureFormat format, bool distanceField, bool screenSpace);
 		void queue_texture(SpriteDefinition sprite);
 
 		// Logic
@@ -344,10 +346,14 @@ namespace ax
 		wgpu::TextureFormat m_depthTextureFormat{ wgpu::TextureFormat::Depth24Plus };
 		wgpu::Texture m_multisampleTexture;
 		wgpu::ShaderModule m_shader;
+		wgpu::ShaderModule m_sdfShader;
 		wgpu::ShaderModule m_compositeShader;
 		wgpu::RenderPipeline m_pipeline;
 		wgpu::RenderPipeline m_screenSpacePipeline;
 		wgpu::RenderPipeline m_oitPipeline;
+		wgpu::RenderPipeline m_sdfPipeline;
+		wgpu::RenderPipeline m_sdfScreenSpacePipeline;
+		wgpu::RenderPipeline m_sdfOitPipeline;
 		wgpu::RenderPipeline m_compositePipeline;
 		wgpu::Texture m_oitAccumulationTexture;
 		wgpu::TextureView m_oitAccumulationView;
@@ -356,6 +362,7 @@ namespace ax
 		wgpu::BindGroupLayout m_compositeGroupLayout;
 		wgpu::BindGroup m_compositeBindGroup;
 		wgpu::Buffer m_uniforms;
+		wgpu::Buffer m_sdfUniforms;
 		wgpu::Sampler m_nearestSampler;
 		wgpu::Sampler m_linearSampler;
 		wgpu::BindGroupLayout m_groupLayout;
@@ -364,7 +371,7 @@ namespace ax
 		wgpu::BindGroup m_viewportBindGroup;
 		std::unordered_map<Texture*, wgpu::BindGroup> m_textureBindGroups;
 		std::mutex m_textureBindGroupsMutex{};
-		std::map<wgpu::TextureFormat, wgpu::RenderPipeline> m_pendingPipelines;
+		std::map<std::tuple<wgpu::TextureFormat, bool, bool>, wgpu::RenderPipeline> m_pendingPipelines;
 
 		std::vector<PendingDrawBatch> m_pendingDrawBatches;
 		std::mutex m_pendingDrawMutex{};
@@ -383,6 +390,7 @@ namespace ax
 			Texture* tex;
 			uint32_t start;
 			uint32_t count;
+			bool distanceField;
 		};
 
 		std::deque<SpriteDefinition> m_spriteSlots;
@@ -402,13 +410,16 @@ namespace ax
 		std::unordered_map<Texture*, std::vector<const SpriteDefinition*>> m_spriteGroups;
 		std::unordered_map<Texture*, std::vector<const SpriteDefinition*>> m_pendingSpriteGroups;
 		std::vector<SpriteGpuData> m_spriteUploadData;
+		std::vector<SdfSpriteGpuData> m_sdfUploadData;
+		std::vector<const SpriteDefinition*> m_spriteUploadSources;
 		std::vector<SpriteGroupRange> m_spriteGroupRanges;
 		std::vector<SpriteGroupRange> m_unlitSpriteGroupRanges;
 		std::vector<SpriteGroupRange> m_screenSpaceSpriteGroupRanges;
 		UnlitShapeCapture m_unlitShapes;
 		ShapeList m_unlitOverlayShapes;
-		std::vector<SpriteGpuData> m_unlitUploadScratch;
-		std::vector<SpriteGpuData> m_screenSpaceUploadScratch;
+		std::vector<const SpriteDefinition*> m_litUploadScratch;
+		std::vector<const SpriteDefinition*> m_unlitUploadScratch;
+		std::vector<const SpriteDefinition*> m_screenSpaceUploadScratch;
 
 		LightRenderer m_lightRenderer;
 		mutable std::mutex m_lightingMutex{};
@@ -420,6 +431,7 @@ namespace ax
 		bool m_lightingRan{};
 		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };
 		uint32_t m_uniformsCapacity{ 1024 };
+		uint32_t m_sdfUniformsCapacity{ 1024 };
 
 		std::mutex m_deferredMutex{};
 		std::vector<std::function<void()>> m_deferred{};

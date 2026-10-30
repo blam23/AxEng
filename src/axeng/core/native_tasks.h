@@ -89,7 +89,7 @@ namespace ax
 	};
 
 	using NumberBuffer = TaskBuffer<double>;
-	using SpriteBuffer = TaskBuffer<SpriteGpuData>;
+	using SpriteBuffer = TaskBuffer<SpriteData>;
 	using TaskValue = std::variant<bool, std::int64_t, double, std::string,
 		std::shared_ptr<NumberBuffer>, std::shared_ptr<SpriteBuffer>>;
 	using TaskRecord = std::map<std::string, TaskValue>;

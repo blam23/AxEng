@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -23,6 +25,7 @@
 #undef APIENTRY
 
 #include "glm/glm.hpp"
+#include "glm/gtc/packing.hpp"
 
 #include <imgui.h>
 
@@ -52,7 +55,13 @@ namespace ax
 		uint32_t bytesPerRow
 	);
 
-	struct SpriteGpuData
+	// Bit flags of SpriteData::useRegion.
+	inline constexpr std::uint32_t sprite_flag_region{ 1u };
+	// Drawn after lighting is applied, like every screen space sprite.
+	inline constexpr std::uint32_t sprite_flag_unlit{ 8u };
+
+	// A sprite as the engine and scripts author it. Sprites are packed into SpriteGpuData for the GPU.
+	struct SpriteData
 	{
 		glm::vec2 pos{ 0.0f, 0.0f };
 		glm::vec2 scale{ 1.0f, 1.0f };
@@ -60,32 +69,99 @@ namespace ax
 		glm::vec4 tint{ 1.0f, 1.0f, 1.0f, 1.0f };
 		float z{ 0.0f };
 		float rotation{ 0.0f };
-		// Bit flags: sprite_flag_region uses `region`; SDF/MSDF flags select their distance channels.
+		// Bit flags: sprite_flag_region uses `region`, sprite_flag_unlit draws after lighting.
 		std::uint32_t useRegion{ 0 };
 		std::uint32_t screenSpace{ 0 };
+		// Screen pixels; a max below the min disables clipping.
 		glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
-		// Distance-field effect: kind (0 none, 1 outline, 2 shadow), thickness, softness, reserved.
-		glm::vec4 effectParams{ 0.0f };
-		// Screen-pixel sampling offset for drop shadows.
-		glm::vec4 effectOffset{ 0.0f };
-
-		static constexpr std::size_t gpuDataSize{ 112 };
 	};
 
-	inline constexpr std::uint32_t sprite_flag_region{ 1u };
-	inline constexpr std::uint32_t sprite_flag_sdf{ 2u };
-	inline constexpr std::uint32_t sprite_flag_msdf{ 4u };
-	// Drawn after lighting is applied, like every screen space sprite.
-	inline constexpr std::uint32_t sprite_flag_unlit{ 8u };
+	// Distance-field effect of one sprite.
+	struct SpriteEffect
+	{
+		// 0 none, 1 outline, 2 shadow.
+		float kind{ 0.0f };
+		float width{ 0.0f };
+		float softness{ 0.0f };
+		// Screen-pixel sampling offset for drop shadows.
+		glm::vec2 offset{ 0.0f };
+	};
 
-	inline bool sprite_unlit(const SpriteGpuData& data) noexcept
+	// The instance layout of the sprite shaders. Regions and clip rectangles are whole texels and pixels (u16), tints
+	// are half floats. Whether a sprite is screen space is a pipeline constant, and distance fields have their own
+	// shader and buffer, so none of that is stored per sprite.
+	struct SpriteGpuData
+	{
+		glm::vec2 pos{ 0.0f, 0.0f };
+		glm::vec2 scale{ 1.0f, 1.0f };
+		// x | y << 16 and w | h << 16 in texels; a zero size means the whole texture.
+		glm::uvec2 region{ 0u, 0u };
+		// r | g << 16 and b | a << 16.
+		glm::uvec2 tint{ 0x3C003C00u, 0x3C003C00u };
+		// min x | y << 16 and max x | y << 16 in screen pixels; the default clips nothing.
+		glm::uvec2 clip{ 0u, 0xFFFFFFFFu };
+		float z{ 0.0f };
+		float rotation{ 0.0f };
+
+		static constexpr std::size_t gpuDataSize{ 48 };
+	};
+
+	struct SdfSpriteGpuData : SpriteGpuData
+	{
+		// Bit 0 is MSDF (distance in the median of rgb rather than alpha); bits 1-2 are the effect kind.
+		std::uint32_t flags{ 0 };
+		// Half floats: thickness | softness << 16.
+		std::uint32_t effect{ 0 };
+		// Half floats: screen pixel offset x | y << 16.
+		std::uint32_t effectOffset{ 0 };
+		std::uint32_t reserved{ 0 };
+
+		static constexpr std::size_t gpuDataSize{ 64 };
+	};
+
+	inline std::uint32_t pack_u16_pair(float low, float high) noexcept
+	{
+		const auto pack = [](float value)
+		{
+			return static_cast<std::uint32_t>(std::clamp(std::lround(value), 0l, 65535l));
+		};
+		return pack(low) | pack(high) << 16;
+	}
+
+	inline SpriteGpuData pack_sprite(const SpriteData& data) noexcept
+	{
+		SpriteGpuData result{};
+		result.pos = data.pos;
+		result.scale = data.scale;
+		result.z = data.z;
+		result.rotation = data.rotation;
+		if ((data.useRegion & sprite_flag_region) != 0)
+			result.region = { pack_u16_pair(data.region.x, data.region.y), pack_u16_pair(data.region.z, data.region.w) };
+		result.tint = { glm::packHalf2x16({ data.tint.r, data.tint.g }), glm::packHalf2x16({ data.tint.b, data.tint.a }) };
+		if (data.clipRect.z >= data.clipRect.x && data.clipRect.w >= data.clipRect.y)
+			result.clip = { pack_u16_pair(data.clipRect.x, data.clipRect.y), pack_u16_pair(data.clipRect.z, data.clipRect.w) };
+		return result;
+	}
+
+	inline SdfSpriteGpuData pack_sdf_sprite(const SpriteData& data, const SpriteEffect& effect, bool msdf) noexcept
+	{
+		SdfSpriteGpuData result{};
+		static_cast<SpriteGpuData&>(result) = pack_sprite(data);
+		const auto kind{ static_cast<std::uint32_t>(std::clamp(effect.kind, 0.0f, 3.0f)) };
+		result.flags = (msdf ? 1u : 0u) | kind << 1;
+		result.effect = glm::packHalf2x16({ effect.width, effect.softness });
+		result.effectOffset = glm::packHalf2x16(effect.offset);
+		return result;
+	}
+
+	inline bool sprite_unlit(const SpriteData& data) noexcept
 	{
 		return data.screenSpace != 0 || (data.useRegion & sprite_flag_unlit) != 0;
 	}
 
 	struct SpriteDefinition
 	{
-		SpriteGpuData gpuData{};
+		SpriteData gpuData{};
 		Texture* tex{ nullptr };
 		Texture* groupedTexture{ nullptr };
 		SpriteGroup* group{ nullptr };
@@ -94,6 +170,7 @@ namespace ax
 		bool allocated{ false };
 		std::uint64_t generation{};
 		std::shared_ptr<Texture> keepAlive{};
+		SpriteEffect effect{};
 	};
 
 	static_assert(sizeof(glm::vec2) == 2 * sizeof(float));
@@ -101,17 +178,14 @@ namespace ax
 	static_assert(offsetof(SpriteGpuData, pos) == 0);
 	static_assert(offsetof(SpriteGpuData, scale) == 8);
 	static_assert(offsetof(SpriteGpuData, region) == 16);
-	static_assert(offsetof(SpriteGpuData, tint) == 32);
-	static_assert(offsetof(SpriteGpuData, z) == 48);
-	static_assert(offsetof(SpriteGpuData, rotation) == 52);
-	static_assert(offsetof(SpriteGpuData, useRegion) == 56);
-	static_assert(offsetof(SpriteGpuData, screenSpace) == 60);
-	static_assert(offsetof(SpriteGpuData, clipRect) == 64);
-	static_assert(offsetof(SpriteGpuData, effectParams) == 80);
-	static_assert(offsetof(SpriteGpuData, effectOffset) == 96);
+	static_assert(offsetof(SpriteGpuData, tint) == 24);
+	static_assert(offsetof(SpriteGpuData, clip) == 32);
+	static_assert(offsetof(SpriteGpuData, z) == 40);
+	static_assert(offsetof(SpriteGpuData, rotation) == 44);
 	static_assert(sizeof(SpriteGpuData) == SpriteGpuData::gpuDataSize);
+	static_assert(sizeof(SdfSpriteGpuData) == SdfSpriteGpuData::gpuDataSize);
 	static_assert(offsetof(SpriteDefinition, gpuData) == 0);
-	static_assert(offsetof(SpriteDefinition, tex) == SpriteGpuData::gpuDataSize);
+	static_assert(offsetof(SpriteDefinition, tex) == sizeof(SpriteData));
 
 	class Texture : public Asset
 	{
@@ -146,21 +220,23 @@ namespace ax
 
 		void add_region(const std::string& subTexture, const rectf& region);
 
-		// Distance field textures (e.g. the SDF font) are drawn with sprite_flag_sdf.
+		// Distance field textures (e.g. the SDF font) are drawn by the distance-field sprite shader.
 		bool sdf() const { return m_sdf; }
 		void set_sdf(bool sdf) { m_sdf = sdf; }
 		bool msdf() const { return m_msdf; }
 		void set_msdf(bool msdf) { m_msdf = msdf; }
+		// Drawn by the distance-field sprite shader instead of the ordinary one.
+		bool distance_field() const { return m_sdf || m_msdf; }
 
-		// Sprite data for drawing with this texture, with texture dependent flags applied.
-		SpriteGpuData gpu_data_for(const SpriteGpuData& data) const
+		// Instance data for drawing a sprite with this texture.
+		SpriteGpuData gpu_data_for(const SpriteData& data) const
 		{
-			auto result{ data };
-			if (m_sdf)
-				result.useRegion |= sprite_flag_sdf;
-			if (m_msdf)
-				result.useRegion |= sprite_flag_msdf;
-			return result;
+			return pack_sprite(data);
+		}
+
+		SdfSpriteGpuData sdf_gpu_data_for(const SpriteDefinition& sprite) const
+		{
+			return pack_sdf_sprite(sprite.gpuData, sprite.effect, m_msdf);
 		}
 
 	private:

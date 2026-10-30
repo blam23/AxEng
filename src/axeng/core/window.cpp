@@ -731,6 +731,25 @@ void ax::Window::reload_pipeline()
 	shaderDesc.nextInChain = &shaderCodeDesc;
 	m_shader = m_device.CreateShaderModule(&shaderDesc);
 
+	std::string sdfShaderCode;
+	std::ifstream sdfFile{ "shaders/sdf_shader.wgsl" };
+	if (sdfFile)
+	{
+		std::ostringstream stream;
+		stream << sdfFile.rdbuf();
+		sdfShaderCode = stream.str();
+	}
+	else
+	{
+		spdlog::error("Could not load distance-field shader file.");
+		return;
+	}
+	wgpu::ShaderModuleDescriptor sdfShaderDesc{};
+	wgpu::ShaderSourceWGSL sdfShaderCodeDesc;
+	sdfShaderCodeDesc.code = sdfShaderCode.data();
+	sdfShaderDesc.nextInChain = &sdfShaderCodeDesc;
+	m_sdfShader = m_device.CreateShaderModule(&sdfShaderDesc);
+
 	wgpu::RenderPipelineDescriptor pipelineDesc{};
 
 	// Depth buffer
@@ -790,6 +809,9 @@ void ax::Window::reload_pipeline()
 	bufferDesc.mappedAtCreation = false;
 	bufferDesc.label = "SpriteBatch";
 	m_uniforms = m_device.CreateBuffer(&bufferDesc);
+	bufferDesc.size = static_cast<uint64_t>(SdfSpriteGpuData::gpuDataSize) * static_cast<uint64_t>(m_sdfUniformsCapacity);
+	bufferDesc.label = "SdfSpriteBatch";
+	m_sdfUniforms = m_device.CreateBuffer(&bufferDesc);
 
 	// Viewport
 	wgpu::BufferDescriptor vpDesc{};
@@ -815,7 +837,8 @@ void ax::Window::reload_pipeline()
 	bindGroupEntries[0].binding = 0;
 	bindGroupEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
 	bindGroupEntries[0].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
-	bindGroupEntries[0].buffer.minBindingSize = static_cast<uint64_t>(m_uniformStride);
+	// Ordinary and distance-field sprites bind buffers of different element sizes to the same layout.
+	bindGroupEntries[0].buffer.minBindingSize = 0;
 	bindGroupEntries[0].buffer.hasDynamicOffset = false;
 	
 
@@ -879,11 +902,33 @@ void ax::Window::reload_pipeline()
 	spriteBlend.alpha.srcFactor = wgpu::BlendFactor::One;
 	spriteBlend.alpha.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
 	spriteBlend.alpha.operation = wgpu::BlendOperation::Add;
+	wgpu::ConstantEntry screenSpaceConstant{};
+	screenSpaceConstant.key = "screen_space";
+	screenSpaceConstant.value = 1.0;
 	colorTarget.blend = &spriteBlend;
 	fragmentState.entryPoint = "fs_main";
+	pipelineDesc.vertex.constantCount = 1;
+	pipelineDesc.vertex.constants = &screenSpaceConstant;
 	m_screenSpacePipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+	pipelineDesc.vertex.constantCount = 0;
+	pipelineDesc.vertex.constants = nullptr;
 	colorTarget.blend = nullptr;
 	fragmentState.entryPoint = "fs_opaque";
+
+	pipelineDesc.vertex.module = m_sdfShader;
+	fragmentState.module = m_sdfShader;
+	m_sdfPipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+	colorTarget.blend = &spriteBlend;
+	fragmentState.entryPoint = "fs_main";
+	pipelineDesc.vertex.constantCount = 1;
+	pipelineDesc.vertex.constants = &screenSpaceConstant;
+	m_sdfScreenSpacePipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+	pipelineDesc.vertex.constantCount = 0;
+	pipelineDesc.vertex.constants = nullptr;
+	colorTarget.blend = nullptr;
+	fragmentState.entryPoint = "fs_opaque";
+	pipelineDesc.vertex.module = m_shader;
+	fragmentState.module = m_shader;
 
 	ShapeRenderer::init(m_device, {
 		.colourFormat = m_surfaceFormat,
@@ -915,6 +960,11 @@ void ax::Window::reload_pipeline()
 	fragmentState.targetCount = 2;
 	fragmentState.targets = oitTargets;
 	m_oitPipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+	pipelineDesc.vertex.module = m_sdfShader;
+	fragmentState.module = m_sdfShader;
+	m_sdfOitPipeline = m_device.CreateRenderPipeline(&pipelineDesc);
+	pipelineDesc.vertex.module = m_shader;
+	fragmentState.module = m_shader;
 
 	std::string compositeShaderCode;
 	std::ifstream compositeFile{ m_sampleCount > 1
@@ -1087,6 +1137,8 @@ std::shared_ptr<ax::StaticSpriteBatch> ax::Window::attach_sprite_batch(Texture* 
 		throw sol::error("Static batches must be attached on the renderer thread");
 	if (!texture || !data || !data->sealed() || data->size() * SpriteGpuData::gpuDataSize > 65536)
 		throw sol::error("Static sprite batches require a texture and 1-1024 sealed records");
+	if (texture->distance_field())
+		throw sol::error("Static sprite batches cannot use distance-field textures");
 	auto batch{ std::make_shared<StaticSpriteBatch>() };
 	batch->m_texture = texture;
 	batch->m_data = std::move(data);
@@ -1196,11 +1248,13 @@ void ax::Window::draw_pending()
 	submit_pending_draw_batch(std::move(batch));
 }
 
-wgpu::RenderPipeline ax::Window::setup_pending_pipeline(wgpu::TextureFormat format)
+wgpu::RenderPipeline ax::Window::setup_pending_pipeline(wgpu::TextureFormat format, bool distanceField, bool screenSpace)
 {
-	const auto found{ m_pendingPipelines.find(format) };
+	const auto key{ std::tuple{ format, distanceField, screenSpace } };
+	const auto found{ m_pendingPipelines.find(key) };
 	if (found != m_pendingPipelines.end())
 		return found->second;
+	const auto& shader{ distanceField ? m_sdfShader : m_shader };
 
 	wgpu::BindGroupLayout layouts[2]{ m_groupLayout, m_globalLayout };
 	wgpu::PipelineLayoutDescriptor layoutDesc{};
@@ -1221,15 +1275,23 @@ wgpu::RenderPipeline ax::Window::setup_pending_pipeline(wgpu::TextureFormat form
 	target.blend = &blend;
 	target.writeMask = wgpu::ColorWriteMask::All;
 	wgpu::FragmentState fragment{};
-	fragment.module = m_shader;
+	fragment.module = shader;
 	fragment.entryPoint = "fs_main";
 	fragment.targetCount = 1;
 	fragment.targets = &target;
 
 	wgpu::RenderPipelineDescriptor desc{};
 	desc.layout = layout;
-	desc.vertex.module = m_shader;
+	desc.vertex.module = shader;
 	desc.vertex.entryPoint = "vs_main";
+	wgpu::ConstantEntry screenSpaceConstant{};
+	screenSpaceConstant.key = "screen_space";
+	screenSpaceConstant.value = 1.0;
+	if (screenSpace)
+	{
+		desc.vertex.constantCount = 1;
+		desc.vertex.constants = &screenSpaceConstant;
+	}
 	desc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
 	desc.primitive.frontFace = wgpu::FrontFace::CCW;
 	desc.primitive.cullMode = wgpu::CullMode::None;
@@ -1244,7 +1306,7 @@ wgpu::RenderPipeline ax::Window::setup_pending_pipeline(wgpu::TextureFormat form
 		return {};
 	}
 
-	m_pendingPipelines.emplace(format, pipeline);
+	m_pendingPipelines.emplace(key, pipeline);
 	return pipeline;
 }
 
@@ -1272,9 +1334,16 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 	if (batch.shapes.empty() && sprites.empty())
 		return;
 
-	const auto pipeline{ sprites.empty() ? wgpu::RenderPipeline{} : setup_pending_pipeline(format) };
-	if (!sprites.empty() && pipeline.Get() == nullptr)
-		return;
+	std::optional<std::pair<bool, bool>> checked{};
+	for (const auto* sprite : sprites)
+	{
+		const std::pair variant{ sprite->tex->distance_field(), sprite->gpuData.screenSpace != 0 };
+		if (checked == variant)
+			continue;
+		if (setup_pending_pipeline(format, variant.first, variant.second).Get() == nullptr)
+			return;
+		checked = variant;
+	}
 
 	if (!ShapeRenderer::init(m_device, {
 		.colourFormat = format,
@@ -1312,24 +1381,51 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 
 	if (!sprites.empty())
 	{
-		ensure_uniform_capacity(static_cast<uint32_t>(sprites.size()));
-		m_spriteUploadData.clear();
-		m_spriteUploadData.reserve(sprites.size());
-		for (const auto* sprite : sprites)
-			m_spriteUploadData.push_back(sprite->tex->gpu_data_for(sprite->gpuData));
-		m_queue.WriteBuffer(m_uniforms, 0, m_spriteUploadData.data(), m_spriteUploadData.size() * m_uniformStride);
-
-		pass.SetPipeline(pipeline);
-		pass.SetBindGroup(1, m_viewportBindGroup);
-		for (uint32_t first = 0; first < sprites.size();)
+		// Sprites are drawn in submission order; each kind of sprite has its own buffer, so runs index into either.
+		struct Run
 		{
-			uint32_t end{ first + 1 };
-			while (end < sprites.size() && sprites[end]->tex == sprites[first]->tex)
-				++end;
+			Texture* tex;
+			bool distanceField;
+			bool screenSpace;
+			uint32_t first;
+			uint32_t count;
+		};
+		std::vector<Run> runs{};
+		m_spriteUploadData.clear();
+		m_sdfUploadData.clear();
+		for (const auto* sprite : sprites)
+		{
+			const bool distanceField{ sprite->tex->distance_field() };
+			const bool screenSpace{ sprite->gpuData.screenSpace != 0 };
+			if (runs.empty() || runs.back().tex != sprite->tex || runs.back().screenSpace != screenSpace)
+				runs.push_back({ sprite->tex, distanceField, screenSpace,
+					static_cast<uint32_t>(distanceField ? m_sdfUploadData.size() : m_spriteUploadData.size()), 0 });
+			++runs.back().count;
+			if (distanceField)
+				m_sdfUploadData.push_back(sprite->tex->sdf_gpu_data_for(*sprite));
+			else
+				m_spriteUploadData.push_back(sprite->tex->gpu_data_for(sprite->gpuData));
+		}
+		ensure_uniform_capacity(static_cast<uint32_t>(m_spriteUploadData.size()));
+		ensure_sdf_uniform_capacity(static_cast<uint32_t>(m_sdfUploadData.size()));
+		if (!m_spriteUploadData.empty())
+			m_queue.WriteBuffer(m_uniforms, 0, m_spriteUploadData.data(), m_spriteUploadData.size() * m_uniformStride);
+		if (!m_sdfUploadData.empty())
+			m_queue.WriteBuffer(m_sdfUniforms, 0, m_sdfUploadData.data(),
+				m_sdfUploadData.size() * SdfSpriteGpuData::gpuDataSize);
 
-			pass.SetBindGroup(0, get_texture_bind_group(sprites[first]->tex));
-			pass.Draw(6, end - first, 0, first);
-			first = end;
+		pass.SetBindGroup(1, m_viewportBindGroup);
+		std::optional<std::pair<bool, bool>> current{};
+		for (const auto& run : runs)
+		{
+			const std::pair variant{ run.distanceField, run.screenSpace };
+			if (current != variant)
+			{
+				pass.SetPipeline(setup_pending_pipeline(format, run.distanceField, run.screenSpace));
+				current = variant;
+			}
+			pass.SetBindGroup(0, get_texture_bind_group(run.tex));
+			pass.Draw(6, run.count, 0, run.first);
 		}
 	}
 
@@ -1674,6 +1770,26 @@ void ax::Window::ensure_uniform_capacity(uint32_t required)
 	}
 }
 
+void ax::Window::ensure_sdf_uniform_capacity(uint32_t required)
+{
+	if (required <= m_sdfUniformsCapacity)
+		return;
+
+	while (m_sdfUniformsCapacity < required)
+		m_sdfUniformsCapacity *= 2;
+
+	wgpu::BufferDescriptor bufferDesc{};
+	bufferDesc.size = static_cast<uint64_t>(SdfSpriteGpuData::gpuDataSize) * static_cast<uint64_t>(m_sdfUniformsCapacity);
+	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
+	bufferDesc.mappedAtCreation = false;
+	bufferDesc.label = "SdfSpriteBatch";
+	m_sdfUniforms = m_device.CreateBuffer(&bufferDesc);
+	{
+		std::lock_guard lock{ m_textureBindGroupsMutex };
+		m_textureBindGroups.clear();
+	}
+}
+
 glm::vec2 ax::Window::global_to_viewport(const glm::vec2& position) const
 {
 	const glm::vec2 viewportCenter{ m_width * 0.5f, m_height * 0.5f };
@@ -1745,7 +1861,7 @@ wgpu::BindGroup ax::Window::get_texture_bind_group(Texture* texture)
 	if (const auto it{ m_textureBindGroups.find(texture) }; it != m_textureBindGroups.end())
 		return it->second;
 
-	auto bindGroup{ setup_bind_groups(texture->view()) };
+	auto bindGroup{ setup_bind_groups(texture->view(), texture->distance_field() ? m_sdfUniforms : m_uniforms) };
 	m_textureBindGroups.emplace(texture, bindGroup);
 	return bindGroup;
 }
@@ -2406,7 +2522,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		{
 			ZoneScopedN("Window::screen-space-sprites");
 			auto screenSpacePass{ beginScenePass(false) };
-			draw_sprite_batches(screenSpacePass, m_screenSpacePipeline, SpriteLayer::ScreenSpace);
+			draw_sprite_batches(screenSpacePass, m_screenSpacePipeline, m_sdfScreenSpacePipeline, SpriteLayer::ScreenSpace);
 			screenSpacePass.End();
 		}
 		// After the overlay shapes: depth decides what covers what, so panels sit under a screen space material and
@@ -2472,7 +2588,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			auto unlitPass{ beginScenePass(false) };
 			for (const auto& call : m_unlitShapes.calls())
 				ShapeRenderer::draw(unlitPass, call);
-			draw_sprite_batches(unlitPass, m_pipeline, SpriteLayer::Unlit);
+			draw_sprite_batches(unlitPass, m_pipeline, m_sdfPipeline, SpriteLayer::Unlit);
 			drawMaterials(unlitPass, MaterialPass::Unlit);
 			unlitPass.End();
 			}
@@ -2485,7 +2601,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			{
 				ZoneScopedN("Window::screen-space-sprites");
 				auto screenSpacePass{ beginScenePass(false) };
-				draw_sprite_batches(screenSpacePass, m_screenSpacePipeline, SpriteLayer::ScreenSpace);
+				draw_sprite_batches(screenSpacePass, m_screenSpacePipeline, m_sdfScreenSpacePipeline, SpriteLayer::ScreenSpace);
 				screenSpacePass.End();
 			}
 			m_unlitShapes.clear();
@@ -2653,73 +2769,88 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 		}
 
 		size_t spriteCount = 0;
-		for (const auto& group : m_spriteGroups)
-			spriteCount += group.second.size();
-		for (const auto& group : m_pendingSpriteGroups)
-			spriteCount += group.second.size();
+		size_t sdfSpriteCount = 0;
+		// Groups of destroyed textures linger empty, so only a group with sprites may touch its texture.
+		const auto countGroups = [&](const auto& groups)
+		{
+			for (const auto& group : groups)
+				if (!group.second.empty())
+					(group.first->distance_field() ? sdfSpriteCount : spriteCount) += group.second.size();
+		};
+		countGroups(m_spriteGroups);
+		countGroups(m_pendingSpriteGroups);
 
 		ensure_uniform_capacity(static_cast<uint32_t>(spriteCount));
+		ensure_sdf_uniform_capacity(static_cast<uint32_t>(sdfSpriteCount));
 		m_spriteGroupRanges.reserve(m_spriteGroups.size());
 		m_screenSpaceSpriteGroupRanges.reserve(m_spriteGroups.size());
 		m_spriteUploadData.reserve(spriteCount);
 
 		uint32_t instanceCursor = 0;
-		auto uploadGroup = [this, &instanceCursor, splitUnlit](Texture* tex, const std::vector<const SpriteDefinition*>& activeSprites, const std::vector<const SpriteDefinition*>* pendingSprites)
+		uint32_t sdfInstanceCursor = 0;
+		auto uploadGroup = [this, &instanceCursor, &sdfInstanceCursor, splitUnlit](Texture* tex, const std::vector<const SpriteDefinition*>& activeSprites, const std::vector<const SpriteDefinition*>* pendingSprites)
 		{
 			ZoneScopedN("Window::sprite-upload-group");
-			m_spriteUploadData.clear();
+			m_spriteUploadSources.clear();
 			if (pendingSprites != nullptr)
 				for (const auto* sprite : *pendingSprites)
-					m_spriteUploadData.push_back(tex->gpu_data_for(sprite->gpuData));
+					m_spriteUploadSources.push_back(sprite);
 			for (const auto* sprite : activeSprites)
 				if (!sprite->group || sprite->group->visible())
-					m_spriteUploadData.push_back(tex->gpu_data_for(sprite->gpuData));
+					m_spriteUploadSources.push_back(sprite);
 
-			const uint32_t count = static_cast<uint32_t>(m_spriteUploadData.size());
-			if (count == 0)
+			if (m_spriteUploadSources.empty())
 				return;
 
 			// Keep screen-space sprites after scene rendering even when no lighting split is active.
+			m_litUploadScratch.clear();
 			m_unlitUploadScratch.clear();
 			m_screenSpaceUploadScratch.clear();
-			std::uint32_t litCount{};
-			for (const auto& data : m_spriteUploadData)
+			for (const auto* sprite : m_spriteUploadSources)
 			{
-				if (data.screenSpace != 0)
-				{
-					m_screenSpaceUploadScratch.push_back(data);
-				}
-				else if (splitUnlit && sprite_unlit(data))
-				{
-					m_unlitUploadScratch.push_back(data);
-				}
+				if (sprite->gpuData.screenSpace != 0)
+					m_screenSpaceUploadScratch.push_back(sprite);
+				else if (splitUnlit && sprite_unlit(sprite->gpuData))
+					m_unlitUploadScratch.push_back(sprite);
 				else
-				{
-					m_spriteUploadData[litCount++] = data;
-				}
+					m_litUploadScratch.push_back(sprite);
 			}
-			if (litCount > 0)
-				m_spriteGroupRanges.push_back({ tex, instanceCursor, litCount });
-			const auto unlitStart{ instanceCursor + litCount };
-			std::ranges::copy(m_unlitUploadScratch,
-				m_spriteUploadData.begin() + static_cast<std::ptrdiff_t>(litCount));
-			const auto unlitCount{ static_cast<std::uint32_t>(m_unlitUploadScratch.size()) };
-			if (unlitCount > 0)
-				m_unlitSpriteGroupRanges.push_back({ tex, unlitStart, unlitCount });
-			const auto screenSpaceStart{ unlitStart + unlitCount };
-			std::ranges::copy(m_screenSpaceUploadScratch,
-				m_spriteUploadData.begin() + static_cast<std::ptrdiff_t>(litCount + m_unlitUploadScratch.size()));
-			const auto screenSpaceCount{ static_cast<std::uint32_t>(m_screenSpaceUploadScratch.size()) };
-			if (screenSpaceCount > 0)
-				m_screenSpaceSpriteGroupRanges.push_back({ tex, screenSpaceStart, screenSpaceCount });
-			m_queue.WriteBuffer
-			(
-				m_uniforms,
-				static_cast<uint64_t>(instanceCursor) * m_uniformStride,
-				m_spriteUploadData.data(),
-				m_spriteUploadData.size() * m_uniformStride
-			);
-			instanceCursor += count;
+
+			const bool distanceField{ tex->distance_field() };
+			auto& cursor{ distanceField ? sdfInstanceCursor : instanceCursor };
+			m_spriteUploadData.clear();
+			m_sdfUploadData.clear();
+			const auto append = [&](const std::vector<const SpriteDefinition*>& sprites,
+				std::vector<SpriteGroupRange>& ranges)
+			{
+				if (sprites.empty())
+					return;
+				ranges.push_back({ tex, cursor + static_cast<uint32_t>(distanceField ? m_sdfUploadData.size() : m_spriteUploadData.size()),
+					static_cast<uint32_t>(sprites.size()), distanceField });
+				for (const auto* sprite : sprites)
+				{
+					if (distanceField)
+						m_sdfUploadData.push_back(tex->sdf_gpu_data_for(*sprite));
+					else
+						m_spriteUploadData.push_back(tex->gpu_data_for(sprite->gpuData));
+				}
+			};
+			append(m_litUploadScratch, m_spriteGroupRanges);
+			append(m_unlitUploadScratch, m_unlitSpriteGroupRanges);
+			append(m_screenSpaceUploadScratch, m_screenSpaceSpriteGroupRanges);
+
+			if (distanceField)
+			{
+				m_queue.WriteBuffer(m_sdfUniforms, static_cast<uint64_t>(cursor) * SdfSpriteGpuData::gpuDataSize,
+					m_sdfUploadData.data(), m_sdfUploadData.size() * SdfSpriteGpuData::gpuDataSize);
+				cursor += static_cast<uint32_t>(m_sdfUploadData.size());
+			}
+			else
+			{
+				m_queue.WriteBuffer(m_uniforms, static_cast<uint64_t>(cursor) * m_uniformStride,
+					m_spriteUploadData.data(), m_spriteUploadData.size() * m_uniformStride);
+				cursor += static_cast<uint32_t>(m_spriteUploadData.size());
+			}
 		};
 
 		for (const auto& group : m_spriteGroups)
@@ -2734,13 +2865,14 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 				uploadGroup(group.first, emptyGroup, &group.second);
 		}
 
-		draw_sprite_batches(pass, m_pipeline, splitUnlit ? SpriteLayer::Lit : SpriteLayer::All);
+		draw_sprite_batches(pass, m_pipeline, m_sdfPipeline, splitUnlit ? SpriteLayer::Lit : SpriteLayer::All);
 	}
 
 }
 
 
-void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline, SpriteLayer layer)
+void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline,
+	const wgpu::RenderPipeline& sdfPipeline, SpriteLayer layer)
 {
 	ZoneScopedN("Window::sprite-draw");
 	pass.SetPipeline(pipeline);
@@ -2757,16 +2889,29 @@ void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::
 	}
 	const auto& ranges{ layer == SpriteLayer::Unlit ? m_unlitSpriteGroupRanges
 		: layer == SpriteLayer::ScreenSpace ? m_screenSpaceSpriteGroupRanges : m_spriteGroupRanges };
-	for (const auto& range : ranges)
+	// Distance-field ranges follow the ordinary ones; depth decides the order between them.
+	for (const auto distanceField : { false, true })
 	{
-		pass.SetBindGroup(0, get_texture_bind_group(range.tex));
-		pass.Draw(6, range.count, 0, range.start);
+		bool pipelineSet{};
+		for (const auto& range : ranges)
+		{
+			if (range.distanceField != distanceField)
+				continue;
+			if (!pipelineSet)
+			{
+				pass.SetPipeline(distanceField ? sdfPipeline : pipeline);
+				pass.SetBindGroup(1, m_viewportBindGroup);
+				pipelineSet = true;
+			}
+			pass.SetBindGroup(0, get_texture_bind_group(range.tex));
+			pass.Draw(6, range.count, 0, range.start);
+		}
 	}
 }
 
 void ax::Window::draw_transparent_sprites(wgpu::RenderPassEncoder& pass, SpriteLayer layer)
 {
-	draw_sprite_batches(pass, m_oitPipeline, layer);
+	draw_sprite_batches(pass, m_oitPipeline, m_sdfOitPipeline, layer);
 }
 
 void ax::Window::set_lighting(const LightingSettings& settings)

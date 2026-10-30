@@ -14,11 +14,12 @@ wgpu::Buffer ax::upload_static_sprites(const wgpu::Device& device, const SpriteB
 	if (!mapped)
 		throw std::runtime_error("Failed to map retained sprite batch");
 	const auto& records{ data.data() };
-	std::copy(records.begin(), records.end(), mapped);
 	for (std::size_t i{ 0 }; i < records.size(); ++i)
 	{
-		mapped[i].region.x += atlasOffset.x;
-		mapped[i].region.y += atlasOffset.y;
+		auto record{ records[i] };
+		record.region.x += atlasOffset.x;
+		record.region.y += atlasOffset.y;
+		mapped[i] = pack_sprite(record);
 	}
 	buffer.Unmap();
 	return buffer;

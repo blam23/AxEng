@@ -25,12 +25,15 @@ namespace
 	constexpr unsigned char s_shader[]{
 		#embed "../../../shaders/basic_shader.wgsl"
 	};
+	constexpr unsigned char s_sdfShader[]{
+		#embed "../../../shaders/sdf_shader.wgsl"
+	};
 	constexpr std::uint32_t s_size{ 64 };
 	using Pixel = std::array<std::uint8_t, 4>;
 
-	std::vector<ax::SpriteGpuData> make_sdf_text(const ax::SdfFont& font, std::string_view text,
+	std::vector<ax::SdfSpriteGpuData> make_sdf_text(const ax::SdfFont& font, std::string_view text,
 		float centerX, float baselineY, float textScale, glm::vec4 tint,
-		std::uint32_t distanceFieldFlag = ax::sprite_flag_sdf)
+		bool msdf = false)
 	{
 		float textWidth{};
 		for (const unsigned char character : text)
@@ -41,7 +44,7 @@ namespace
 		}
 
 		float penX{ centerX - textWidth * 0.5f };
-		std::vector<ax::SpriteGpuData> sprites{};
+		std::vector<ax::SdfSpriteGpuData> sprites{};
 		sprites.reserve(text.size());
 		for (const unsigned char character : text)
 		{
@@ -52,15 +55,15 @@ namespace
 			const auto& glyph{ font.glyphs[index] };
 			if (glyph.width > 0 && glyph.height > 0)
 			{
-				ax::SpriteGpuData sprite{};
+				ax::SpriteData sprite{};
 				sprite.pos = { penX + glyph.xOffset * textScale, baselineY + glyph.yOffset * textScale };
 				sprite.scale = { font.texelScale * textScale, font.texelScale * textScale };
 				sprite.tint = tint;
 				sprite.region = { static_cast<float>(glyph.x), static_cast<float>(glyph.y),
 					static_cast<float>(glyph.width), static_cast<float>(glyph.height) };
-				sprite.useRegion = ax::sprite_flag_region | distanceFieldFlag;
+				sprite.useRegion = ax::sprite_flag_region;
 				sprite.screenSpace = 1;
-				sprites.push_back(sprite);
+				sprites.push_back(ax::pack_sdf_sprite(sprite, {}, msdf));
 			}
 			penX += glyph.advance * textScale;
 		}
@@ -129,13 +132,37 @@ protected:
 	}
 
 	static std::vector<Pixel> render(const std::vector<Pixel>& pixels, std::uint32_t width,
-		std::uint32_t height, const std::vector<ax::SpriteGpuData>& sprites, const char* entry = "fs_main",
+		std::uint32_t height, const std::vector<ax::SpriteData>& input, const char* entry = "fs_main",
 		wgpu::Buffer retained = nullptr, std::uint32_t outputWidth = s_size,
 		std::uint32_t outputHeight = s_size, std::array<double, 4> clearColour = { 0.0, 0.0, 0.0, 0.0 },
 		bool blend = false)
 	{
+		std::vector<ax::SpriteGpuData> sprites{};
+		for (const auto& sprite : input)
+			sprites.push_back(ax::pack_sprite(sprite));
+		return render_records({ reinterpret_cast<const char*>(s_shader), sizeof(s_shader) }, pixels, width, height,
+			sprites.data(), sprites.size(), sizeof(ax::SpriteGpuData), entry, retained, outputWidth, outputHeight,
+			clearColour, blend);
+	}
+
+	// Distance-field sprites use their own shader and record layout.
+	static std::vector<Pixel> render_sdf(const std::vector<Pixel>& pixels, std::uint32_t width,
+		std::uint32_t height, const std::vector<ax::SdfSpriteGpuData>& sprites, const char* entry = "fs_main",
+		std::uint32_t outputWidth = s_size, std::uint32_t outputHeight = s_size,
+		std::array<double, 4> clearColour = { 0.0, 0.0, 0.0, 0.0 }, bool blend = false)
+	{
+		return render_records({ reinterpret_cast<const char*>(s_sdfShader), sizeof(s_sdfShader) }, pixels, width,
+			height, sprites.data(), sprites.size(), sizeof(ax::SdfSpriteGpuData), entry, nullptr, outputWidth,
+			outputHeight, clearColour, blend);
+	}
+
+	static std::vector<Pixel> render_records(wgpu::StringView shaderCode, const std::vector<Pixel>& pixels,
+		std::uint32_t width, std::uint32_t height, const void* records, std::size_t recordCount,
+		std::size_t recordSize, const char* entry, wgpu::Buffer retained, std::uint32_t outputWidth,
+		std::uint32_t outputHeight, std::array<double, 4> clearColour, bool blend)
+	{
 		wgpu::ShaderSourceWGSL source{};
-		source.code = { reinterpret_cast<const char*>(s_shader), sizeof(s_shader) };
+		source.code = shaderCode;
 		wgpu::ShaderModuleDescriptor shaderDesc{};
 		shaderDesc.nextInChain = &source;
 		const auto shader{ s_device.CreateShaderModule(&shaderDesc) };
@@ -183,6 +210,12 @@ protected:
 		pipelineDesc.layout = s_device.CreatePipelineLayout(&pipelineLayoutDesc);
 		pipelineDesc.vertex.module = shader;
 		pipelineDesc.vertex.entryPoint = "vs_main";
+		// The tests position sprites in screen pixels.
+		wgpu::ConstantEntry screenSpace{};
+		screenSpace.key = "screen_space";
+		screenSpace.value = 1.0;
+		pipelineDesc.vertex.constantCount = 1;
+		pipelineDesc.vertex.constants = &screenSpace;
 		pipelineDesc.fragment = &fragment;
 		const auto pipeline{ s_device.CreateRenderPipeline(&pipelineDesc) };
 		std::array<wgpu::ColorTargetState, 2> oitTargets{};
@@ -207,11 +240,11 @@ protected:
 			&uploadLayout, &textureDesc.size);
 
 		wgpu::BufferDescriptor bufferDesc{};
-		bufferDesc.size = sprites.size() * sizeof(ax::SpriteGpuData);
+		bufferDesc.size = recordCount * recordSize;
 		bufferDesc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
 		const auto spriteBuffer{ retained ? retained : s_device.CreateBuffer(&bufferDesc) };
 		if (!retained)
-			s_device.GetQueue().WriteBuffer(spriteBuffer, 0, sprites.data(), bufferDesc.size);
+			s_device.GetQueue().WriteBuffer(spriteBuffer, 0, records, bufferDesc.size);
 		const std::array<float, 8> camera{ static_cast<float>(outputWidth), static_cast<float>(outputHeight),
 			0, 0, 0, 0, 1, 0 };
 		bufferDesc.size = sizeof(camera);
@@ -265,7 +298,7 @@ protected:
 		pass.SetPipeline(pipeline);
 		pass.SetBindGroup(0, spriteGroup);
 		pass.SetBindGroup(1, cameraGroup);
-		pass.Draw(6, static_cast<std::uint32_t>(sprites.size()));
+		pass.Draw(6, static_cast<std::uint32_t>(recordCount));
 		pass.End();
 
 		wgpu::TexelCopyTextureInfo copySource{};
@@ -308,7 +341,7 @@ TEST_F(SpriteShaderTest, RetainedUploadMatchesDynamicAtlasTintScaleAndLocalInsta
 	};
 	auto budget{ std::make_shared<ax::TaskBufferBudget>() };
 	auto records{ std::make_shared<ax::SpriteBuffer>(2, budget) };
-	ax::SpriteGpuData tile{};
+	ax::SpriteData tile{};
 	tile.pos = { 8.25f, 8.25f };
 	tile.scale = { 17.5f, 17.5f };
 	tile.region = { 0, 0, 1, 2 };
@@ -323,7 +356,7 @@ TEST_F(SpriteShaderTest, RetainedUploadMatchesDynamicAtlasTintScaleAndLocalInsta
 	const auto retained{ ax::upload_static_sprites(s_device, *records, { 1, 0 }) };
 	tile.region.x = 1;
 	neighbour.region.x = 1;
-	const std::vector<ax::SpriteGpuData> dynamic{ tile, neighbour };
+	const std::vector<ax::SpriteData> dynamic{ tile, neighbour };
 	const auto expected{ render(atlas, 3, 2, dynamic, "fs_opaque") };
 	EXPECT_EQ(render(atlas, 3, 2, dynamic, "fs_opaque", retained), expected);
 	EXPECT_EQ(render(atlas, 3, 2, dynamic, "fs_opaque", retained), expected);
@@ -337,7 +370,7 @@ TEST_F(SpriteShaderTest, AtlasTileEdgesStayOpaqueAtFractionalScale)
 		{ 0, 0, 255, 255 }, { 255, 0, 0, 255 }, { 0, 255, 0, 0 },
 		{ 0, 0, 255, 255 }, { 0, 0, 255, 255 }, { 0, 255, 0, 0 }
 	};
-	ax::SpriteGpuData tile{};
+	ax::SpriteData tile{};
 	tile.pos = { 8.25f, 8.25f };
 	tile.scale = { 17.5f, 17.5f };
 	tile.region = { 1, 0, 1, 2 };
@@ -354,7 +387,7 @@ TEST_F(SpriteShaderTest, AtlasTileEdgesStayOpaqueAtFractionalScale)
 
 TEST_F(SpriteShaderTest, TransparentTexelRgbDoesNotCreateFringes)
 {
-	ax::SpriteGpuData sprite{};
+	ax::SpriteData sprite{};
 	sprite.pos = { 8.25f, 8.25f };
 	sprite.scale = { 16, 16 };
 	sprite.rotation = 0.3f;
@@ -384,7 +417,7 @@ TEST_F(SpriteShaderTest, DistanceFieldSpritesHaveSharpAntialiasedEdges)
 	std::vector<Pixel> ramp{};
 	for (std::uint8_t i{ 0 }; i < 4; ++i)
 		ramp.push_back({ 255, 255, 255, static_cast<std::uint8_t>(32 + i * 64) });
-	ax::SpriteGpuData sprite{};
+	ax::SpriteData sprite{};
 	sprite.pos = { 0, 16 };
 	sprite.scale = { 16, 16 };
 	sprite.screenSpace = 1;
@@ -400,8 +433,7 @@ TEST_F(SpriteShaderTest, DistanceFieldSpritesHaveSharpAntialiasedEdges)
 		return partial;
 	};
 	const auto plain{ render(ramp, 4, 1, { sprite }) };
-	sprite.useRegion = ax::sprite_flag_sdf;
-	const auto sdf{ render(ramp, 4, 1, { sprite }) };
+	const auto sdf{ render_sdf(ramp, 4, 1, { ax::pack_sdf_sprite(sprite, {}, false) }) };
 	ASSERT_EQ(sdf.size(), s_size * s_size);
 	// Inside the edge is fully opaque, outside is empty, and only about a pixel in between is blended.
 	EXPECT_EQ(sdf[24 * s_size + 60][3], 255);
@@ -419,23 +451,22 @@ TEST_F(SpriteShaderTest, MsdfEffectsExpandAndOffsetGlyphCoverage)
 		const auto distance{ static_cast<std::uint8_t>(32 + i * 64) };
 		ramp.push_back({ distance, distance, distance, 255 });
 	}
-	ax::SpriteGpuData sprite{};
+	ax::SpriteData sprite{};
 	sprite.pos = { 0, 16 };
 	sprite.scale = { 16, 16 };
 	sprite.screenSpace = 1;
-	sprite.useRegion = ax::sprite_flag_msdf;
-	const auto plain{ render(ramp, 4, 1, { sprite }) };
-	sprite.effectParams = { 1, 4.0f, 0.0f, 0.0f };
-	const auto outline{ render(ramp, 4, 1, { sprite }) };
+	ax::SpriteEffect effect{};
+	const auto plain{ render_sdf(ramp, 4, 1, { ax::pack_sdf_sprite(sprite, effect, true) }) };
+	effect = { 1, 4.0f, 0.0f, {} };
+	const auto outline{ render_sdf(ramp, 4, 1, { ax::pack_sdf_sprite(sprite, effect, true) }) };
 	const auto coverage = [](const std::vector<Pixel>& image)
 	{
 		return std::ranges::count_if(image, [](const Pixel& pixel) { return pixel[3] > 0; });
 	};
 	ASSERT_EQ(plain.size(), s_size * s_size);
 	EXPECT_GT(coverage(outline), coverage(plain));
-	sprite.effectParams = { 2, 0.0f, 0.0f, 0.0f };
-	sprite.effectOffset = { 2.0f, 0.0f, 0.0f, 0.0f };
-	const auto shadow{ render(ramp, 4, 1, { sprite }) };
+	effect = { 2, 0.0f, 0.0f, { 2.0f, 0.0f } };
+	const auto shadow{ render_sdf(ramp, 4, 1, { ax::pack_sdf_sprite(sprite, effect, true) }) };
 	EXPECT_NE(shadow, plain);
 }
 
@@ -467,7 +498,7 @@ TEST_F(SpriteShaderTest, WritesSdfFontRenderSamples)
 	std::array<std::vector<Pixel>, 4> msdfSamples{};
 	const auto writeSample = [&](std::string_view name, const ax::SdfFont& font,
 		std::uint32_t fontSize, std::array<double, 4> background, glm::vec4 foreground,
-		float shadowOpacity, std::uint32_t supersampleFactor, std::uint32_t distanceFieldFlag)
+		float shadowOpacity, std::uint32_t supersampleFactor, bool msdf)
 		-> std::vector<Pixel>
 	{
 		const float fontScale{ static_cast<float>(fontSize) / ax::sdf_font_reference_height };
@@ -476,19 +507,19 @@ TEST_F(SpriteShaderTest, WritesSdfFontRenderSamples)
 		const auto renderWidth{ width * supersampleFactor };
 		const auto renderHeight{ height * supersampleFactor };
 		const float centerX{ static_cast<float>(width) * supersampleFactor * 0.5f };
-		std::vector<ax::SpriteGpuData> sprites{};
+		std::vector<ax::SdfSpriteGpuData> sprites{};
 		if (shadowOpacity > 0.0f)
 			sprites = make_sdf_text(font, "Steam 168/200", centerX + static_cast<float>(supersampleFactor),
 				baseline + static_cast<float>(supersampleFactor), textScale,
-				{ 0.0f, 0.0f, 0.0f, shadowOpacity }, distanceFieldFlag);
+				{ 0.0f, 0.0f, 0.0f, shadowOpacity }, msdf);
 		auto foregroundSprites{ make_sdf_text(font, "Steam 168/200", centerX, baseline,
-			textScale, foreground, distanceFieldFlag) };
+			textScale, foreground, msdf) };
 		sprites.insert(sprites.end(), foregroundSprites.begin(), foregroundSprites.end());
 
 		std::vector<Pixel> atlasPixels(font.pixels.size() / sizeof(Pixel));
 		std::memcpy(atlasPixels.data(), font.pixels.data(), font.pixels.size());
-		const auto rendered{ render(atlasPixels, font.width, font.height, sprites, "fs_main", nullptr,
-			renderWidth, renderHeight, background, true) };
+		const auto rendered{ render_sdf(atlasPixels, font.width, font.height, sprites, "fs_main",
+				renderWidth, renderHeight, background, true) };
 		if (rendered.size() != static_cast<std::size_t>(renderWidth) * renderHeight)
 			return {};
 
@@ -540,7 +571,7 @@ TEST_F(SpriteShaderTest, WritesSdfFontRenderSamples)
 			EXPECT_LT(uprightDifference, flippedDifference) << "MSDF glyphs appear vertically flipped";
 		}
 
-		if (distanceFieldFlag == ax::sprite_flag_msdf)
+		if (msdf)
 		{
 			const auto backgroundPixel{ image.front() };
 			const auto hasVisibleText{ std::any_of(image.begin(), image.end(), [&](const Pixel& pixel)
@@ -602,31 +633,31 @@ TEST_F(SpriteShaderTest, WritesSdfFontRenderSamples)
 		std::string_view name;
 		std::string_view label;
 		const ax::SdfFont* font;
-		std::uint32_t distanceFieldFlag;
+		bool msdf;
 		std::uint32_t supersampleFactor;
 	};
 	const std::array treatments{
-		Treatment{ "sdf_default_2x_downsample", "SDF, 2x", &baselineSdf, ax::sprite_flag_sdf, 2 },
+		Treatment{ "sdf_default_2x_downsample", "SDF, 2x", &baselineSdf, false, 2 },
 		Treatment{ "sdf_thickened_0.5px_2x_downsample", "SDF +0.5px, 2x",
-			&thickenedSdf, ax::sprite_flag_sdf, 2 },
+			&thickenedSdf, false, 2 },
 		Treatment{ "msdfgen_96x16_2x_downsample", "MSDF distance-color, default",
-			&msdf, ax::sprite_flag_msdf, 2 },
+			&msdf, true, 2 },
 		Treatment{ "msdfgen_96x16_native_1x", "MSDF, no supersampling",
-			&msdf, ax::sprite_flag_msdf, 1 },
+			&msdf, true, 1 },
 		Treatment{ "msdfgen_96x16_4x_downsample", "MSDF, 4x downsample",
-			&msdf, ax::sprite_flag_msdf, 4 },
+			&msdf, true, 4 },
 		Treatment{ "msdfgen_96x8_narrow_range_2x_downsample",
-			"MSDF, narrow range", &narrowRangeMsdf, ax::sprite_flag_msdf, 2 },
+			"MSDF, narrow range", &narrowRangeMsdf, true, 2 },
 		Treatment{ "msdfgen_192x32_high_resolution_2x_downsample",
-			"MSDF, high-res atlas", &highResolutionMsdf, ax::sprite_flag_msdf, 2 },
+			"MSDF, high-res atlas", &highResolutionMsdf, true, 2 },
 		Treatment{ "msdfgen_96x16_simple_coloring_2x_downsample",
-			"MSDF, simple edge colors", &simpleColoredMsdf, ax::sprite_flag_msdf, 2 },
+			"MSDF, simple edge colors", &simpleColoredMsdf, true, 2 },
 		Treatment{ "msdfgen_96x16_no_error_correction_2x_downsample",
-			"MSDF, no correction", &noErrorCorrectionMsdf, ax::sprite_flag_msdf, 2 },
+			"MSDF, no correction", &noErrorCorrectionMsdf, true, 2 },
 		Treatment{ "msdfgen_96x16_edge_only_correction_2x_downsample",
-			"MSDF, edge-only correction", &edgeOnlyCorrectionMsdf, ax::sprite_flag_msdf, 2 },
+			"MSDF, edge-only correction", &edgeOnlyCorrectionMsdf, true, 2 },
 		Treatment{ "msdfgen_96x16_thickened_0.5px_2x_downsample",
-			"MSDF +0.5px, 2x", &thickenedMsdf, ax::sprite_flag_msdf, 2 }
+			"MSDF +0.5px, 2x", &thickenedMsdf, true, 2 }
 	};
 	std::array<std::array<std::vector<Pixel>, fontSizes.size()>, treatments.size()> treatmentSamples{};
 	for (std::size_t sizeIndex{}; sizeIndex < fontSizes.size(); ++sizeIndex)
@@ -638,7 +669,7 @@ TEST_F(SpriteShaderTest, WritesSdfFontRenderSamples)
 			const std::string name{ "size_" + std::to_string(fontSize) + "px_" +
 				std::string(treatment.name) + ".png" };
 			auto image{ writeSample(name, *treatment.font, fontSize, steamBackground, white, 0.3f,
-				treatment.supersampleFactor, treatment.distanceFieldFlag) };
+				treatment.supersampleFactor, treatment.msdf) };
 			ASSERT_EQ(image.size(), static_cast<std::size_t>(width) * height) << name;
 			treatmentSamples[treatmentIndex][sizeIndex] = std::move(image);
 			if (treatment.name == "sdf_default_2x_downsample")
@@ -662,9 +693,9 @@ TEST_F(SpriteShaderTest, WritesSdfFontRenderSamples)
 		const float labelBaseline{ (height - labelFontSize) * 0.5f + msdf.baseline * labelScale };
 		constexpr glm::vec4 labelColor{ 0.12f, 0.15f, 0.2f, 1.0f };
 		const auto labelSprites{ make_sdf_text(msdf, treatments[treatmentIndex].label,
-			labelColumnWidth * 0.5f, labelBaseline, labelScale, labelColor, ax::sprite_flag_msdf) };
-		const auto labelImage{ render(atlasPixels, msdf.width, msdf.height, labelSprites, "fs_main",
-			nullptr, labelColumnWidth, height, steamBackground, true) };
+			labelColumnWidth * 0.5f, labelBaseline, labelScale, labelColor, true) };
+		const auto labelImage{ render_sdf(atlasPixels, msdf.width, msdf.height, labelSprites, "fs_main",
+			labelColumnWidth, height, steamBackground, true) };
 		ASSERT_EQ(labelImage.size(), static_cast<std::size_t>(labelColumnWidth) * height)
 			<< treatments[treatmentIndex].label;
 		for (std::size_t sizeIndex{}; sizeIndex < fontSizes.size(); ++sizeIndex)
@@ -740,7 +771,7 @@ TEST_F(SpriteShaderTest, WritesSdfFontRenderSamples)
 
 TEST_F(SpriteShaderTest, RotatedScaledSpritePreservesColourAndTint)
 {
-	ax::SpriteGpuData sprite{};
+	ax::SpriteData sprite{};
 	sprite.pos = { 16, 16 };
 	sprite.scale = { 16, 16 };
 	sprite.rotation = 0.4f;
@@ -752,4 +783,37 @@ TEST_F(SpriteShaderTest, RotatedScaledSpritePreservesColourAndTint)
 	for (std::size_t i{ 0 }; i < expected.size(); ++i)
 		EXPECT_NEAR(image[32 * s_size + 32][i], expected[i], 1);
 	EXPECT_EQ(image[0], (Pixel{}));
+}
+
+TEST(SpritePacking, RegionTintAndClipRoundTrip)
+{
+	ax::SpriteData data{};
+	data.useRegion = ax::sprite_flag_region;
+	data.region = { 12, 34, 56, 78 };
+	data.tint = { 1.0f, 0.5f, 0.25f, 2.0f };
+	data.clipRect = { 3, 4, 500, 600 };
+	const auto packed{ ax::pack_sprite(data) };
+	EXPECT_EQ(packed.region, glm::uvec2(12u | 34u << 16, 56u | 78u << 16));
+	EXPECT_EQ(glm::unpackHalf2x16(packed.tint.x), glm::vec2(1.0f, 0.5f));
+	EXPECT_EQ(glm::unpackHalf2x16(packed.tint.y), glm::vec2(0.25f, 2.0f));
+	EXPECT_EQ(packed.clip, glm::uvec2(3u | 4u << 16, 500u | 600u << 16));
+}
+
+TEST(SpritePacking, UnsetRegionAndClipMeanWholeTextureAndNoClip)
+{
+	const auto packed{ ax::pack_sprite(ax::SpriteData{}) };
+	EXPECT_EQ(packed.region, glm::uvec2(0u));
+	EXPECT_EQ(packed.clip, glm::uvec2(0u, 0xFFFFFFFFu));
+	// A region is ignored unless the sprite asks for it.
+	ax::SpriteData data{};
+	data.region = { 1, 2, 3, 4 };
+	EXPECT_EQ(ax::pack_sprite(data).region, glm::uvec2(0u));
+}
+
+TEST(SpritePacking, DistanceFieldEffectRoundTrips)
+{
+	const auto packed{ ax::pack_sdf_sprite({}, { 2, 1.5f, 0.5f, { -2.0f, 3.0f } }, true) };
+	EXPECT_EQ(packed.flags, 1u | 2u << 1);
+	EXPECT_EQ(glm::unpackHalf2x16(packed.effect), glm::vec2(1.5f, 0.5f));
+	EXPECT_EQ(glm::unpackHalf2x16(packed.effectOffset), glm::vec2(-2.0f, 3.0f));
 }
