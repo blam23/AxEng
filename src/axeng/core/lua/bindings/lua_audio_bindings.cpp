@@ -7,6 +7,8 @@
 
 #include <cmath>
 #include <functional>
+#include <map>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -106,6 +108,109 @@ namespace
 		for (std::size_t i{}; i < values.size(); ++i)
 			table[i + 1] = values[i];
 		return table;
+	}
+
+	std::optional<ax::audio::InstrumentWave> instrument_wave_from_name(std::string_view name) noexcept
+	{
+		if (name == "sine")
+			return ax::audio::InstrumentWave::Sine;
+		if (name == "triangle")
+			return ax::audio::InstrumentWave::Triangle;
+		if (name == "saw")
+			return ax::audio::InstrumentWave::Saw;
+		if (name == "square")
+			return ax::audio::InstrumentWave::Square;
+		if (name == "noise")
+			return ax::audio::InstrumentWave::Noise;
+		return std::nullopt;
+	}
+
+	ax::audio::InstrumentEnvelope envelope_from_table(const sol::table& table,
+		ax::audio::InstrumentEnvelope envelope)
+	{
+		envelope.attack = table.get_or("attack", envelope.attack);
+		envelope.decay = table.get_or("decay", envelope.decay);
+		envelope.sustain = table.get_or("sustain", envelope.sustain);
+		envelope.release = table.get_or("release", envelope.release);
+		return envelope;
+	}
+
+	std::optional<ax::audio::InstrumentPlayOptions> instrument_options_from_table(
+		const sol::optional<sol::table>& table)
+	{
+		ax::audio::InstrumentPlayOptions options{};
+		if (!table)
+			return options;
+
+		options.volume = table->get_or("volume", options.volume);
+		options.pan = table->get_or("pan", options.pan);
+		const sol::optional<std::string> bus{ (*table)["bus"] };
+		if (bus)
+		{
+			const auto parsed{ ax::audio::bus_from_name(*bus) };
+			if (!parsed || *parsed == ax::audio::Bus::Master)
+			{
+				spdlog::error("<Audio> Invalid instrument bus '{}'", *bus);
+				return std::nullopt;
+			}
+			options.bus = *parsed;
+		}
+		return options;
+	}
+
+	std::optional<ax::audio::SynthInstrumentDefinition> synth_definition_from_table(const sol::table& table)
+	{
+		ax::audio::SynthInstrumentDefinition definition{};
+		const sol::optional<std::string> wave{ table["wave"] };
+		if (wave)
+		{
+			const auto parsed{ instrument_wave_from_name(*wave) };
+			if (!parsed)
+			{
+				spdlog::error("<Audio> Unknown pitched synth wave '{}'", *wave);
+				return std::nullopt;
+			}
+			definition.wave = *parsed;
+		}
+		definition.gain = table.get_or("gain", definition.gain);
+		definition.detuneCents = table.get_or("detune_cents", definition.detuneCents);
+		definition.vibratoCents = table.get_or("vibrato_cents", definition.vibratoCents);
+		definition.vibratoRate = table.get_or("vibrato_rate", definition.vibratoRate);
+		definition.lowPassHz = table.get_or("low_pass_hz", definition.lowPassHz);
+		definition.pitchDropSemitones = table.get_or("pitch_drop_semitones", definition.pitchDropSemitones);
+		definition.pitchDropSeconds = table.get_or("pitch_drop_seconds", definition.pitchDropSeconds);
+		const sol::optional<sol::table> envelope{ table["envelope"] };
+		if (envelope)
+			definition.envelope = envelope_from_table(*envelope, definition.envelope);
+		return definition;
+	}
+
+	ax::audio::SamplerInstrumentDefinition sampler_definition_from_table(const sol::table& table)
+	{
+		ax::audio::SamplerInstrumentDefinition definition{};
+		definition.rootNote = table.get_or("root_note", definition.rootNote);
+		definition.tuningCents = table.get_or("tuning_cents", definition.tuningCents);
+		definition.startFrame = table.get_or("start_frame", definition.startFrame);
+		definition.endFrame = table.get_or("end_frame", definition.endFrame);
+		definition.loopStartFrame = table.get_or("loop_start_frame", definition.loopStartFrame);
+		definition.loopEndFrame = table.get_or("loop_end_frame", definition.loopEndFrame);
+		definition.gain = table.get_or("gain", definition.gain);
+		definition.loop = table.get_or("loop", definition.loop);
+		const sol::optional<sol::table> envelope{ table["envelope"] };
+		if (envelope)
+			definition.envelope = envelope_from_table(*envelope, definition.envelope);
+		return definition;
+	}
+
+	bool read_array_index(const sol::object& key, int& index)
+	{
+		if (key.get_type() != sol::type::number)
+			return false;
+		const auto value{ key.as<double>() };
+		if (!std::isfinite(value) || value < 1.0 || value > 16384.0 || std::floor(value) != value)
+			return false;
+		index = static_cast<int>(value);
+		return true;
 	}
 }
 
@@ -258,6 +363,170 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 			return static_cast<double>(id);
 		};
 
+	audio_table["render_synth_sample"] =
+		[default_sample_rate = std::min(system->sample_rate(), 48000u)](
+			const sol::table& table, int note, sol::optional<sol::table> options)
+			-> sol::optional<std::string>
+		{
+			if (note < 0 || note > 127)
+			{
+				spdlog::error("<Audio> Invalid MIDI note '{}' for synth sample rendering", note);
+				return sol::nullopt;
+			}
+			const auto definition{ synth_definition_from_table(table) };
+			if (!definition)
+				return sol::nullopt;
+
+			const auto holdSeconds{ options ? options->get_or("hold_seconds", 1.0f) : 1.0f };
+			const auto velocity{ options ? options->get_or("velocity", 1.0f) : 1.0f };
+			const auto sampleRate{ options ? options->get_or("sample_rate", default_sample_rate) : default_sample_rate };
+			std::string error{};
+			const auto pcm{ ax::audio::render_synth_sample(*definition, static_cast<std::uint8_t>(note),
+				velocity, holdSeconds, sampleRate, error) };
+			if (!pcm)
+			{
+				spdlog::error("<Audio> Failed to render synth sample: {}", error);
+				return sol::nullopt;
+			}
+			const auto wav{ ax::AudioSample::encode_wav(*pcm, error) };
+			if (!wav)
+			{
+				spdlog::error("<Audio> Failed to encode synth sample: {}", error);
+				return sol::nullopt;
+			}
+			return std::string{ reinterpret_cast<const char*>(wav->data()), wav->size() };
+		};
+
+	audio_table["load_sample"] =
+		[&app](const std::string& name, const std::string& encoded) -> bool
+		{
+			constexpr std::size_t max_encoded_sample_bytes{ 64u * 1024u * 1024u };
+			if (name.empty() || encoded.empty() || encoded.size() > max_encoded_sample_bytes)
+			{
+				spdlog::error("<Audio> Sample name must be nonempty and encoded data must be 1..{} bytes",
+					max_encoded_sample_bytes);
+				return false;
+			}
+			if (app.audio_samples().get(name) != nullptr)
+			{
+				spdlog::error("<Audio> Sample '{}' is already loaded", name);
+				return false;
+			}
+
+			std::vector<std::uint8_t> data{};
+			data.reserve(encoded.size());
+			for (const auto byte : encoded)
+				data.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(byte)));
+			if (app.audio_samples().load_from_raw(name, {}, data) == nullptr)
+			{
+				spdlog::error("<Audio> Failed to load generated or imported sample '{}'", name);
+				return false;
+			}
+			return true;
+		};
+
+	audio_table["sample_info"] =
+		[&app](sol::this_state lua, const std::string& name) -> sol::object
+		{
+			const auto* const sample{ app.audio_samples().get(name) };
+			if (sample == nullptr)
+				return sol::make_object(lua, sol::nil);
+
+			const auto& pcm{ sample->pcm() };
+			sol::state_view view{ lua };
+			return view.create_table_with(
+				"sample_rate", pcm.sampleRate,
+				"channels", pcm.channels,
+				"frames", pcm.frame_count(),
+				"duration_seconds", static_cast<double>(pcm.frame_count()) / pcm.sampleRate);
+		};
+
+	audio_table["inspect_sample"] =
+		[](sol::this_state lua, const std::string& encoded) -> sol::object
+		{
+			constexpr std::size_t max_encoded_sample_bytes{ 64u * 1024u * 1024u };
+			if (encoded.empty() || encoded.size() > max_encoded_sample_bytes)
+			{
+				spdlog::error("<Audio> Encoded sample must be between 1 byte and {} bytes",
+					max_encoded_sample_bytes);
+				return sol::make_object(lua, sol::nil);
+			}
+			const auto bytes{ std::span{
+				reinterpret_cast<const std::uint8_t*>(encoded.data()), encoded.size() } };
+			const auto pcm{ ax::audio::decode_audio_sample(bytes) };
+			if (!pcm)
+			{
+				spdlog::error("<Audio> Encoded sample is empty, unsupported or invalid");
+				return sol::make_object(lua, sol::nil);
+			}
+			sol::state_view view{ lua };
+			return view.create_table_with(
+				"sample_rate", pcm->sampleRate,
+				"channels", pcm->channels,
+				"frames", pcm->frame_count(),
+				"duration_seconds", static_cast<double>(pcm->frame_count()) / pcm->sampleRate);
+		};
+
+	audio_table["play_synth"] =
+		[with_audio](const sol::table& table, int note, sol::optional<sol::table> options) -> double
+		{
+			if (note < 0 || note > 127)
+			{
+				spdlog::error("<Audio> Invalid MIDI note '{}'", note);
+				return 0.0;
+			}
+			const auto definition{ synth_definition_from_table(table) };
+			const auto playback{ instrument_options_from_table(options) };
+			if (!definition || !playback)
+				return 0.0;
+			const auto velocity{ options ? options->get_or("velocity", 1.0f) : 1.0f };
+			const auto id{ with_audio([&](ax::audio::AudioSystem& audio)
+			{
+				return audio.play_synth(*definition, static_cast<std::uint8_t>(note), velocity, *playback);
+			}, ax::audio::VoiceId{}) };
+			if (id == 0)
+				spdlog::warn("<Audio> Pitched synth voice was rejected");
+			return static_cast<double>(id);
+		};
+
+	audio_table["play_sampler"] =
+		[&app, with_audio](const std::string& sample_name, const sol::table& table, int note,
+			sol::optional<sol::table> options) -> double
+		{
+			if (note < 0 || note > 127)
+			{
+				spdlog::error("<Audio> Invalid MIDI note '{}'", note);
+				return 0.0;
+			}
+			const auto* const sample{ app.audio_samples().get(sample_name) };
+			if (sample == nullptr)
+			{
+				spdlog::error("<Audio> Unknown audio sample '{}'", sample_name);
+				return 0.0;
+			}
+			const auto definition{ sampler_definition_from_table(table) };
+			const auto playback{ instrument_options_from_table(options) };
+			if (!playback)
+				return 0.0;
+			const auto velocity{ options ? options->get_or("velocity", 1.0f) : 1.0f };
+			const auto id{ with_audio([&](ax::audio::AudioSystem& audio)
+			{
+				return audio.play_sampler(sample->pcm(), definition, static_cast<std::uint8_t>(note), velocity, *playback);
+			}, ax::audio::VoiceId{}) };
+			if (id == 0)
+				spdlog::warn("<Audio> Pitched sampler voice was rejected for '{}'", sample_name);
+			return static_cast<double>(id);
+		};
+
+	audio_table["note_off"] =
+		[with_audio](double id) -> bool
+		{
+			return with_audio([&](ax::audio::AudioSystem& audio)
+			{
+				return audio.note_off(static_cast<ax::audio::VoiceId>(id));
+			}, false);
+		};
+
 	audio_table["set"] =
 		[with_audio](double id, const sol::table& options) -> bool
 		{
@@ -407,6 +676,15 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 			return with_audio([&](ax::audio::AudioSystem& audio) { return audio.next_track(fade.value_or(1.0f)); }, false);
 		};
 
+	music_table["previous"] =
+		[with_audio](sol::optional<float> fade) -> bool
+		{
+			return with_audio([&](ax::audio::AudioSystem& audio)
+			{
+				return audio.previous_track(fade.value_or(1.0f));
+			}, false);
+		};
+
 	music_table["stop"] =
 		[with_audio](sol::optional<float> fade)
 		{
@@ -447,5 +725,223 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 			{
 				return audio.playlist_active() || !audio.current_music().empty();
 			}, false);
+		};
+
+	auto sequence_table{ state.create_table() };
+	audio_table["sequence"] = sequence_table;
+
+	sequence_table["list"] =
+		[with_audio](sol::this_state lua) -> sol::table
+		{
+			return string_list(lua, with_audio(
+				[](ax::audio::AudioSystem& audio) { return audio.arrangement_names(); }, std::vector<std::string>{}));
+		};
+
+	sequence_table["define"] =
+		[&app, with_audio](const std::string& name, const sol::table& table) -> bool
+		{
+			ax::audio::Arrangement arrangement{};
+			arrangement.tempo = table.get_or("tempo", arrangement.tempo);
+			arrangement.durationBeats = table.get_or("duration_beats", arrangement.durationBeats);
+			if (const sol::optional<sol::table> reverb{ table["reverb"] })
+			{
+				arrangement.reverb.wet = reverb->get_or("wet", arrangement.reverb.wet);
+				arrangement.reverb.decaySeconds = reverb->get_or("decay_seconds", arrangement.reverb.decaySeconds);
+				arrangement.reverb.damping = reverb->get_or("damping", arrangement.reverb.damping);
+			}
+
+			const sol::optional<sol::table> instrumentTable{ table["instruments"] };
+			if (!instrumentTable)
+			{
+				spdlog::error("<Audio> Arrangement '{}' is missing its instruments table", name);
+				return false;
+			}
+			std::map<int, sol::table> orderedInstruments{};
+			for (const auto& entry : *instrumentTable)
+			{
+				int index{};
+				if (!read_array_index(entry.first, index) || orderedInstruments.contains(index))
+				{
+					spdlog::error("<Audio> Arrangement '{}' has an invalid instrument list index", name);
+					return false;
+				}
+				orderedInstruments.emplace(index, entry.second.as<sol::table>());
+			}
+			if (orderedInstruments.empty() || orderedInstruments.size() > ax::audio::arrangement_max_instruments)
+			{
+				spdlog::error("<Audio> Arrangement '{}' must have between 1 and {} instruments",
+					name, ax::audio::arrangement_max_instruments);
+				return false;
+			}
+			arrangement.instruments.reserve(orderedInstruments.size());
+			for (int index{ 1 }; index <= static_cast<int>(orderedInstruments.size()); ++index)
+			{
+				const auto it{ orderedInstruments.find(index) };
+				if (it == orderedInstruments.end())
+				{
+					spdlog::error("<Audio> Arrangement '{}' has a gap in its instrument list", name);
+					return false;
+				}
+				const sol::optional<std::string> kind{ it->second["type"] };
+				if (!kind)
+				{
+					spdlog::error("<Audio> Arrangement '{}' instrument {} is missing its type", name, index);
+					return false;
+				}
+				if (*kind == "synth")
+				{
+					const auto definition{ synth_definition_from_table(it->second) };
+					if (!definition)
+						return false;
+					arrangement.instruments.push_back({ .definition = *definition });
+				}
+				else if (*kind == "sample")
+				{
+					const sol::optional<std::string> sampleName{ it->second["sample"] };
+					if (!sampleName)
+					{
+						spdlog::error("<Audio> Arrangement '{}' sampler {} is missing its sample name", name, index);
+						return false;
+					}
+					const auto* const sample{ app.audio_samples().get(*sampleName) };
+					if (sample == nullptr)
+					{
+						spdlog::error("<Audio> Arrangement '{}' references unknown audio sample '{}'", name, *sampleName);
+						return false;
+					}
+					arrangement.instruments.push_back({
+						.definition = sampler_definition_from_table(it->second),
+						.sample = &sample->pcm() });
+				}
+				else
+				{
+					spdlog::error("<Audio> Arrangement '{}' instrument {} has unknown type '{}'", name, index, *kind);
+					return false;
+				}
+			}
+
+			const sol::optional<sol::table> noteTable{ table["notes"] };
+			if (!noteTable)
+			{
+				spdlog::error("<Audio> Arrangement '{}' is missing its notes table", name);
+				return false;
+			}
+			std::map<int, sol::table> orderedNotes{};
+			for (const auto& entry : *noteTable)
+			{
+				int index{};
+				if (!read_array_index(entry.first, index) || orderedNotes.contains(index))
+				{
+					spdlog::error("<Audio> Arrangement '{}' has an invalid note list index", name);
+					return false;
+				}
+				orderedNotes.emplace(index, entry.second.as<sol::table>());
+			}
+			if (orderedNotes.size() > ax::audio::arrangement_max_notes)
+			{
+				spdlog::error("<Audio> Arrangement '{}' exceeds the {}-note limit",
+					name, ax::audio::arrangement_max_notes);
+				return false;
+			}
+			arrangement.notes.reserve(orderedNotes.size());
+			for (int index{ 1 }; index <= static_cast<int>(orderedNotes.size()); ++index)
+			{
+				const auto it{ orderedNotes.find(index) };
+				if (it == orderedNotes.end())
+				{
+					spdlog::error("<Audio> Arrangement '{}' has a gap in its note list", name);
+					return false;
+				}
+				const auto& noteTableEntry{ it->second };
+				const auto instrument{ noteTableEntry.get_or("instrument", 0) };
+				const auto note{ noteTableEntry.get_or("note", -1) };
+				if (instrument < 1 || instrument > static_cast<int>(arrangement.instruments.size())
+					|| note < 0 || note > 127)
+				{
+					spdlog::error("<Audio> Arrangement '{}' note {} has an invalid instrument or MIDI pitch", name, index);
+					return false;
+				}
+				arrangement.notes.push_back({
+					.startBeat = noteTableEntry.get_or("start_beat", 0.0f),
+					.durationBeats = noteTableEntry.get_or("duration_beats", 1.0f),
+					.instrument = static_cast<std::uint32_t>(instrument - 1),
+					.note = static_cast<std::uint8_t>(note),
+					.velocity = noteTableEntry.get_or("velocity", 1.0f),
+					.pan = noteTableEntry.get_or("pan", 0.0f) });
+			}
+
+			std::string error{};
+			const auto defined{ with_audio([&](ax::audio::AudioSystem& audio)
+			{
+				return audio.define_arrangement(name, std::move(arrangement), error);
+			}, false) };
+			if (!defined && !error.empty())
+				spdlog::error("<Audio> Failed to define arrangement '{}': {}", name, error);
+			return defined;
+		};
+
+	sequence_table["play"] =
+		[with_audio](const std::string& name, sol::optional<float> fade) -> bool
+		{
+			return with_audio([&](ax::audio::AudioSystem& audio)
+			{
+				return audio.play_arrangement(name, fade.value_or(0.1f));
+			}, false);
+		};
+
+	sequence_table["stop"] =
+		[with_audio](sol::optional<float> fade)
+		{
+			with_audio([&](ax::audio::AudioSystem& audio)
+			{
+				audio.stop_arrangement(fade.value_or(0.1f));
+				return 0;
+			}, 0);
+		};
+
+	sequence_table["pause"] =
+		[with_audio]()
+		{
+			with_audio([](ax::audio::AudioSystem& audio)
+			{
+				audio.set_arrangement_paused(true);
+				return 0;
+			}, 0);
+		};
+
+	sequence_table["resume"] =
+		[with_audio]()
+		{
+			with_audio([](ax::audio::AudioSystem& audio)
+			{
+				audio.set_arrangement_paused(false);
+				return 0;
+			}, 0);
+		};
+
+	sequence_table["seek"] =
+		[with_audio](float seconds) -> bool
+		{
+			return with_audio([&](ax::audio::AudioSystem& audio)
+			{
+				return audio.seek_arrangement(seconds);
+			}, false);
+		};
+
+	sequence_table["state"] =
+		[with_audio](sol::this_state lua) -> sol::object
+		{
+			const auto info{ with_audio(
+				[](ax::audio::AudioSystem& audio) { return audio.arrangement_playback(); },
+				ax::audio::ArrangementPlaybackInfo{}) };
+			if (info.name.empty())
+				return sol::nil;
+			sol::state_view view{ lua };
+			return view.create_table_with(
+				"name", info.name,
+				"active", info.active,
+				"paused", info.paused,
+				"position_seconds", info.positionSeconds,
+				"duration_seconds", info.durationSeconds);
 		};
 }

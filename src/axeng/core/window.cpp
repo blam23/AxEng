@@ -17,6 +17,7 @@
 #include <imgui.h>
 #include <dawn/native/DawnNative.h>
 #include <windows.h>
+#include <commctrl.h>
 #include <timeapi.h>
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
@@ -38,6 +39,9 @@
 std::map<GLFWwindow*, ax::Window*> s_windows{};
 std::mutex s_windows_mutex{};
 bool s_imgui_initialized{ false };
+static std::mutex s_redirectMutex{};
+static std::map<HWND, HWND> s_redirectHandles{};
+static constexpr UINT_PTR s_window_subclass_id{ 1 };
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -101,6 +105,12 @@ ax::Window::~Window()
 					s_imgui_initialized = false;
 				}
 			}
+		}
+		const auto hwnd{ glfwGetWin32Window(m_window) };
+		{
+			std::lock_guard lock{ s_redirectMutex };
+			::RemoveWindowSubclass(hwnd, raw_windows_event, s_window_subclass_id);
+			s_redirectHandles.erase(hwnd);
 		}
 		glfwDestroyWindow(m_window);
 	}
@@ -1681,10 +1691,6 @@ void ax::Window::focus_child(DWORD processID)
 	}
 }
 
-static std::mutex s_redirectMutex{};
-static std::map<HWND, WNDPROC> s_originalWndProc{};
-static std::map<HWND, HWND> s_redirectHandles{};
-
 void ax::Window::redirect_input_to_child(DWORD processID)
 {
 	auto it = m_childWindows.find(processID);
@@ -1701,11 +1707,9 @@ void ax::Window::redirect_input_to_child(DWORD processID)
 
 			ImGui_ImplGlfw_RestoreCallbacks(m_window);
 
-			if (s_originalWndProc.find(hWnd) == s_originalWndProc.end())
-				s_originalWndProc[hWnd] = (WNDPROC)::GetWindowLongPtr(hWnd, GWLP_WNDPROC);
-
 			s_redirectHandles[hWnd] = childHandle;
-			::SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)ax::Window::raw_windows_event);
+			if (!::SetWindowSubclass(hWnd, raw_windows_event, s_window_subclass_id, 0))
+				spdlog::error("Failed to install input redirection subclass: {}", ::GetLastError());
 
 			register_window_events();
 			ImGui_ImplGlfw_InstallCallbacks(m_window);
@@ -1714,21 +1718,52 @@ void ax::Window::redirect_input_to_child(DWORD processID)
 }
 
 
-LRESULT ax::Window::raw_windows_event(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK ax::Window::raw_windows_event(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+	UINT_PTR, DWORD_PTR)
 {
+	if (msg == WM_APPCOMMAND)
+	{
+		const auto command{ GET_APPCOMMAND_LPARAM(lParam) };
+		switch (command)
+		{
+		case APPCOMMAND_MEDIA_PLAY_PAUSE:
+			ax::input::KeyEventHandler::dispatch_external_key(ax::input::media_key_play_pause, true);
+			return TRUE;
+		case APPCOMMAND_MEDIA_NEXTTRACK:
+			ax::input::KeyEventHandler::dispatch_external_key(ax::input::media_key_next, true);
+			return TRUE;
+		case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+			ax::input::KeyEventHandler::dispatch_external_key(ax::input::media_key_previous, true);
+			return TRUE;
+		default:
+			break;
+		}
+	}
+
 	switch (msg)
 	{
 	case WM_KEYDOWN:
 	case WM_KEYUP:
 	{
-		::SendMessage(s_redirectHandles[hwnd], msg, wParam, lParam);
-		return 0;
+		HWND redirect{};
+		{
+			std::lock_guard lock{ s_redirectMutex };
+			const auto it{ s_redirectHandles.find(hwnd) };
+			if (it != s_redirectHandles.end())
+				redirect = it->second;
+		}
+		if (redirect != nullptr)
+		{
+			::SendMessage(redirect, msg, wParam, lParam);
+			return 0;
+		}
+		break;
 	}
 	default:
 		break;
 	}
 
-	return ::CallWindowProc(s_originalWndProc[hwnd], hwnd, msg, wParam, lParam);
+	return ::DefSubclassProc(hwnd, msg, wParam, lParam);
 }
 
 
@@ -1737,14 +1772,12 @@ void ax::Window::reset_input_redirection()
 	std::lock_guard lock{ s_redirectMutex };
 
 	const auto hwnd{ ::glfwGetWin32Window(m_window) };
-	const auto originalWndProc{ s_originalWndProc.find(hwnd) };
-	if (originalWndProc == s_originalWndProc.end())
+	const auto redirect{ s_redirectHandles.find(hwnd) };
+	if (redirect == s_redirectHandles.end())
 		return;
 
 	ImGui_ImplGlfw_RestoreCallbacks(m_window);
 	s_redirectHandles.erase(hwnd);
-	::SetWindowLongPtr(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(originalWndProc->second));
-	s_originalWndProc.erase(originalWndProc);
 
 	register_window_events();
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
@@ -2039,6 +2072,12 @@ void ax::Window::run_loop()
 		}
 	} frameTimer;
 	register_window_events();
+	{
+		const auto hwnd{ glfwGetWin32Window(m_window) };
+		std::lock_guard lock{ s_redirectMutex };
+		if (!::SetWindowSubclass(hwnd, raw_windows_event, s_window_subclass_id, 0))
+			spdlog::error("Failed to install Windows input subclass: {}", ::GetLastError());
+	}
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
 
 	using Clock = std::chrono::steady_clock;

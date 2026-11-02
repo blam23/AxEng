@@ -11,6 +11,8 @@
 #include <mutex>
 #include <numbers>
 #include <random>
+#include <type_traits>
+#include <variant>
 
 #include "miniaudio.h"
 #include "spdlog/spdlog.h"
@@ -112,6 +114,141 @@ namespace
 		double fadePosition{ 0.0 };
 		std::uint32_t fadeRemaining{ 0 };
 		std::uint32_t fadeLength{ 0 };
+		std::optional<std::variant<ax::audio::SynthInstrumentVoice, ax::audio::SamplerInstrumentVoice>> instrument{};
+	};
+
+	struct StereoReverb
+	{
+		static constexpr std::array<float, 4> s_delay_seconds{ 0.0297f, 0.0371f, 0.0411f, 0.0437f };
+
+		void configure(const ax::audio::ReverbSettings& settings, std::uint32_t rate)
+		{
+			m_settings = settings;
+			m_sampleRate = rate;
+			for (std::size_t i{}; i < m_delays.size(); ++i)
+			{
+				if (!(settings.wet > 0.0f))
+				{
+					m_delays[i].clear();
+					m_feedback[i] = 0.0f;
+					continue;
+				}
+				const auto frames{ static_cast<std::size_t>(
+					std::lround(s_delay_seconds[i] * static_cast<float>(rate))) };
+				m_delays[i].assign(std::max<std::size_t>(frames, 1), 0.0f);
+				m_feedback[i] = std::pow(0.001f, s_delay_seconds[i] / settings.decaySeconds);
+			}
+			reset();
+		}
+
+		void reset() noexcept
+		{
+			for (auto& delay : m_delays)
+				std::ranges::fill(delay, 0.0f);
+			m_positions.fill(0);
+			m_damped.fill(0.0f);
+			m_wet = 0.0f;
+			m_wetRemaining = m_settings.wet > 0.0f
+				? static_cast<std::uint32_t>(static_cast<float>(m_sampleRate) * 0.02f)
+				: 0;
+			m_wetStep = m_wetRemaining > 0
+				? m_settings.wet / static_cast<float>(m_wetRemaining)
+				: 0.0f;
+		}
+
+		void process(float inputLeft, float inputRight, float& outputLeft, float& outputRight) noexcept
+		{
+			if (!(m_settings.wet > 0.0f))
+			{
+				outputLeft = inputLeft;
+				outputRight = inputRight;
+				return;
+			}
+
+			std::array<float, 4> delayed{};
+			for (std::size_t i{}; i < delayed.size(); ++i)
+			{
+				delayed[i] = m_delays[i][m_positions[i]];
+				m_damped[i] = delayed[i] * (1.0f - m_settings.damping)
+					+ m_damped[i] * m_settings.damping;
+			}
+
+			const std::array<float, 4> feedback
+			{
+				(m_damped[0] + m_damped[1] + m_damped[2] + m_damped[3]) * 0.5f,
+				(m_damped[0] - m_damped[1] + m_damped[2] - m_damped[3]) * 0.5f,
+				(m_damped[0] + m_damped[1] - m_damped[2] - m_damped[3]) * 0.5f,
+				(m_damped[0] - m_damped[1] - m_damped[2] + m_damped[3]) * 0.5f,
+			};
+			const std::array<float, 4> input
+			{
+				(inputLeft + inputRight) * 0.5f,
+				(inputLeft - inputRight) * 0.5f,
+				(-inputLeft + inputRight) * 0.5f,
+				(-inputLeft - inputRight) * 0.5f,
+			};
+			for (std::size_t i{}; i < m_delays.size(); ++i)
+			{
+				m_delays[i][m_positions[i]] = input[i] + feedback[i] * m_feedback[i];
+				m_positions[i] = (m_positions[i] + 1) % m_delays[i].size();
+			}
+
+			const auto wetLeft{ (delayed[0] + delayed[1] - delayed[2] - delayed[3]) * 0.5f };
+			const auto wetRight{ (delayed[0] - delayed[1] + delayed[2] - delayed[3]) * 0.5f };
+			outputLeft = inputLeft + wetLeft * m_wet;
+			outputRight = inputRight + wetRight * m_wet;
+			if (m_wetRemaining > 0)
+			{
+				m_wet += m_wetStep;
+				if (--m_wetRemaining == 0)
+					m_wet = m_settings.wet;
+			}
+		}
+
+		std::uint64_t tail_frames() const noexcept
+		{
+			if (!(m_settings.wet > 0.0f))
+				return 0;
+			return static_cast<std::uint64_t>(
+				std::min(m_settings.decaySeconds * 3.0f, 10.0f) * static_cast<float>(m_sampleRate));
+		}
+
+	private:
+		ax::audio::ReverbSettings m_settings{};
+		std::array<std::vector<float>, 4> m_delays{};
+		std::array<std::size_t, 4> m_positions{};
+		std::array<float, 4> m_feedback{};
+		std::array<float, 4> m_damped{};
+		std::uint32_t m_sampleRate{};
+		std::uint32_t m_wetRemaining{};
+		float m_wet{};
+		float m_wetStep{};
+	};
+
+	struct ArrangementVoice
+	{
+		std::optional<std::variant<ax::audio::SynthInstrumentVoice, ax::audio::SamplerInstrumentVoice>> instrument{};
+		std::uint64_t noteOffFrame{};
+		float leftPan{};
+		float rightPan{};
+		bool noteOffSent{};
+	};
+
+	struct ArrangementPlayback
+	{
+		std::shared_ptr<const ax::audio::PreparedArrangement> arrangement{};
+		std::string name{};
+		std::array<ArrangementVoice, ax::audio::arrangement_max_voices> voices{};
+		std::size_t nextNote{};
+		std::uint64_t framePosition{};
+		std::uint64_t tailRemaining{};
+		Ramp gain{};
+		Ramp tailGain{ .value = 1.0f, .target = 1.0f };
+		StereoReverb reverb{};
+		bool active{};
+		bool paused{};
+		bool stopping{};
+		bool draining{};
 	};
 
 	struct MusicStream
@@ -287,6 +424,9 @@ struct ax::audio::AudioSystem::Impl
 	mutable std::mutex mutex{};
 	std::vector<Voice> voices{};
 	VoiceId nextVoiceId{ 1 };
+	std::map<std::string, std::shared_ptr<const PreparedArrangement>> arrangements{};
+	std::array<ArrangementPlayback, 2> arrangementPlayers{};
+	int currentArrangement{ -1 };
 	std::array<float, static_cast<std::size_t>(Bus::Count)> busTargets{};
 	std::array<float, static_cast<std::size_t>(Bus::Count)> busGains{};
 
@@ -320,6 +460,45 @@ struct ax::audio::AudioSystem::Impl
 	{
 		voice.stopping = true;
 		voice.gain.set(0.0f, std::max<std::uint32_t>(frames_for(fade), 32));
+	}
+
+	void stop_arrangement_player(ArrangementPlayback& player, float fade) noexcept
+	{
+		if (!player.active)
+			return;
+		if (player.draining)
+		{
+			player.stopping = true;
+			player.tailGain.set(0.0f, std::max<std::uint32_t>(frames_for(fade), 32));
+			return;
+		}
+		if (player.stopping)
+			return;
+		player.stopping = true;
+		player.paused = false;
+		player.gain.set(0.0f, std::max<std::uint32_t>(frames_for(fade), 32));
+		for (auto& voice : player.voices)
+		{
+			if (voice.instrument && !voice.noteOffSent)
+			{
+				std::visit([](auto& instrument) { instrument.note_off(); }, *voice.instrument);
+				voice.noteOffSent = true;
+			}
+		}
+	}
+
+	void make_voice_room()
+	{
+		const auto active{ static_cast<std::size_t>(
+			std::ranges::count_if(voices, [](const Voice& voice) { return !voice.stopping; })) };
+		if (active < s_max_voices)
+			return;
+
+		auto victim{ std::ranges::find_if(voices, [](const Voice& voice) { return !voice.stopping && !voice.loop; }) };
+		if (victim == voices.end())
+			victim = std::ranges::find_if(voices, [](const Voice& voice) { return !voice.stopping; });
+		if (victim != voices.end())
+			stop_voice(*victim, s_steal_fade);
 	}
 
 	SampleBuffer render_variant(SoundEntry& entry, std::uint32_t index)
@@ -411,6 +590,48 @@ struct ax::audio::AudioSystem::Impl
 		const auto rateScale{ static_cast<double>(sfx_sample_rate) / static_cast<double>(sampleRate) };
 		for (auto& voice : voices)
 		{
+			if (voice.instrument)
+			{
+				const auto busGain{ bus_gain(voice.bus) };
+				const auto angle{ (std::clamp(voice.pan.value, -1.0f, 1.0f) + 1.0f)
+					* std::numbers::pi_v<float> * 0.25f };
+				const auto leftGain{ std::cos(angle) * std::numbers::sqrt2_v<float> * busGain };
+				const auto rightGain{ std::sin(angle) * std::numbers::sqrt2_v<float> * busGain };
+				voice.pan.advance(frames);
+
+				for (std::uint32_t f{}; f < frames; ++f)
+				{
+					float leftSample{};
+					float rightSample{};
+					const auto playing{ std::visit([&](auto& instrument)
+					{
+						using Instrument = std::decay_t<decltype(instrument)>;
+						if constexpr (std::is_same_v<Instrument, ax::audio::SynthInstrumentVoice>)
+						{
+							float sample{};
+							if (!instrument.next(sample))
+								return false;
+							leftSample = sample;
+							rightSample = sample;
+							return true;
+						}
+						else
+							return instrument.next(leftSample, rightSample);
+					}, *voice.instrument) };
+					if (!playing)
+					{
+						voice.stopping = true;
+						voice.gain.set(0.0f, 0);
+						break;
+					}
+
+					const auto gain{ voice.gain.tick() };
+					out[f * 2] += leftSample * gain * leftGain;
+					out[f * 2 + 1] += rightSample * gain * rightGain;
+				}
+				continue;
+			}
+
 			const auto& samples{ *voice.buffer };
 			const auto size{ samples.size() };
 			if (size == 0)
@@ -509,6 +730,203 @@ struct ax::audio::AudioSystem::Impl
 		}
 	}
 
+	ArrangementVoice* start_arrangement_note(ArrangementPlayback& player,
+		const PreparedArrangementNote& note) noexcept
+	{
+		const auto slot{ std::ranges::find_if(player.voices, [](const ArrangementVoice& voice)
+		{
+			return !voice.instrument;
+		}) };
+		if (slot == player.voices.end())
+			return nullptr;
+
+		const auto& source{ player.arrangement->instruments[note.instrument] };
+		std::visit([&](const auto& definition)
+		{
+			using Definition = std::decay_t<decltype(definition)>;
+			if constexpr (std::is_same_v<Definition, SynthInstrumentDefinition>)
+				slot->instrument.emplace(std::in_place_type<SynthInstrumentVoice>, definition,
+					note.note, note.velocity, sampleRate);
+			else
+				slot->instrument.emplace(std::in_place_type<SamplerInstrumentVoice>, *source.sample,
+					definition, note.note, note.velocity, sampleRate);
+		}, source.definition);
+		slot->noteOffFrame = note.noteOffFrame;
+		const auto angle{ (note.pan + 1.0f) * std::numbers::pi_v<float> * 0.25f };
+		slot->leftPan = std::cos(angle) * std::numbers::sqrt2_v<float>;
+		slot->rightPan = std::sin(angle) * std::numbers::sqrt2_v<float>;
+		slot->noteOffSent = false;
+		return &*slot;
+	}
+
+	void position_arrangement_player(ArrangementPlayback& player, std::uint64_t frame) noexcept
+	{
+		for (auto& voice : player.voices)
+			voice.instrument.reset();
+		player.reverb.reset();
+		player.tailRemaining = 0;
+		player.draining = false;
+		player.framePosition = std::min(frame, player.arrangement->durationFrames);
+
+		const auto& notes{ player.arrangement->notes };
+		const auto firstPending{ std::lower_bound(notes.begin(), notes.end(), player.framePosition,
+			[](const PreparedArrangementNote& note, std::uint64_t position)
+			{
+				return note.startFrame < position;
+			}) };
+		player.nextNote = static_cast<std::size_t>(std::distance(notes.begin(), firstPending));
+
+		for (auto it{ notes.begin() }; it != firstPending; ++it)
+		{
+			const auto& instrument{ player.arrangement->instruments[it->instrument] };
+			const auto tailFrames{ frames_for(std::visit(
+				[](const auto& definition) { return definition.envelope.release; }, instrument.definition)) };
+			if (player.framePosition >= it->noteOffFrame + tailFrames)
+				continue;
+
+			auto* const voice{ start_arrangement_note(player, *it) };
+			if (voice == nullptr)
+				continue;
+
+			const auto age{ player.framePosition - it->startFrame };
+			const auto heldFrames{ std::min(age, it->noteOffFrame - it->startFrame) };
+			std::visit([heldFrames](auto& activeVoice) { activeVoice.advance(heldFrames); }, *voice->instrument);
+			if (age >= it->noteOffFrame - it->startFrame)
+			{
+				std::visit([](auto& activeVoice) { activeVoice.note_off(); }, *voice->instrument);
+				voice->noteOffSent = true;
+				std::visit([age, heldFrames](auto& activeVoice)
+				{
+					activeVoice.advance(age - heldFrames);
+				}, *voice->instrument);
+			}
+			if (std::visit([](const auto& activeVoice) { return activeVoice.finished(); }, *voice->instrument))
+				voice->instrument.reset();
+		}
+	}
+
+	void mix_arrangements(float* out, std::uint32_t frames) noexcept
+	{
+		const auto musicGain{ bus_gain(Bus::Music) };
+		for (auto& player : arrangementPlayers)
+		{
+			if (!player.active || player.paused || !player.arrangement)
+				continue;
+
+			for (std::uint32_t f{}; f < frames; ++f)
+			{
+				for (auto& voice : player.voices)
+				{
+					if (!voice.instrument)
+						continue;
+					if (!voice.noteOffSent && player.framePosition >= voice.noteOffFrame)
+					{
+						std::visit([](auto& instrument) { instrument.note_off(); }, *voice.instrument);
+						voice.noteOffSent = true;
+					}
+					if (std::visit([](const auto& instrument) { return instrument.finished(); }, *voice.instrument))
+						voice.instrument.reset();
+				}
+
+				while (!player.draining && player.framePosition < player.arrangement->durationFrames
+					&& player.nextNote < player.arrangement->notes.size()
+					&& player.arrangement->notes[player.nextNote].startFrame <= player.framePosition)
+				{
+					start_arrangement_note(player, player.arrangement->notes[player.nextNote]);
+					++player.nextNote;
+				}
+
+				const auto frameGain{ player.gain.tick() * musicGain };
+				float inputLeft{};
+				float inputRight{};
+				for (auto& voice : player.voices)
+				{
+					if (!voice.instrument)
+						continue;
+
+					float leftSample{};
+					float rightSample{};
+					const auto playing{ std::visit([&](auto& instrument)
+					{
+						using Instrument = std::decay_t<decltype(instrument)>;
+						if constexpr (std::is_same_v<Instrument, SynthInstrumentVoice>)
+						{
+							float sample{};
+							if (!instrument.next(sample))
+								return false;
+							leftSample = sample;
+							rightSample = sample;
+							return true;
+						}
+						else
+							return instrument.next(leftSample, rightSample);
+					}, *voice.instrument) };
+					if (!playing)
+					{
+						voice.instrument.reset();
+						continue;
+					}
+
+					inputLeft += leftSample * frameGain * voice.leftPan;
+					inputRight += rightSample * frameGain * voice.rightPan;
+				}
+
+				float outputLeft{};
+				float outputRight{};
+				player.reverb.process(inputLeft, inputRight, outputLeft, outputRight);
+				if (player.draining)
+				{
+					const auto tailGain{ player.tailGain.tick() };
+					outputLeft *= tailGain;
+					outputRight *= tailGain;
+				}
+				out[f * 2] += outputLeft;
+				out[f * 2 + 1] += outputRight;
+
+				if (player.stopping && !player.draining
+					&& player.gain.remaining == 0 && player.gain.value <= 0.0f)
+				{
+					for (auto& voice : player.voices)
+						voice.instrument.reset();
+					player.draining = true;
+					player.tailRemaining = player.reverb.tail_frames();
+					player.tailGain.set(1.0f, 0);
+				}
+				if (player.framePosition >= player.arrangement->durationFrames)
+				{
+					for (auto& voice : player.voices)
+					{
+						if (voice.instrument && !voice.noteOffSent)
+						{
+							std::visit([](auto& instrument) { instrument.note_off(); }, *voice.instrument);
+							voice.noteOffSent = true;
+						}
+					}
+					if (std::ranges::none_of(player.voices, [](const ArrangementVoice& voice)
+						{ return voice.instrument.has_value(); }) && !player.draining)
+					{
+						player.draining = true;
+						player.tailRemaining = player.reverb.tail_frames();
+						player.tailGain.set(1.0f, 0);
+					}
+				}
+				if (player.draining)
+				{
+					if (player.tailRemaining > 0)
+						--player.tailRemaining;
+					if (player.tailRemaining == 0
+						|| (player.stopping && player.tailGain.remaining == 0 && player.tailGain.value <= 0.0f))
+					{
+						player.active = false;
+						break;
+					}
+				}
+				else if (player.framePosition < player.arrangement->durationFrames)
+					++player.framePosition;
+			}
+		}
+	}
+
 	void mix(float* output, std::uint32_t frames) noexcept
 	{
 		std::fill_n(output, static_cast<std::size_t>(frames) * 2, 0.0f);
@@ -527,6 +945,7 @@ struct ax::audio::AudioSystem::Impl
 
 			mix_voices(out, count);
 			mix_music(out, count);
+			mix_arrangements(out, count);
 			for (std::uint32_t i{}; i < count * 2; ++i)
 				out[i] = soft_clip(out[i]);
 			done += count;
@@ -756,12 +1175,10 @@ ax::audio::VoiceId ax::audio::AudioSystem::play(const std::string& name, const P
 
 	// Enforce the per-sound and global voice limits by fading out the oldest voices.
 	std::size_t instances{};
-	std::size_t active{};
 	for (const auto& voice : impl.voices)
 	{
 		if (voice.stopping)
 			continue;
-		++active;
 		if (voice.soundId == entry.id)
 			++instances;
 	}
@@ -773,17 +1190,9 @@ ax::audio::VoiceId ax::audio::AudioSystem::play(const std::string& name, const P
 		{
 			impl.stop_voice(voice, s_steal_fade);
 			--instances;
-			--active;
 		}
 	}
-	if (active >= s_max_voices)
-	{
-		auto victim{ std::ranges::find_if(impl.voices, [](const Voice& v) { return !v.stopping && !v.loop; }) };
-		if (victim == impl.voices.end())
-			victim = std::ranges::find_if(impl.voices, [](const Voice& v) { return !v.stopping; });
-		if (victim != impl.voices.end())
-			impl.stop_voice(*victim, s_steal_fade);
-	}
+	impl.make_voice_room();
 
 	Voice voice{};
 	voice.id = impl.nextVoiceId++;
@@ -805,12 +1214,75 @@ ax::audio::VoiceId ax::audio::AudioSystem::play(const std::string& name, const P
 	return impl.voices.back().id;
 }
 
+ax::audio::VoiceId ax::audio::AudioSystem::play_synth(const SynthInstrumentDefinition& definition,
+	std::uint8_t note, float velocity, const InstrumentPlayOptions& options)
+{
+	m_impl->pump();
+	if (options.bus == Bus::Master || static_cast<std::size_t>(options.bus) >= static_cast<std::size_t>(Bus::Count))
+		return 0;
+
+	Voice voice{};
+	voice.instrument.emplace(std::in_place_type<SynthInstrumentVoice>, definition, note, velocity, m_impl->sampleRate);
+	if (!std::get<SynthInstrumentVoice>(*voice.instrument).valid())
+		return 0;
+
+	voice.bus = options.bus;
+	voice.pan.set(sanitise(options.pan, -1.0f, 1.0f, 0.0f), 0);
+	voice.gain.set(sanitise(options.volume, 0.0f, 4.0f, 1.0f), 0);
+
+	std::lock_guard lock{ m_impl->mutex };
+	m_impl->make_voice_room();
+	voice.id = m_impl->nextVoiceId++;
+	m_impl->voices.push_back(std::move(voice));
+	return m_impl->voices.back().id;
+}
+
+ax::audio::VoiceId ax::audio::AudioSystem::play_sampler(const AudioSampleData& sample,
+	const SamplerInstrumentDefinition& definition, std::uint8_t note, float velocity,
+	const InstrumentPlayOptions& options)
+{
+	m_impl->pump();
+	if (options.bus == Bus::Master || static_cast<std::size_t>(options.bus) >= static_cast<std::size_t>(Bus::Count))
+		return 0;
+
+	Voice voice{};
+	voice.instrument.emplace(std::in_place_type<SamplerInstrumentVoice>, sample, definition, note,
+		velocity, m_impl->sampleRate);
+	if (!std::get<SamplerInstrumentVoice>(*voice.instrument).valid())
+		return 0;
+
+	voice.loop = definition.loop;
+	voice.bus = options.bus;
+	voice.pan.set(sanitise(options.pan, -1.0f, 1.0f, 0.0f), 0);
+	voice.gain.set(sanitise(options.volume, 0.0f, 4.0f, 1.0f), 0);
+
+	std::lock_guard lock{ m_impl->mutex };
+	m_impl->make_voice_room();
+	voice.id = m_impl->nextVoiceId++;
+	m_impl->voices.push_back(std::move(voice));
+	return m_impl->voices.back().id;
+}
+
+bool ax::audio::AudioSystem::note_off(VoiceId id)
+{
+	m_impl->pump();
+	std::lock_guard lock{ m_impl->mutex };
+	auto* voice{ m_impl->find_voice(id) };
+	if (voice == nullptr || !voice->instrument || voice->stopping)
+		return false;
+
+	std::visit([](auto& instrument) { instrument.note_off(); }, *voice->instrument);
+	return true;
+}
+
 bool ax::audio::AudioSystem::update_voice(VoiceId id, const VoiceUpdate& update)
 {
 	m_impl->pump();
 	std::lock_guard lock{ m_impl->mutex };
 	auto* voice{ m_impl->find_voice(id) };
 	if (voice == nullptr || voice->stopping)
+		return false;
+	if (voice->instrument && update.pitch)
 		return false;
 
 	const auto frames{ m_impl->frames_for(update.ramp) };
@@ -898,6 +1370,8 @@ bool ax::audio::AudioSystem::play_music(const Music& music, float fade)
 {
 	m_impl->pump();
 	std::lock_guard lock{ m_impl->mutex };
+	for (auto& player : m_impl->arrangementPlayers)
+		m_impl->stop_arrangement_player(player, fade);
 	m_impl->playlistActive = false;
 	m_impl->playlist.clear();
 	m_impl->waitingForGap = false;
@@ -912,6 +1386,8 @@ bool ax::audio::AudioSystem::play_playlist(std::vector<const Music*> tracks, con
 		return false;
 
 	std::lock_guard lock{ m_impl->mutex };
+	for (auto& player : m_impl->arrangementPlayers)
+		m_impl->stop_arrangement_player(player, options.fade);
 	m_impl->playlist = std::move(tracks);
 	m_impl->playlistOptions = options;
 	m_impl->playlistOptions.fade = sanitise(options.fade, 0.0f, 60.0f, 1.0f);
@@ -932,6 +1408,26 @@ bool ax::audio::AudioSystem::next_track(float fade)
 	return m_impl->playlistActive;
 }
 
+bool ax::audio::AudioSystem::previous_track(float fade)
+{
+	m_impl->pump();
+	std::lock_guard lock{ m_impl->mutex };
+	if (!m_impl->playlistActive || m_impl->playlist.empty() || m_impl->playlistPosition == 0)
+		return false;
+	if (m_impl->playlistPosition == 1)
+	{
+		if (!m_impl->playlistOptions.repeat)
+			return false;
+		m_impl->playlistPosition = m_impl->playlistOrder.size() - 1;
+	}
+	else
+	{
+		m_impl->playlistPosition -= 2;
+	}
+	m_impl->advance_playlist(fade);
+	return m_impl->playlistActive;
+}
+
 void ax::audio::AudioSystem::stop_music(float fade)
 {
 	m_impl->pump();
@@ -943,6 +1439,8 @@ void ax::audio::AudioSystem::stop_music(float fade)
 		stream->stopping = true;
 		stream->gain.set(0.0f, std::max<std::uint32_t>(m_impl->frames_for(fade), 64));
 	}
+	for (auto& player : m_impl->arrangementPlayers)
+		m_impl->stop_arrangement_player(player, fade);
 }
 
 void ax::audio::AudioSystem::set_music_paused(bool paused)
@@ -974,6 +1472,139 @@ bool ax::audio::AudioSystem::playlist_active() const
 	m_impl->pump();
 	std::lock_guard lock{ m_impl->mutex };
 	return m_impl->playlistActive;
+}
+
+bool ax::audio::AudioSystem::define_arrangement(const std::string& name, Arrangement arrangement,
+	std::string& error)
+{
+	if (name.empty())
+	{
+		error = "arrangement name must not be empty";
+		spdlog::error("<Audio> Failed to define arrangement: {}", error);
+		return false;
+	}
+	auto prepared{ prepare_arrangement(std::move(arrangement), m_impl->sampleRate, error) };
+	if (!prepared)
+	{
+		spdlog::error("<Audio> Failed to prepare arrangement '{}': {}", name, error);
+		return false;
+	}
+	m_impl->arrangements.insert_or_assign(name, std::move(prepared));
+	return true;
+}
+
+std::vector<std::string> ax::audio::AudioSystem::arrangement_names() const
+{
+	std::vector<std::string> names{};
+	names.reserve(m_impl->arrangements.size());
+	for (const auto& [name, _] : m_impl->arrangements)
+		names.push_back(name);
+	return names;
+}
+
+bool ax::audio::AudioSystem::play_arrangement(const std::string& name, float fade)
+{
+	fade = sanitise(fade, 0.0f, 60.0f, 0.1f);
+	m_impl->pump();
+	const auto it{ m_impl->arrangements.find(name) };
+	if (it == m_impl->arrangements.end())
+	{
+		spdlog::warn("<Audio> Unknown arrangement '{}'", name);
+		return false;
+	}
+	StereoReverb reverb{};
+	reverb.configure(it->second->reverb, m_impl->sampleRate);
+
+	std::lock_guard lock{ m_impl->mutex };
+	for (auto& stream : m_impl->music)
+	{
+		stream->stopping = true;
+		stream->gain.set(0.0f, std::max<std::uint32_t>(m_impl->frames_for(fade), 64));
+	}
+	m_impl->playlistActive = false;
+	m_impl->playlist.clear();
+	m_impl->waitingForGap = false;
+
+	const auto oldIndex{ m_impl->currentArrangement };
+	for (std::size_t i{}; i < m_impl->arrangementPlayers.size(); ++i)
+	{
+		auto& player{ m_impl->arrangementPlayers[i] };
+		if (player.active)
+			m_impl->stop_arrangement_player(player, fade);
+	}
+
+	const auto targetIndex{ oldIndex < 0 ? 0 : 1 - oldIndex };
+	auto& target{ m_impl->arrangementPlayers[static_cast<std::size_t>(targetIndex)] };
+	target = ArrangementPlayback{};
+	target.arrangement = it->second;
+	target.name = name;
+	target.reverb = std::move(reverb);
+	target.active = true;
+	target.gain.value = fade > 0.0f ? 0.0f : 1.0f;
+	target.gain.set(1.0f, m_impl->frames_for(fade));
+	m_impl->currentArrangement = targetIndex;
+	return true;
+}
+
+void ax::audio::AudioSystem::stop_arrangement(float fade)
+{
+	fade = sanitise(fade, 0.0f, 60.0f, 0.1f);
+	m_impl->pump();
+	std::lock_guard lock{ m_impl->mutex };
+	for (auto& player : m_impl->arrangementPlayers)
+		m_impl->stop_arrangement_player(player, fade);
+}
+
+bool ax::audio::AudioSystem::seek_arrangement(float positionSeconds)
+{
+	m_impl->pump();
+	if (!std::isfinite(positionSeconds))
+		return false;
+
+	std::lock_guard lock{ m_impl->mutex };
+	if (m_impl->currentArrangement < 0)
+		return false;
+	auto& player{ m_impl->arrangementPlayers[static_cast<std::size_t>(m_impl->currentArrangement)] };
+	if (!player.arrangement)
+		return false;
+
+	const auto maxSeconds{ static_cast<double>(player.arrangement->durationFrames)
+		/ static_cast<double>(player.arrangement->sampleRate) };
+	const auto clampedSeconds{ std::clamp(static_cast<double>(positionSeconds), 0.0, maxSeconds) };
+	const auto targetFrame{ static_cast<std::uint64_t>(std::llround(
+		clampedSeconds * static_cast<double>(player.arrangement->sampleRate))) };
+	m_impl->position_arrangement_player(player, targetFrame);
+	player.stopping = false;
+	player.active = targetFrame < player.arrangement->durationFrames;
+	player.gain.set(1.0f, m_impl->frames_for(0.01f));
+	return true;
+}
+
+void ax::audio::AudioSystem::set_arrangement_paused(bool paused)
+{
+	std::lock_guard lock{ m_impl->mutex };
+	if (m_impl->currentArrangement >= 0)
+		m_impl->arrangementPlayers[static_cast<std::size_t>(m_impl->currentArrangement)].paused = paused;
+}
+
+ax::audio::ArrangementPlaybackInfo ax::audio::AudioSystem::arrangement_playback() const
+{
+	m_impl->pump();
+	std::lock_guard lock{ m_impl->mutex };
+	if (m_impl->currentArrangement < 0)
+		return {};
+
+	const auto& player{ m_impl->arrangementPlayers[static_cast<std::size_t>(m_impl->currentArrangement)] };
+	if (!player.arrangement)
+		return {};
+	return ArrangementPlaybackInfo{
+		.name = player.name,
+		.active = player.active,
+		.paused = player.paused,
+		.positionSeconds = static_cast<float>(std::min(player.framePosition, player.arrangement->durationFrames))
+			/ static_cast<float>(player.arrangement->sampleRate),
+		.durationSeconds = static_cast<float>(player.arrangement->durationFrames)
+			/ static_cast<float>(player.arrangement->sampleRate) };
 }
 
 void ax::audio::AudioSystem::mix(float* output, std::uint32_t frames) noexcept

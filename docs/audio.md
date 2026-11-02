@@ -7,6 +7,9 @@ AxEng has a small audio system built on [miniaudio](https://miniaud.io/) (vcpkg 
   on every play, so repeated sounds don't sound identical.
 - **Music**: encoded tracks (`.ogg`, `.mp3`, `.flac`, `.wav`) loaded as assets, the same way as textures and
   scripts, and played singly or as a shuffled playlist.
+- **Pitched instrument DSP**: generic MIDI-note synth and sampler voices with ADSR envelopes, plus decoded mono/stereo
+  audio sample assets. These are low-level voice primitives; arrangement scheduling and music-bus playback are a
+  separate layer.
 
 Code lives in `src/axeng/core/audio/`:
 
@@ -15,6 +18,8 @@ Code lives in `src/axeng/core/audio/`:
 | `sfx_synth.h/.cpp` | `SfxParams`, `synthesize()`, `mutate()`, `generate_preset()`. Pure functions, no device needed. |
 | `audio_system.h/.cpp` | `AudioSystem`: output device, mixer, sound bank, voices, buses and the music player. |
 | `music.h/.cpp` | `Music` asset and `MusicManager` (`AssetManager<Music, MusicManager>`). |
+| `instrument.h/.cpp` | Pitched synth/sampler voice state, envelopes, resampling, and sample decoding. |
+| `audio_sample.h/.cpp` | Decoded `AudioSample` assets and `AudioSampleManager`. |
 | `miniaudio_impl.c` | The miniaudio + stb_vorbis implementation translation unit (compiled with `-w`). |
 
 Lua bindings are in `lua/bindings/lua_audio_bindings.cpp` and are exposed as `app.audio` on the **main thread
@@ -47,6 +52,147 @@ Add tracks to `project.json` under `music`; the compiler copies them and lists t
 Tracks are validated when the app loads (a bad file logs an error and is skipped). The compressed data stays in
 memory and is decoded while it plays, so Ogg Vorbis is the best choice for size. The audio thread reads the
 assets, so `Application` destroys the `AudioSystem` before unloading music.
+
+## Audio sample assets
+
+Declare source samples separately from encoded music playlists. The compiler copies these files and writes them to
+`manifest.audio_samples`:
+
+```json
+"audio_samples": {
+    "piano": "assets/music_samples/piano.ogg"
+}
+```
+
+`Application::audio_samples()` provides the loaded `AudioSampleManager`. Samples decode to immutable interleaved
+float PCM on the loading thread; mono and stereo WAV, Ogg Vorbis, MP3, and FLAC are supported. Decoded samples are
+limited to 8–192 kHz and five minutes. Keep the manager/asset alive while sampler voices reference its PCM.
+
+`decode_audio_sample()` can decode encoded bytes without an `Application` asset manager. `SamplerInstrumentVoice`
+uses per-instance settings for root note, fine tuning, trim, optional loop points, gain, and envelope, so multiple
+sampler definitions can share one immutable sample asset without changing one another. Decoded samples are checked
+for finite PCM once; voice construction checks only sample metadata so creating a note does not scan the full buffer.
+
+## Pitched instrument voice primitives
+
+`SynthInstrumentVoice` produces MIDI-pitched sine, triangle, band-limited saw, band-limited square, or deterministic
+noise notes with velocity, ADSR, detune, slow vibrato, a one-pole low-pass filter, and an optional exponential
+pitch drop (up to 48 semitones over 2 seconds). These generic primitives can form electronic percussion such as
+808-style kicks, snares, and hats without game-specific engine code. `SamplerInstrumentVoice` resamples mono/stereo PCM at
+the requested MIDI pitch and applies an independent ADSR and sampler configuration. Both voice types are
+allocation-free after construction and expose `note_off()` for release.
+
+`AudioSystem::play_synth()` and `play_sampler()` play these voices through the existing mixer and return normal
+voice IDs. `note_off(id)` begins the voice's release envelope; `stop(id, fade)` remains available for an immediate
+fade-out. Sampler PCM must outlive its active voices. Voice creation and control happen on the main thread; voice
+rendering and sample decoding do not invoke Lua or allocate on the audio thread.
+
+For authoring, Lua can render one bounded synth note to a mono 16-bit PCM WAV byte string, then register it as a
+runtime sample for preview or arrangement use:
+
+```lua
+local wav = app.audio.render_synth_sample({
+    wave = "triangle",
+    gain = 0.3,
+    envelope = { attack = 0.1, decay = 0.5, sustain = 0.7, release = 1.0 }
+}, 60, { hold_seconds = 2.0, velocity = 0.8, sample_rate = 44100 })
+assert(wav and app.audio.load_sample("user_pad_c4", wav))
+```
+
+The render captures the note through its release, uses a maximum 30-second hold-plus-release duration and a sample
+rate from 8–96 kHz, and limits peaks to 0.95 before WAV encoding. The default sample rate is the audio device rate
+up to 48 kHz. `load_sample(name, bytes)` rejects empty/oversized input, invalid audio, and duplicate loaded names;
+it does not write files or modify the project manifest. A project editor must persist returned WAV bytes to a managed
+project asset and update its manifest before the sample can be used after restart. `inspect_sample(bytes)` validates
+encoded audio without registering it and returns its sample rate, channel count, frame count, and duration.
+`sample_info(name)` returns the same metadata for a sample that is already loaded, or `nil` when it is not present.
+
+Lua can audition pitched instruments using the loaded sample bank:
+
+```lua
+local id = app.audio.play_synth({
+    wave = "sine",
+    gain = 0.3,
+    envelope = { attack = 0.2, decay = 0.5, sustain = 0.7, release = 2.0 }
+}, 60, { velocity = 0.8, volume = 1, pan = 0, bus = "music" })
+
+local piano_id = app.audio.play_sampler("piano", {
+    root_note = 60,
+    start_frame = 0,
+    end_frame = 2205,
+    tuning_cents = 0,
+    gain = 1,
+    envelope = { attack = 0.01, decay = 0, sustain = 1, release = 0.2 }
+}, 60)
+app.audio.note_off(piano_id)
+```
+
+Synth tables accept `wave` (`sine`, `triangle`, `saw`, `square`, or `noise`), `gain`, `detune_cents`,
+`vibrato_cents`, `vibrato_rate`, `low_pass_hz`, `pitch_drop_semitones`, `pitch_drop_seconds`, and an `envelope`
+table. Sampler tables accept `root_note`, `tuning_cents`, trim and loop frame settings, `gain`, `loop`, and
+`envelope`. Playback options accept `velocity`, `volume`, `pan`, and `bus` (`sfx`, `ui`, or `music`).
+`update_voice()` can ramp volume and pan for instrument voices; pitch updates are only supported for generated SFX.
+
+## Sequence arrangements
+
+`audio.sequence` accepts and prepares immutable note arrangements on the Lua/main thread. Notes use beat positions;
+the tempo converts them to sample frames before playback. The mixer schedules those prepared events with a fixed
+64-voice limit and does not access Lua or allocate arrangement voice state in its callback. Arrangements are limited
+to 64 instruments, 16384 notes, and 30 minutes. Sampler definitions resolve to loaded `audio_samples` assets during
+preparation; those assets must outlive the audio system.
+
+```lua
+local sequence = app.audio.sequence
+sequence.define("quiet_theme", {
+    tempo = 54,
+    duration_beats = 64,
+    reverb = { wet = 0.25, decay_seconds = 3.5, damping = 0.4 },
+    instruments = {
+        {
+            type = "synth",
+            wave = "triangle",
+            gain = 0.18,
+            envelope = { attack = 1.5, decay = 0.5, sustain = 0.8, release = 3.0 }
+        },
+        {
+            type = "sample",
+            sample = "piano",
+            root_note = 60,
+            gain = 0.5,
+            envelope = { attack = 0.01, decay = 0, sustain = 1, release = 1.2 }
+        }
+    },
+    notes = {
+        { start_beat = 0, duration_beats = 8, instrument = 1, note = 48, velocity = 0.7 },
+        { start_beat = 12, duration_beats = 1, instrument = 2, note = 67, velocity = 0.4 }
+    }
+})
+
+sequence.play("quiet_theme", 0.5)
+local state = sequence.state()      -- active, paused, position_seconds, duration_seconds
+sequence.pause()
+sequence.seek(18.0)                 -- seconds; active notes and sample offsets are reconstructed
+sequence.resume()
+sequence.stop(0.5)
+```
+
+Instruments are one-based indices into `instruments`; each note supplies `start_beat`, `duration_beats`,
+`instrument`, MIDI `note`, and optional `velocity` and `pan`. A synth instrument accepts the pitched synth fields
+described above with `type = "synth"`. A sampler uses `type = "sample"` and a loaded `sample` name plus the sampler
+settings above. `sequence.define()` reports invalid tempo, duration, assets, note data, and polyphony as an error
+and does not replace a previously prepared arrangement on failure. `sequence.list()` returns defined arrangement
+names; `sequence.play()`, `stop()`, `pause()`, `resume()`, `seek(seconds)`, and `state()` control the active
+arrangement. Seeking clamps to the arrangement duration and rebuilds active note/envelope/sample positions. It resets
+voice and reverb state, then fades the reverb return in over 20 ms; it does not recreate historical reverb tails.
+Sequence pause state is independent of `audio.music.pause()` / `resume()`, which control encoded music playback.
+
+`reverb` is optional and defaults to dry playback. Its additive wet-return level is 0..1, `decay_seconds` is 0.1..8,
+and `damping` is 0..0.95. The bounded four-line stereo effect runs on the arrangement mix; its delay buffers are
+prepared when playback starts and are not allocated in the audio callback. Seeking fades the wet return in without
+changing the dry signal level. Natural ends, stops, and crossfades drain the reverb for at most 10 seconds. Sequence
+playback shares the music bus with encoded tracks and fades the other music source when starting. Per-instrument effect
+sends, delay, and automation remain future work. AxFactory's loading screen prepares its saved procedural tracks
+incrementally, one bounded track operation per frame, before entering the requested scene.
 
 ## Lua API
 

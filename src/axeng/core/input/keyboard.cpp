@@ -16,7 +16,14 @@ void ax::input::KeyEventHandler::cleanup_events(GLFWwindow* window)
 
 bool ax::input::KeyEventHandler::is_key_pressed(Key key)
 {
+	if (key < 0 || static_cast<std::size_t>(key) >= s_keyMap.size())
+		return false;
 	return s_keyMap[key];
+}
+
+void ax::input::KeyEventHandler::dispatch_external_key(Key key, bool pressed, int mods)
+{
+	globalEventHandler.fire({ .key = key, .pressed = pressed, .mods = mods });
 }
 
 
@@ -41,9 +48,9 @@ void ax::input::KeyEventHandler::glfw_callback(GLFWwindow*, int key, [[maybe_unu
 
 	SPDLOG_TRACE("KeyEventHandler: {}, scancode: {}, action: {}, mods: {}", key, scancode, action, mods);
 	
-	if (key > GLFW_KEY_LAST)
+	if (key < 0 || key > GLFW_KEY_LAST)
 	{
-		spdlog::error("Unkown key pressed: {}", key);
+		spdlog::debug("Ignoring key event with invalid key code: {}", key);
 		return;
 	}
 	

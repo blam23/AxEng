@@ -11,6 +11,9 @@
 namespace ax::input
 {
 	using Key = int;
+	inline constexpr Key media_key_play_pause{ GLFW_KEY_LAST + 1 };
+	inline constexpr Key media_key_next{ GLFW_KEY_LAST + 2 };
+	inline constexpr Key media_key_previous{ GLFW_KEY_LAST + 3 };
 
 	struct KeyEvent
 	{
@@ -33,6 +36,7 @@ namespace ax::input
 		static void register_events(GLFWwindow* window);
 		static void cleanup_events(GLFWwindow* window);
 		static bool is_key_pressed(Key key);
+		static void dispatch_external_key(Key key, bool pressed, int mods = 0);
 		inline static AnyKeyEventHandler globalEventHandler{};
 
 		KeyEventHandler(Key key);

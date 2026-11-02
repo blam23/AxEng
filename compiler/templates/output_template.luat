@@ -29,6 +29,10 @@ manifest.music = {
 %%MUSIC%%
 }
 
+manifest.audio_samples = {
+%%AUDIO_SAMPLES%%
+}
+
 manifest.custom_types = {
 %%TYPES%%
 }

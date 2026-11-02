@@ -214,6 +214,40 @@ local function check_and_copy_music(project, in_directory, out_directory)
     return true
 end
 
+local supported_audio_sample_extensions = { [".ogg"] = true, [".mp3"] = true, [".flac"] = true, [".wav"] = true }
+
+local function check_and_copy_audio_samples(project, in_directory, out_directory)
+    if project.audio_samples == nil then
+        return true
+    end
+
+    for sample_name, sample_path in pairs(project.audio_samples) do
+        local ext = (sample_path:match("(%.[^%./\\]+)$") or ""):lower()
+        if not supported_audio_sample_extensions[ext] then
+            log.error("Audio samples must be .ogg, .mp3, .flac or .wav, '" .. sample_path .. "' is not.")
+            return false
+        end
+
+        local in_path = in_directory .. "/" .. sample_path
+        local out_path = out_directory .. "/" .. sample_path
+        local sfile = io.open(in_path, "rb")
+        if sfile == nil then
+            log.error("Cannot open audio sample file '" .. in_path .. "'.")
+            return false
+        end
+        sfile:close()
+
+        if not copy_file(in_path, out_path) then
+            return false
+        end
+
+        log.debug("Compiled audio sample: " .. sample_name)
+    end
+
+    log.info("Compiled audio samples.")
+    return true
+end
+
 local function copy_custom_resources(project, in_directory, out_directory)
     if project.custom_resources == nil then
         return true
@@ -268,6 +302,20 @@ local function gen_music_text(project)
     end
 
     for k,v in pairs(project.music) do
+        ret = ret .. "    [\"" .. k .. "\"] = \"" .. v .. "\",\n"
+    end
+
+    return ax.rstrip(ret)
+end
+
+local function gen_audio_samples_text(project)
+    local ret = ""
+
+    if project.audio_samples == nil then
+        return ret
+    end
+
+    for k,v in pairs(project.audio_samples) do
         ret = ret .. "    [\"" .. k .. "\"] = \"" .. v .. "\",\n"
     end
 
@@ -334,6 +382,7 @@ local function create_manifest(project, dir, source_scripts)
         SCRIPTS = gen_script_text(),
         TEXTURES = gen_textures_text(project),
         MUSIC = gen_music_text(project),
+        AUDIO_SAMPLES = gen_audio_samples_text(project),
         TYPES = gen_types_text(project),
         PERMISSIONS = gen_permissions_text(project),
         ATLAS_TEXTURE = project.atlas_texture or "null",
@@ -430,6 +479,12 @@ function compile(in_directory, out_directory, source_scripts)
     local checked_music = check_and_copy_music(project, in_directory, out_directory)
     if not checked_music then
         log.error("Failed to validate music.")
+        return error_code.InvalidResource
+    end
+
+    local checked_audio_samples = check_and_copy_audio_samples(project, in_directory, out_directory)
+    if not checked_audio_samples then
+        log.error("Failed to validate audio samples.")
         return error_code.InvalidResource
     end
 

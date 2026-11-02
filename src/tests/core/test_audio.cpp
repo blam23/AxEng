@@ -2,13 +2,16 @@
 
 #include "axeng/core/application.h"
 #include "axeng/core/audio/audio_system.h"
+#include "axeng/core/audio/instrument.h"
 #include "axeng/core/audio/sfx_synth.h"
 #include "tests/main/log_capture.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <numbers>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -58,6 +61,20 @@ namespace
 		def.params.decay = 0.1f;
 		def.loop = loop;
 		return def;
+	}
+
+	Arrangement simple_arrangement()
+	{
+		SynthInstrumentDefinition synth{};
+		synth.gain = 1.0f;
+		synth.lowPassHz = 24000.0f;
+		synth.envelope = { .attack = 0.0f, .decay = 0.0f, .sustain = 1.0f, .release = 0.01f };
+		return Arrangement{
+			.tempo = 60.0f,
+			.durationBeats = 4.0f,
+			.instruments = { ArrangementInstrument{ .definition = synth } },
+			.notes = { ArrangementNote{ .startBeat = 1.0f, .durationBeats = 2.0f,
+				.instrument = 0, .note = 69, .velocity = 1.0f, .pan = 0.0f } } };
 	}
 
 	std::vector<std::uint8_t> make_wav(float seconds, float frequency, std::uint32_t rate = 22050)
@@ -202,6 +219,574 @@ TEST(SfxSynth, WaveNamesAndClamping)
 	EXPECT_EQ(params.baseFreq, 1.0f);
 	EXPECT_EQ(params.freqSlide, -1.0f);
 	EXPECT_EQ(params.decay, 0.0f);
+}
+
+TEST(InstrumentVoice, SynthUsesMidiPitchAndReleaseEnvelope)
+{
+	SynthInstrumentDefinition definition{};
+	definition.wave = InstrumentWave::Sine;
+	definition.gain = 1.0f;
+	definition.envelope = { .attack = 0.0f, .decay = 0.0f, .sustain = 1.0f, .release = 0.01f };
+	SynthInstrumentVoice voice{ definition, 69, 1.0f, 8000 };
+	ASSERT_TRUE(voice.valid());
+
+	std::vector<float> samples{};
+	float sample{};
+	for (int i{}; i < 800; ++i)
+	{
+		ASSERT_TRUE(voice.next(sample));
+		samples.push_back(sample);
+	}
+
+	std::size_t crossings{};
+	for (std::size_t i{ 1 }; i < samples.size(); ++i)
+		crossings += (samples[i - 1] < 0.0f) != (samples[i] < 0.0f);
+	EXPECT_NEAR(static_cast<double>(crossings) / 2.0, 440.0 * 0.1, 1.0);
+	EXPECT_GT(peak(samples), 0.9f);
+
+	voice.note_off();
+	for (int i{}; i < 80; ++i)
+		ASSERT_TRUE(voice.next(sample));
+	EXPECT_FALSE(voice.next(sample));
+	EXPECT_TRUE(voice.finished());
+	EXPECT_FLOAT_EQ(sample, 0.0f);
+}
+
+TEST(InstrumentVoice, NoiseAndPitchDropSupportElectronicPercussion)
+{
+	SynthInstrumentDefinition noise{};
+	noise.wave = InstrumentWave::Noise;
+	noise.gain = 1.0f;
+	noise.envelope = { .attack = 0.0f, .decay = 0.0f, .sustain = 1.0f, .release = 0.01f };
+	SynthInstrumentVoice noiseVoice{ noise, 42, 1.0f, 8000 };
+	ASSERT_TRUE(noiseVoice.valid());
+	std::vector<float> noiseSamples{};
+	float sample{};
+	for (int i{}; i < 128; ++i)
+	{
+		ASSERT_TRUE(noiseVoice.next(sample));
+		noiseSamples.push_back(sample);
+	}
+	EXPECT_GT(peak(noiseSamples), 0.9f);
+	EXPECT_LT(*std::min_element(noiseSamples.begin(), noiseSamples.end()), -0.9f);
+	EXPECT_NE(noiseSamples[0], noiseSamples[1]);
+
+	SynthInstrumentDefinition kick{};
+	kick.wave = InstrumentWave::Sine;
+	kick.gain = 1.0f;
+	kick.pitchDropSemitones = 24.0f;
+	kick.pitchDropSeconds = 0.1f;
+	kick.envelope = { .attack = 0.0f, .decay = 0.0f, .sustain = 1.0f, .release = 0.01f };
+	SynthInstrumentVoice kickVoice{ kick, 69, 1.0f, 8000 };
+	ASSERT_TRUE(kickVoice.valid());
+	std::vector<float> kickSamples{};
+	for (int i{}; i < 1600; ++i)
+	{
+		ASSERT_TRUE(kickVoice.next(sample));
+		kickSamples.push_back(sample);
+	}
+	const auto crossings{ [](std::span<const float> values)
+	{
+		std::size_t count{};
+		for (std::size_t i{ 1 }; i < values.size(); ++i)
+			count += (values[i - 1] < 0.0f) != (values[i] < 0.0f);
+		return count;
+	} };
+	const auto earlyCrossings{ crossings(std::span{ kickSamples }.subspan(0, 160)) };
+	const auto lateCrossings{ crossings(std::span{ kickSamples }.subspan(960, 160)) };
+	EXPECT_GT(earlyCrossings, lateCrossings * 3);
+}
+
+TEST(InstrumentVoice, SynthSampleRenderIsDeterministicBoundedAndRoundTrips)
+{
+	SynthInstrumentDefinition definition{};
+	definition.wave = InstrumentWave::Triangle;
+	definition.gain = 1.5f;
+	definition.vibratoCents = 12.0f;
+	definition.vibratoRate = 4.0f;
+	definition.envelope = { .attack = 0.02f, .decay = 0.1f, .sustain = 0.7f, .release = 0.15f };
+	std::string error{};
+
+	const auto first{ render_synth_sample(definition, 60, 0.8f, 0.25f, 22050, error) };
+	ASSERT_TRUE(first) << error;
+	const auto second{ render_synth_sample(definition, 60, 0.8f, 0.25f, 22050, error) };
+	ASSERT_TRUE(second) << error;
+	EXPECT_EQ(first->samples, second->samples);
+	EXPECT_EQ(first->sampleRate, 22050u);
+	EXPECT_EQ(first->channels, 1u);
+	EXPECT_EQ(first->frame_count(), 8821u);
+	EXPECT_LE(peak(first->samples), 0.95f);
+	EXPECT_GT(peak(first->samples), 0.1f);
+
+	const auto wav{ ax::AudioSample::encode_wav(*first, error) };
+	ASSERT_TRUE(wav) << error;
+	const auto decoded{ decode_audio_sample(*wav) };
+	ASSERT_TRUE(decoded);
+	EXPECT_EQ(decoded->sampleRate, first->sampleRate);
+	EXPECT_EQ(decoded->channels, first->channels);
+	EXPECT_EQ(decoded->frame_count(), first->frame_count());
+	EXPECT_NEAR(peak(decoded->samples), peak(first->samples), 0.001f);
+}
+
+TEST(InstrumentVoice, SynthSampleRenderRejectsInvalidAndOversizedRequests)
+{
+	std::string error{};
+	EXPECT_FALSE(render_synth_sample(SynthInstrumentDefinition{}, 128, 1.0f, 1.0f, 48000, error));
+	EXPECT_FALSE(error.empty());
+	EXPECT_FALSE(render_synth_sample(SynthInstrumentDefinition{}, 60, 1.0f,
+		synth_sample_max_seconds, 48000, error));
+	EXPECT_FALSE(error.empty());
+	EXPECT_FALSE(render_synth_sample(SynthInstrumentDefinition{}, 60, 1.0f, 1.0f, 192000, error));
+	EXPECT_FALSE(error.empty());
+}
+
+TEST(InstrumentVoice, RejectsInvalidSynthSettings)
+{
+	SynthInstrumentDefinition definition{};
+	definition.gain = std::numeric_limits<float>::infinity();
+	const SynthInstrumentVoice invalidGain{ definition, 60, 1.0f, 48000 };
+	const SynthInstrumentVoice invalidNote{ SynthInstrumentDefinition{}, 128, 1.0f, 48000 };
+	const SynthInstrumentVoice invalidRate{ SynthInstrumentDefinition{}, 60, 1.0f, 0 };
+	EXPECT_FALSE(invalidGain.valid());
+	EXPECT_FALSE(invalidNote.valid());
+	EXPECT_FALSE(invalidRate.valid());
+}
+
+TEST(InstrumentVoice, DecodesEncodedSamples)
+{
+	const auto encoded{ make_wav(0.1f, 440.0f) };
+	const auto sample{ decode_audio_sample(encoded) };
+	ASSERT_TRUE(sample.has_value());
+	EXPECT_EQ(sample->sampleRate, 22050u);
+	EXPECT_EQ(sample->channels, 1u);
+	EXPECT_EQ(sample->frame_count(), 2205u);
+	EXPECT_TRUE(sample->valid());
+	EXPECT_FALSE(decode_audio_sample(std::span<const std::uint8_t>{}).has_value());
+	EXPECT_FALSE(decode_audio_sample(std::span<const std::uint8_t>{ encoded.data(), 16 }).has_value());
+}
+
+TEST(InstrumentVoice, SampleMetadataValidationDoesNotScanPcm)
+{
+	AudioSampleData sample{};
+	sample.sampleRate = 8000;
+	sample.channels = 1;
+	sample.samples = { 0.0f, std::numeric_limits<float>::quiet_NaN() };
+
+	EXPECT_TRUE(sample.metadata_valid());
+	EXPECT_FALSE(sample.valid());
+}
+
+TEST(AudioSampleManager, LoadsSamplesFromTheProjectManifest)
+{
+	const auto wav{ make_wav(0.1f, 440.0f) };
+	const std::string manifest{
+		"manifest = { name = 'axeng_test_audio_samples', headless = true, audio = true, permissions = {}, "
+		"scripts = { main = 'main.lua' }, entry_point = 'main', "
+		"audio_samples = { piano = 'piano.wav' } }"
+	};
+	const std::string entryPoint{ "return 0" };
+	ax::EmbeddedResourceLayout layout;
+	layout.emplace("manifest.luac", ax::EmbeddedResource{ reinterpret_cast<const std::uint8_t*>(manifest.data()), manifest.size() });
+	layout.emplace("main.lua", ax::EmbeddedResource{ reinterpret_cast<const std::uint8_t*>(entryPoint.data()), entryPoint.size() });
+	layout.emplace("piano.wav", ax::EmbeddedResource{ wav.data(), wav.size() });
+
+	auto app{ ax::Application::from_embedded({}, std::move(layout)) };
+	app.set_audio_config(AudioSystem::Config{ .openDevice = false });
+	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
+	ASSERT_NE(app.audio(), nullptr);
+
+	const auto* sample{ app.audio_samples().get("piano") };
+	ASSERT_NE(sample, nullptr);
+	EXPECT_TRUE(sample->is_loaded());
+	EXPECT_EQ(sample->pcm().sampleRate, 22050u);
+	EXPECT_EQ(sample->pcm().channels, 1u);
+	EXPECT_EQ(sample->pcm().frame_count(), 2205u);
+}
+
+TEST(AudioSampleManager, InvalidSamplesReportOneLoadError)
+{
+	testlog::LogCapture::instance().expect_total_error_count(1);
+
+	const std::string manifest{
+		"manifest = { name = 'axeng_test_bad_audio_sample', headless = true, audio = true, permissions = {}, "
+		"scripts = { main = 'main.lua' }, entry_point = 'main', "
+		"audio_samples = { broken = 'broken.wav' } }"
+	};
+	const std::string entry_point{ "return 0" };
+	const std::string invalid_sample{ "not an audio file" };
+	ax::EmbeddedResourceLayout layout;
+	layout.emplace("manifest.luac", ax::EmbeddedResource{ reinterpret_cast<const std::uint8_t*>(manifest.data()), manifest.size() });
+	layout.emplace("main.lua", ax::EmbeddedResource{ reinterpret_cast<const std::uint8_t*>(entry_point.data()), entry_point.size() });
+	layout.emplace("broken.wav", ax::EmbeddedResource{ reinterpret_cast<const std::uint8_t*>(invalid_sample.data()), invalid_sample.size() });
+
+	auto app{ ax::Application::from_embedded({}, std::move(layout)) };
+	app.set_audio_config(AudioSystem::Config{ .openDevice = false });
+	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
+	EXPECT_EQ(app.audio_samples().get("broken"), nullptr);
+}
+
+TEST(AudioSystem, LuaCanPlaySynthAndSamplerInstruments)
+{
+	const auto wav{ make_wav(0.1f, 440.0f) };
+	const std::string manifest{
+		"manifest = { name = 'axeng_test_pitched_audio', headless = true, audio = true, permissions = {}, "
+		"scripts = { main = 'main.lua' }, entry_point = 'main', "
+		"audio_samples = { piano = 'piano.wav' } }"
+	};
+	const std::string entry_point{
+		"local env = { attack = 0, decay = 0, sustain = 1, release = 0.01 }\n"
+		"local synth = app.audio.play_synth({ wave = 'sine', gain = 1, envelope = env }, 69)\n"
+		"assert(synth > 0 and app.audio.note_off(synth))\n"
+		"local sample = app.audio.play_sampler('piano', { root_note = 60, end_frame = 2205, envelope = env }, 60)\n"
+		"assert(sample > 0 and app.audio.note_off(sample))\n"
+		"local rendered_wav = app.audio.render_synth_sample({ wave = 'triangle', gain = 1, envelope = env }, 60, "
+		"{ hold_seconds = 0.1, sample_rate = 22050 })\n"
+		"assert(type(rendered_wav) == 'string' and #rendered_wav > 44)\n"
+		"local inspected_sample = app.audio.inspect_sample(rendered_wav)\n"
+		"assert(inspected_sample.sample_rate == 22050 and inspected_sample.channels == 1)\n"
+		"assert(inspected_sample.frames > 0 and inspected_sample.duration_seconds > 0)\n"
+		"assert(app.audio.sample_info('rendered') == nil)\n"
+		"assert(app.audio.load_sample('rendered', rendered_wav))\n"
+		"local sample_info = app.audio.sample_info('rendered')\n"
+		"assert(sample_info.sample_rate == 22050 and sample_info.channels == 1 and sample_info.frames > 0)\n"
+		"assert(sample_info.duration_seconds > 0 and app.audio.sample_info('missing') == nil)\n"
+		"local rendered_voice = app.audio.play_sampler('rendered', { root_note = 60, envelope = env }, 60)\n"
+		"assert(rendered_voice > 0 and app.audio.note_off(rendered_voice))\n"
+		"assert(app.audio.sequence.define('ambient', {\n"
+		"  tempo = 60, duration_beats = 4,\n"
+		"  reverb = { wet = 0.25, decay_seconds = 3, damping = 0.35 },\n"
+		"  instruments = {{ type = 'synth', wave = 'sine', gain = 1, envelope = env }},\n"
+		"  notes = {{ start_beat = 0, duration_beats = 2, instrument = 1, note = 60 }}\n"
+		"}))\n"
+		"assert(app.audio.sequence.play('ambient', 0))\n"
+		"local state = app.audio.sequence.state()\n"
+		"assert(state.name == 'ambient' and state.active and state.duration_seconds == 4)\n"
+		"assert(app.audio.sequence.seek(1))\n"
+		"assert(app.audio.sequence.state().position_seconds == 1)\n"
+		"return 0"
+	};
+	ax::EmbeddedResourceLayout layout;
+	layout.emplace("manifest.luac", ax::EmbeddedResource{ reinterpret_cast<const std::uint8_t*>(manifest.data()), manifest.size() });
+	layout.emplace("main.lua", ax::EmbeddedResource{ reinterpret_cast<const std::uint8_t*>(entry_point.data()), entry_point.size() });
+	layout.emplace("piano.wav", ax::EmbeddedResource{ wav.data(), wav.size() });
+
+	auto app{ ax::Application::from_embedded({}, std::move(layout)) };
+	app.set_audio_config(AudioSystem::Config{ .openDevice = false });
+	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
+	EXPECT_EQ(app.audio()->voice_count(), 3u);
+	ASSERT_NE(app.audio_samples().get("rendered"), nullptr);
+	EXPECT_EQ(app.audio_samples().get("rendered")->pcm().sampleRate, 22050u);
+}
+
+TEST(AudioSystem, ArrangementSchedulesSeeksPausesAndResumes)
+{
+	auto uninterrupted{ make_offline_audio() };
+	auto sought{ make_offline_audio() };
+	std::string error{};
+	ASSERT_TRUE(uninterrupted.define_arrangement("test", simple_arrangement(), error)) << error;
+	ASSERT_TRUE(sought.define_arrangement("test", simple_arrangement(), error)) << error;
+	EXPECT_TRUE(uninterrupted.play_arrangement("test", 0.0f));
+	EXPECT_TRUE(sought.play_arrangement("test", 0.0f));
+
+	const auto silence{ mix_for(uninterrupted, 1.0f) };
+	EXPECT_LT(peak(silence), 1e-6f);
+	mix_for(uninterrupted, 0.5f);
+	ASSERT_TRUE(sought.seek_arrangement(1.5f));
+	const auto uninterruptedAudio{ mix_for(uninterrupted, 0.1f) };
+	const auto soughtAudio{ mix_for(sought, 0.1f) };
+	ASSERT_EQ(uninterruptedAudio.size(), soughtAudio.size());
+	for (std::size_t i{}; i < uninterruptedAudio.size(); ++i)
+		EXPECT_NEAR(uninterruptedAudio[i], soughtAudio[i], 1e-5f);
+
+	const auto beforePause{ sought.arrangement_playback().positionSeconds };
+	sought.set_arrangement_paused(true);
+	mix_for(sought, 0.25f);
+	EXPECT_FLOAT_EQ(sought.arrangement_playback().positionSeconds, beforePause);
+	sought.set_arrangement_paused(false);
+	mix_for(sought, 0.1f);
+	EXPECT_GT(sought.arrangement_playback().positionSeconds, beforePause);
+	EXPECT_TRUE(sought.arrangement_playback().active);
+
+	EXPECT_TRUE(sought.seek_arrangement(4.0f));
+	EXPECT_FALSE(sought.arrangement_playback().active);
+}
+
+TEST(AudioSystem, ArrangementPlaybackIsIndependentOfEncodedMusicPause)
+{
+	auto audio{ make_offline_audio() };
+	std::string error{};
+	ASSERT_TRUE(audio.define_arrangement("sequence", simple_arrangement(), error)) << error;
+
+	audio.set_music_paused(true);
+	ASSERT_TRUE(audio.play_arrangement("sequence", 0.0f));
+	EXPECT_FALSE(audio.arrangement_playback().paused);
+	EXPECT_GT(peak(mix_for(audio, 1.5f)), 0.1f);
+
+	audio.set_arrangement_paused(true);
+	EXPECT_TRUE(audio.arrangement_playback().paused);
+}
+
+TEST(Arrangement, RejectsExcessivePolyphony)
+{
+	auto arrangement{ simple_arrangement() };
+	arrangement.notes.clear();
+	for (std::size_t i{}; i <= arrangement_max_voices; ++i)
+		arrangement.notes.push_back({ .startBeat = 0.0f, .durationBeats = 2.0f, .instrument = 0,
+			.note = 60, .velocity = 1.0f, .pan = 0.0f });
+
+	std::string error{};
+	EXPECT_FALSE(prepare_arrangement(std::move(arrangement), 48000, error));
+	EXPECT_NE(error.find("polyphony"), std::string::npos);
+}
+
+TEST(Arrangement, ReusesVoiceSlotsAtNoteBoundaries)
+{
+	auto arrangement{ simple_arrangement() };
+	arrangement.durationBeats = 2.0f;
+	arrangement.instruments.front() = ArrangementInstrument{
+		.definition = SynthInstrumentDefinition{
+			.wave = InstrumentWave::Sine,
+			.envelope = { .attack = 0.0f, .decay = 0.0f, .sustain = 1.0f, .release = 0.0f },
+			.gain = 1.0f,
+			.lowPassHz = 24000.0f } };
+	arrangement.notes.clear();
+	for (std::size_t i{}; i < arrangement_max_voices; ++i)
+	{
+		arrangement.notes.push_back({ .startBeat = 0.0f, .durationBeats = 1.0f, .instrument = 0, .note = 69 });
+		arrangement.notes.push_back({ .startBeat = 1.0f, .durationBeats = 1.0f, .instrument = 0, .note = 69 });
+	}
+
+	auto audio{ make_offline_audio() };
+	std::string error{};
+	ASSERT_TRUE(audio.define_arrangement("boundary", std::move(arrangement), error)) << error;
+	ASSERT_TRUE(audio.play_arrangement("boundary", 0.0f));
+	mix_for(audio, 1.1f);
+	EXPECT_GT(peak(mix_for(audio, 0.1f)), 0.1f);
+}
+
+TEST(Arrangement, SamplerSeekRestoresSampleOffset)
+{
+	AudioSampleData sample{};
+	sample.sampleRate = 48000;
+	sample.channels = 1;
+	sample.samples.resize(48000 * 4);
+	for (std::size_t i{}; i < sample.samples.size(); ++i)
+		sample.samples[i] = std::sin(2.0f * std::numbers::pi_v<float> * 440.0f
+			* static_cast<float>(i) / 48000.0f);
+
+	SamplerInstrumentDefinition sampler{};
+	sampler.endFrame = sample.frame_count();
+	sampler.envelope = { .attack = 0.0f, .decay = 0.0f, .sustain = 1.0f, .release = 0.01f };
+	Arrangement arrangement{
+		.tempo = 60.0f,
+		.durationBeats = 4.0f,
+		.instruments = { ArrangementInstrument{ .definition = sampler, .sample = &sample } },
+		.notes = { ArrangementNote{ .startBeat = 0.0f, .durationBeats = 4.0f, .instrument = 0,
+			.note = 60, .velocity = 1.0f, .pan = 0.0f } } };
+
+	auto uninterrupted{ make_offline_audio() };
+	auto sought{ make_offline_audio() };
+	std::string error{};
+	ASSERT_TRUE(uninterrupted.define_arrangement("sample", arrangement, error)) << error;
+	ASSERT_TRUE(sought.define_arrangement("sample", std::move(arrangement), error)) << error;
+	ASSERT_TRUE(uninterrupted.play_arrangement("sample", 0.0f));
+	ASSERT_TRUE(sought.play_arrangement("sample", 0.0f));
+
+	mix_for(uninterrupted, 1.0f);
+	ASSERT_TRUE(sought.seek_arrangement(1.0f));
+	const auto uninterruptedAudio{ mix_for(uninterrupted, 0.1f) };
+	const auto soughtAudio{ mix_for(sought, 0.1f) };
+	ASSERT_EQ(uninterruptedAudio.size(), soughtAudio.size());
+	for (std::size_t i{}; i < uninterruptedAudio.size(); ++i)
+		EXPECT_NEAR(uninterruptedAudio[i], soughtAudio[i], 1e-5f);
+}
+
+TEST(Arrangement, ReverbAddsTailAndSeekClearsIt)
+{
+	auto arrangement{ simple_arrangement() };
+	arrangement.notes = {
+		ArrangementNote{ .startBeat = 0.0f, .durationBeats = 0.25f, .instrument = 0,
+			.note = 69, .velocity = 1.0f, .pan = 0.0f },
+		ArrangementNote{ .startBeat = 3.0f, .durationBeats = 0.25f, .instrument = 0,
+			.note = 69, .velocity = 1.0f, .pan = 0.0f },
+	};
+	arrangement.reverb = { .wet = 0.6f, .decaySeconds = 1.0f, .damping = 0.3f };
+	auto dryArrangement{ arrangement };
+	dryArrangement.reverb.wet = 0.0f;
+
+	auto audio{ make_offline_audio() };
+	auto dryAudio{ make_offline_audio() };
+	std::string error{};
+	ASSERT_TRUE(audio.define_arrangement("reverb", std::move(arrangement), error)) << error;
+	ASSERT_TRUE(dryAudio.define_arrangement("dry", std::move(dryArrangement), error)) << error;
+	ASSERT_TRUE(audio.play_arrangement("reverb", 0.0f));
+	ASSERT_TRUE(dryAudio.play_arrangement("dry", 0.0f));
+
+	mix_for(audio, 0.5f);
+	const auto tail{ mix_for(audio, 0.05f) };
+	EXPECT_GT(peak(tail), 1e-5f);
+
+	ASSERT_TRUE(audio.seek_arrangement(2.0f));
+	const auto clearedTail{ mix_for(audio, 0.05f) };
+	EXPECT_LT(peak(clearedTail), 1e-6f);
+
+	ASSERT_TRUE(audio.seek_arrangement(3.0f));
+	ASSERT_TRUE(dryAudio.seek_arrangement(3.0f));
+	const auto wetDirect{ mix_for(audio, 0.01f) };
+	const auto dryDirect{ mix_for(dryAudio, 0.01f) };
+	ASSERT_EQ(wetDirect.size(), dryDirect.size());
+	for (std::size_t i{}; i < wetDirect.size(); ++i)
+		EXPECT_NEAR(wetDirect[i], dryDirect[i], 1e-5f);
+
+	const auto laterNote{ mix_for(audio, 0.05f) };
+	EXPECT_GT(peak(laterNote), 0.1f);
+}
+
+TEST(Arrangement, RejectsInvalidReverbSettings)
+{
+	auto arrangement{ simple_arrangement() };
+	arrangement.reverb.wet = 1.01f;
+
+	std::string error{};
+	EXPECT_FALSE(prepare_arrangement(std::move(arrangement), 48000, error));
+	EXPECT_NE(error.find("reverb"), std::string::npos);
+}
+
+TEST(Arrangement, ReverbHandlesMaximumPolyphony)
+{
+	auto arrangement{ simple_arrangement() };
+	arrangement.durationBeats = 2.0f;
+	arrangement.notes.clear();
+	for (std::size_t i{}; i < arrangement_max_voices; ++i)
+	{
+		arrangement.notes.push_back({ .startBeat = 0.0f, .durationBeats = 1.0f, .instrument = 0,
+			.note = static_cast<std::uint8_t>(48 + i % 24), .velocity = 0.3f, .pan = 0.0f });
+	}
+	arrangement.reverb = { .wet = 0.4f, .decaySeconds = 1.5f, .damping = 0.4f };
+
+	auto audio{ make_offline_audio() };
+	std::string error{};
+	ASSERT_TRUE(audio.define_arrangement("dense_reverb", std::move(arrangement), error)) << error;
+	ASSERT_TRUE(audio.play_arrangement("dense_reverb", 0.0f));
+	const auto output{ mix_for(audio, 1.1f) };
+	EXPECT_TRUE(std::ranges::all_of(output, [](float sample) { return std::isfinite(sample); }));
+	EXPECT_LE(peak(output), 1.0f);
+	EXPECT_GT(peak(output), 0.1f);
+}
+
+TEST(Arrangement, ReverbContinuesAcrossArrangementCrossfade)
+{
+	auto first{ simple_arrangement() };
+	first.notes.front().startBeat = 0.0f;
+	first.notes.front().durationBeats = 4.0f;
+	first.reverb = { .wet = 0.3f, .decaySeconds = 1.0f, .damping = 0.4f };
+	auto second{ first };
+	second.notes.front().note = 72;
+
+	auto audio{ make_offline_audio() };
+	std::string error{};
+	ASSERT_TRUE(audio.define_arrangement("first", std::move(first), error)) << error;
+	ASSERT_TRUE(audio.define_arrangement("second", std::move(second), error)) << error;
+	ASSERT_TRUE(audio.play_arrangement("first", 0.0f));
+	mix_for(audio, 0.05f);
+	ASSERT_TRUE(audio.play_arrangement("second", 0.05f));
+
+	const auto output{ mix_for(audio, 0.2f) };
+	const auto state{ audio.arrangement_playback() };
+	EXPECT_EQ(state.name, "second");
+	EXPECT_TRUE(state.active);
+	EXPECT_TRUE(std::ranges::all_of(output, [](float sample) { return std::isfinite(sample); }));
+	EXPECT_GT(peak(output), 0.01f);
+}
+
+TEST(InstrumentVoice, SamplerAppliesIndependentSettingsAndPitch)
+{
+	AudioSampleData sample{};
+	sample.sampleRate = 8000;
+	sample.channels = 1;
+	sample.samples.assign(100, 1.0f);
+
+	SamplerInstrumentDefinition quiet{};
+	quiet.rootNote = 60;
+	quiet.startFrame = 0;
+	quiet.endFrame = sample.frame_count();
+	quiet.envelope = { .attack = 0.0f, .decay = 0.0f, .sustain = 1.0f, .release = 0.01f };
+	quiet.gain = 0.2f;
+	auto loud{ quiet };
+	loud.gain = 0.8f;
+
+	SamplerInstrumentVoice quietVoice{ sample, quiet, 72, 1.0f, 8000 };
+	SamplerInstrumentVoice loudVoice{ sample, loud, 72, 1.0f, 8000 };
+	ASSERT_TRUE(quietVoice.valid());
+	ASSERT_TRUE(loudVoice.valid());
+	EXPECT_FLOAT_EQ(quiet.gain, 0.2f);
+	EXPECT_FLOAT_EQ(loud.gain, 0.8f);
+
+	float quietLeft{}, quietRight{}, loudLeft{}, loudRight{};
+	std::size_t frames{};
+	while (quietVoice.next(quietLeft, quietRight))
+	{
+		ASSERT_TRUE(loudVoice.next(loudLeft, loudRight));
+		EXPECT_NEAR(loudLeft, quietLeft * 4.0f, 1e-5f);
+		++frames;
+	}
+	EXPECT_EQ(frames, 50u);
+}
+
+TEST(InstrumentVoice, SamplerPreservesStereoChannelsAndRejectsBadLoop)
+{
+	AudioSampleData sample{};
+	sample.sampleRate = 8000;
+	sample.channels = 2;
+	sample.samples = { 0.25f, 0.75f, 0.5f, 1.0f };
+	SamplerInstrumentDefinition definition{};
+	definition.startFrame = 0;
+	definition.endFrame = 2;
+	definition.envelope = { .attack = 0.0f, .decay = 0.0f, .sustain = 1.0f, .release = 0.01f };
+	SamplerInstrumentVoice voice{ sample, definition, 60, 1.0f, 8000 };
+	ASSERT_TRUE(voice.valid());
+
+	float left{}, right{};
+	ASSERT_TRUE(voice.next(left, right));
+	EXPECT_NEAR(left, 0.25f, 1e-5f);
+	EXPECT_NEAR(right, 0.75f, 1e-5f);
+
+	definition.loop = true;
+	definition.loopStartFrame = 1;
+	definition.loopEndFrame = 1;
+	const SamplerInstrumentVoice invalidLoop{ sample, definition, 60, 1.0f, 8000 };
+	EXPECT_FALSE(invalidLoop.valid());
+}
+
+TEST(AudioSystem, PlaysPitchedSynthAndSamplerVoices)
+{
+	auto audio{ make_offline_audio() };
+	SynthInstrumentDefinition synth{};
+	synth.gain = 1.0f;
+	synth.envelope = { .attack = 0.0f, .decay = 0.0f, .sustain = 1.0f, .release = 0.01f };
+
+	const auto synthId{ audio.play_synth(synth, 69) };
+	ASSERT_NE(synthId, 0u);
+	EXPECT_GT(peak(mix_for(audio, 0.01f)), 0.1f);
+	EXPECT_TRUE(audio.note_off(synthId));
+	mix_for(audio, 0.02f);
+	EXPECT_FALSE(audio.is_playing(synthId));
+	EXPECT_EQ(audio.play_synth(synth, 69, 1.0f, InstrumentPlayOptions{ .bus = Bus::Master }), 0u);
+
+	AudioSampleData sample{};
+	sample.sampleRate = 8000;
+	sample.channels = 1;
+	sample.samples.assign(1000, 0.5f);
+	SamplerInstrumentDefinition sampler{};
+	sampler.endFrame = sample.frame_count();
+	sampler.envelope = { .attack = 0.0f, .decay = 0.0f, .sustain = 1.0f, .release = 0.01f };
+
+	const auto samplerId{ audio.play_sampler(sample, sampler, 60) };
+	ASSERT_NE(samplerId, 0u);
+	EXPECT_GT(peak(mix_for(audio, 0.01f)), 0.1f);
+	EXPECT_TRUE(audio.note_off(samplerId));
+	mix_for(audio, 0.02f);
+	EXPECT_FALSE(audio.is_playing(samplerId));
 }
 
 TEST(AudioSystem, OneShotPlaysAndFinishes)
@@ -451,6 +1036,14 @@ TEST(AudioSystem, ApplicationLoadsMusicAndBindsLua)
 	EXPECT_FALSE(audio->playlist_active());
 	mix_for(*audio, 0.01f);
 	EXPECT_TRUE(audio->current_music().empty());
+
+	ASSERT_TRUE(audio->play_playlist({ a, b },
+		{ .shuffle = false, .repeat = true, .fade = 0.0f, .gap = 0.0f }));
+	EXPECT_EQ(audio->current_music(), a->asset_name());
+	ASSERT_TRUE(audio->previous_track(0.0f));
+	EXPECT_EQ(audio->current_music(), b->asset_name());
+	ASSERT_TRUE(audio->next_track(0.0f));
+	EXPECT_EQ(audio->current_music(), a->asset_name());
 }
 
 TEST(AudioSystem, LiveRedefinitionUpdatesPlayingLoops)

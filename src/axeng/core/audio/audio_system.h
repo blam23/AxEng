@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "axeng/core/audio/arrangement.h"
+#include "axeng/core/audio/instrument.h"
 #include "axeng/core/audio/sfx_synth.h"
 #include "axeng/core/helpers.h"
 
@@ -65,6 +67,13 @@ namespace ax::audio
 		float fadeIn{ 0.0f };
 	};
 
+	struct InstrumentPlayOptions
+	{
+		float volume{ 1.0f };
+		float pan{ 0.0f };
+		Bus bus{ Bus::Music };
+	};
+
 	struct VoiceUpdate
 	{
 		std::optional<float> volume{};
@@ -96,6 +105,15 @@ namespace ax::audio
 		float fade{ 1.0f };
 		// Silence between tracks that end naturally.
 		float gap{ 2.0f };
+	};
+
+	struct ArrangementPlaybackInfo
+	{
+		std::string name{};
+		bool active{};
+		bool paused{};
+		float positionSeconds{};
+		float durationSeconds{};
 	};
 
 	class AudioSystem
@@ -140,6 +158,12 @@ namespace ax::audio
 
 		// Returns 0 if the sound doesn't exist, is cooling down, or has no audio.
 		VoiceId play(const std::string& name, const PlayOptions& options = {});
+		// Pitched voices use the music bus by default. Sample PCM must outlive its active sampler voices.
+		VoiceId play_synth(const SynthInstrumentDefinition& definition, std::uint8_t note, float velocity = 1.0f,
+			const InstrumentPlayOptions& options = {});
+		VoiceId play_sampler(const AudioSampleData& sample, const SamplerInstrumentDefinition& definition,
+			std::uint8_t note, float velocity = 1.0f, const InstrumentPlayOptions& options = {});
+		bool note_off(VoiceId id);
 		bool update_voice(VoiceId id, const VoiceUpdate& update);
 		void stop(VoiceId id, float fade = 0.05f);
 		void stop_sound(const std::string& name, float fade = 0.05f);
@@ -154,12 +178,22 @@ namespace ax::audio
 		bool play_music(const Music& music, float fade = 1.0f);
 		bool play_playlist(std::vector<const Music*> tracks, const PlaylistOptions& options = {});
 		bool next_track(float fade = 1.0f);
+		bool previous_track(float fade = 1.0f);
 		void stop_music(float fade = 1.0f);
 		void set_music_paused(bool paused);
 		bool music_paused() const;
 		// Name of the track currently playing, or empty if none (including between tracks).
 		std::string current_music() const;
 		bool playlist_active() const;
+
+		// Main-thread API. Prepared arrangements are immutable and may refer to samples that must outlive playback.
+		bool define_arrangement(const std::string& name, Arrangement arrangement, std::string& error);
+		std::vector<std::string> arrangement_names() const;
+		bool play_arrangement(const std::string& name, float fade = 0.1f);
+		void stop_arrangement(float fade = 0.1f);
+		bool seek_arrangement(float positionSeconds);
+		void set_arrangement_paused(bool paused);
+		ArrangementPlaybackInfo arrangement_playback() const;
 
 		// Mixes interleaved stereo float frames. Called by the device thread, or manually when no device is open.
 		void mix(float* output, std::uint32_t frames) noexcept;

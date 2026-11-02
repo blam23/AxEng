@@ -338,7 +338,8 @@ namespace ax
 		GLFWwindow* m_window{ nullptr };
 		void register_window_events();
 		static void window_close_handler(GLFWwindow* window);
-		static LRESULT CALLBACK raw_windows_event(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+		static LRESULT CALLBACK raw_windows_event(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+			UINT_PTR subclassId, DWORD_PTR refData);
 
 		// WGPU
 		wgpu::Adapter m_adapter;

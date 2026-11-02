@@ -9,6 +9,7 @@
 
 // AxEng
 #include "axeng/core/audio/audio_system.h"
+#include "axeng/core/audio/audio_sample.h"
 #include "axeng/core/audio/music.h"
 #include "axeng/core/background_worker.h"
 #include "axeng/core/native_tasks.h"
@@ -91,6 +92,9 @@ namespace ax
 		const MusicManager& music() const noexcept { return m_music; }
 		MusicManager& music() noexcept { return m_music; }
 
+		const AudioSampleManager& audio_samples() const noexcept { return m_audioSamples; }
+		AudioSampleManager& audio_samples() noexcept { return m_audioSamples; }
+
 		// Null when audio is disabled (headless apps, or manifest.audio = false).
 		audio::AudioSystem* audio() noexcept { return m_audio.get(); }
 		const audio::AudioSystem* audio() const noexcept { return m_audio.get(); }
@@ -162,6 +166,7 @@ namespace ax
 		lua::ScriptManager m_scripts;
 		TextureManager m_textures;
 		MusicManager m_music;
+		AudioSampleManager m_audioSamples;
 		std::unique_ptr<audio::AudioSystem> m_audio;
 		FontSheet m_fontSheet{};
 		SdfFont m_msdfFont{};

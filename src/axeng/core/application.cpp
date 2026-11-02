@@ -130,22 +130,33 @@ void ax::Application::init_audio(const sol::table& manifest)
 	m_audio = std::make_unique<audio::AudioSystem>(m_audioConfig);
 
 	const sol::optional<sol::table> musicTable{ manifest["music"] };
-	if (!musicTable)
-		return;
-
-	for (const auto& entry : *musicTable)
+	if (musicTable)
 	{
-		const auto name{ entry.first.as<std::string>() };
-		if (m_music.load(name, entry.second.as<std::string>()) == nullptr)
-			spdlog::error("Failed to load music '{}'", name);
+		for (const auto& entry : *musicTable)
+		{
+			const auto name{ entry.first.as<std::string>() };
+			if (m_music.load(name, entry.second.as<std::string>()) == nullptr)
+				spdlog::error("Failed to load music '{}'", name);
+		}
+	}
+
+	const sol::optional<sol::table> sampleTable{ manifest["audio_samples"] };
+	if (sampleTable)
+	{
+		for (const auto& entry : *sampleTable)
+		{
+			const auto name{ entry.first.as<std::string>() };
+			m_audioSamples.load(name, entry.second.as<std::string>());
+		}
 	}
 }
 
 void ax::Application::shutdown_audio()
 {
-	// The audio thread reads the music assets, so it must stop before they are released.
+	// Active music and sampler voices can reference these assets, so audio must stop before they are released.
 	m_audio.reset();
 	m_music.unload_all({});
+	m_audioSamples.unload_all({});
 }
 
 std::string make_safe_directory_name(const std::string& name)
@@ -530,6 +541,7 @@ ax::Application::Application
 	, m_scripts{ Badge<Application>{}, permissions, m_loader }
 	, m_textures{ Badge<Application>{}, m_loader }
 	, m_music{ Badge<Application>{}, m_loader }
+	, m_audioSamples{ Badge<Application>{}, m_loader }
 	, m_allowedPermissions{ permissions }
 	, m_backgroundWorker{ true, permissions }
 {
