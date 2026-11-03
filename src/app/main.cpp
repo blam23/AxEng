@@ -60,6 +60,10 @@ namespace
 			if (!arg.empty())
 				ret.emplace_back(std::string_view{ arg });
 		}
+#ifdef PACKAGED_APPLICATION_USER_FILES_BESIDE_EXECUTABLE
+		ret.emplace_back("--user-directory");
+		ret.emplace_back(executable_directory().string());
+#endif
 		return ret;
 	}
 }
