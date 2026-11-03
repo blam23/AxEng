@@ -419,7 +419,7 @@ int lua_exception_handler(lua_State* L, sol::optional<const std::exception&> may
 ax::Error ax::lua::Manager::setup()
 {
 	LogTimer _timer{ "setup lua" };
-	spdlog::info("LuaJIT version: {} (version number {})", LUAJIT_VERSION, LUAJIT_VERSION_NUM);
+	spdlog::info("{} version: {} (version number {})", AX_LUA_RUNTIME_NAME, AX_LUA_RUNTIME_VERSION, AX_LUA_RUNTIME_VERSION_NUMBER);
 
 	m_state.set_panic(sol::c_call<decltype(&lua_panic), &lua_panic>);
 	m_state.set_exception_handler(&lua_exception_handler);
@@ -435,6 +435,12 @@ ax::Error ax::lua::Manager::setup()
 		sol::lib::bit32
 	);
 	tracy::LuaRegister(m_state.lua_state());
+#ifdef __EMSCRIPTEN__
+	// Lua 5.4 keeps the coroutine library apart and dropped functions the scripts, written for LuaJIT, still call.
+	m_state.open_libraries(sol::lib::coroutine, sol::lib::utf8);
+	m_state["unpack"] = m_state["table"]["unpack"];
+	m_state["loadstring"] = m_state["load"];
+#endif
 
 	sol::table blocked{ m_state.create_table() };
 	sol::table mt{ m_state.create_table() };

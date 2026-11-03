@@ -4,7 +4,10 @@
     "builtin-baseline": "e99d87dcf02926bfd629560e11e156329d5720c1",
     "dependencies":  [
                          "fmt",
-                         "glfw3",
+                         {
+                             "name": "glfw3",
+                             "platform": "!emscripten"
+                         },
                          "glm",
                          {
                              "name":  "imgui",
@@ -12,7 +15,19 @@
                                               "docking-experimental"
                                           ]
                          },
-                         "luajit",
+                         {
+                             "name": "luajit",
+                             "platform": "!emscripten"
+                         },
+                         {
+                             "name": "lua54",
+                             "platform": "emscripten"
+                         },
+                         {
+                             "name": "libdatachannel",
+                             "default-features": false,
+                             "platform": "!emscripten"
+                         },
                          "miniaudio",
                          "minizip-ng",
                          {
@@ -26,11 +41,18 @@
                          "spdlog",
                          {
                              "name": "tracy",
-                             "features": [ "on-demand" ]
+                             "features": [ "on-demand" ],
+                             "platform": "!emscripten"
                          },
                          "stb",
-                         "dawn",
-                         "vulkan-headers",
+                         {
+                             "name": "dawn",
+                             "platform": "!emscripten"
+                         },
+                         {
+                             "name": "vulkan-headers",
+                             "platform": "!emscripten"
+                         },
                          "gtest"
                      ],
     "overrides": [

@@ -2,10 +2,12 @@
 
 #include "axeng/core/helpers.h"
 
+#include <cstdint>
 #include <string_view>
 #include <filesystem>
 #include <expected>
 #include <variant>
+#include <vector>
 #include <map>
 #include <optional>
 #include <typeindex>

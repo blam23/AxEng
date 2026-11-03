@@ -15,7 +15,21 @@
 #include "axeng/external/IconsFontAwesome6.h"
 #include "axeng/external/ImGuiNotify.hpp"
 #include <imgui.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/html5.h>
+#include <GLFW/emscripten_glfw3.h>
+
+// The page may define window.__ax to watch the loop (the AxFactory page counts frames for its automated tests).
+EM_ASYNC_JS(void, ax_wait_animation_frame, (), {
+	const watcher = globalThis.__ax;
+	if (watcher) watcher.onFrame?.();
+	await new Promise(resolve => requestAnimationFrame(resolve));
+});
+#else
 #include <dawn/native/DawnNative.h>
+#endif
+#ifdef _WIN32
 #include <windows.h>
 #include <commctrl.h>
 #include <timeapi.h>
@@ -23,6 +37,7 @@
 #include <GLFW/glfw3native.h>
 
 #pragma comment(lib, "winmm.lib")
+#endif
 
 #include <algorithm>
 #include <array>
@@ -52,6 +67,13 @@ namespace
 #embed "../../../shaders/composite_shader_single.wgsl"
 	};
 
+#ifdef __EMSCRIPTEN__
+	// WebGPU objects belong to the thread that created them, so the surface texture is acquired when it is waited for.
+	constexpr auto s_surface_acquire_policy{ std::launch::deferred };
+#else
+	constexpr auto s_surface_acquire_policy{ std::launch::async };
+#endif
+
 	wgpu::StringView embedded_text(std::span<const unsigned char> data)
 	{
 		return { reinterpret_cast<const char*>(data.data()), data.size() };
@@ -61,9 +83,11 @@ namespace
 std::map<GLFWwindow*, ax::Window*> s_windows{};
 std::mutex s_windows_mutex{};
 bool s_imgui_initialized{ false };
+#ifdef _WIN32
 static std::mutex s_redirectMutex{};
 static std::map<HWND, HWND> s_redirectHandles{};
 static constexpr UINT_PTR s_window_subclass_id{ 1 };
+#endif
 
 static void glfw_error_callback(int error, const char* description)
 {
@@ -93,16 +117,23 @@ ax::Window::Window(const WindowDefinition& def)
 	}
 
 	m_window = glfwCreateWindow(m_width, m_height, def.title.data(), NULL, NULL);
+#ifdef __EMSCRIPTEN__
+	// The canvas follows the size of the browser window; resizes reach the game as the usual resize events.
+	if (m_window)
+		emscripten_glfw_make_canvas_resizable(m_window, "window", nullptr);
+#endif
 
 	if (background)
 	{
 		glfwWindowHint(GLFW_FOCUSED, GLFW_TRUE);
 		glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
+#ifdef _WIN32
 		if (m_window)
 		{
 			HWND handle = glfwGetWin32Window(m_window);
 			SetWindowPos(handle, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 		}
+#endif
 	}
 
 	std::lock_guard lock{ s_windows_mutex };
@@ -130,12 +161,14 @@ ax::Window::~Window()
 				}
 			}
 		}
+#ifdef _WIN32
 		const auto hwnd{ glfwGetWin32Window(m_window) };
 		{
 			std::lock_guard lock{ s_redirectMutex };
 			::RemoveWindowSubclass(hwnd, raw_windows_event, s_window_subclass_id);
 			s_redirectHandles.erase(hwnd);
 		}
+#endif
 		glfwDestroyWindow(m_window);
 	}
 
@@ -200,6 +233,10 @@ bool ax::Window::create_surfaces()
 	}
 	m_surfaceSupportsCopySource =
 		(static_cast<uint32_t>(capabilities.usages) & static_cast<uint32_t>(wgpu::TextureUsage::CopySrc)) != 0;
+#ifdef __EMSCRIPTEN__
+	// A canvas can be configured with any texture usage, though the capabilities the port reports list only rendering.
+	m_surfaceSupportsCopySource = true;
+#endif
 
 	auto surfaceUsage{ wgpu::TextureUsage::RenderAttachment };
 	if (m_surfaceSupportsCopySource)
@@ -216,7 +253,12 @@ bool ax::Window::create_surfaces()
 		.viewFormatCount = 0,
 		.viewFormats = nullptr,
 		.alphaMode = wgpu::CompositeAlphaMode::Auto,
+#ifdef __EMSCRIPTEN__
+		// A browser presents every frame in step with the display.
+		.presentMode = wgpu::PresentMode::Fifo,
+#else
 		.presentMode = m_vsync ? wgpu::PresentMode::Fifo : wgpu::PresentMode::Immediate,
+#endif
 	};
 
 	m_surface.Configure(&config);
@@ -392,8 +434,7 @@ ax::WindowFrameImageEvent ax::Window::read_frame_image
 	const auto deadline{ std::chrono::steady_clock::now() + std::chrono::seconds{ 10 } };
 	while (!mapResult->complete.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
 	{
-		m_device.Tick();
-		std::this_thread::yield();
+		ax::poll_device(m_device);
 	}
 	if (!mapResult->complete.load(std::memory_order_acquire))
 	{
@@ -534,8 +575,7 @@ ax::WindowFrameImageEvent ax::Window::read_frame_image
 		const auto deadline{ std::chrono::steady_clock::now() + std::chrono::seconds{ 10 } };
 		while (!mapResult->complete.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
 		{
-			reference.m_device.Tick();
-			std::this_thread::yield();
+			ax::poll_device(reference.m_device);
 		}
 		if (!mapResult->complete.load(std::memory_order_acquire))
 		{
@@ -629,10 +669,28 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 	// Get wgpu Instance
 	//
 	wgpu::InstanceDescriptor desc{};
-	wgpu::Instance instance;
+	wgpu::Instance& instance{ m_instance };
 	desc.nextInChain = nullptr;
 
 	static const auto s_timed_wait_any = wgpu::InstanceFeatureName::TimedWaitAny;
+#ifdef __EMSCRIPTEN__
+	wgpu::InstanceDescriptor instanceDesc
+	{
+		.requiredFeatureCount = 1,
+		.requiredFeatures = &s_timed_wait_any
+	};
+	instance = wgpu::CreateInstance(&instanceDesc);
+
+	//
+	// Get Adapter
+	//
+	// The browser picks the backend, so the requested one is ignored.
+	wgpu::RequestAdapterOptions options
+	{
+		.featureLevel = wgpu::FeatureLevel::Core,
+	};
+	(void)backendType;
+#else
 	// Dawn loads d3dcompiler_47.dll / vulkan-1.dll with LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, which only
 	// accepts absolute paths, so the system directory has to be given to it explicitly.
 	char systemDir[MAX_PATH]{};
@@ -652,7 +710,7 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 		.requiredFeatures = &s_timed_wait_any
 	};
 	instance = wgpu::CreateInstance(&instanceDesc);
-	
+
 	//
 	// Get Adapter
 	//
@@ -669,6 +727,7 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 		.featureLevel = wgpu::FeatureLevel::Core,
 		.backendType = backendType
 	};
+#endif
 
 	auto adapter_callback =
 		[](wgpu::RequestAdapterStatus status, wgpu::Adapter adapter, wgpu::StringView message, void* userdata)
@@ -706,6 +765,7 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 	deviceDescriptor.requiredLimits = &limits;
 
 	// Keeps compiled shaders between runs, so only the first run pays for compiling them.
+#ifndef __EMSCRIPTEN__
 	wgpu::DawnCacheDeviceDescriptor cacheDescriptor{};
 	if (m_gpuCache)
 	{
@@ -727,6 +787,7 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 		);
 		deviceDescriptor.nextInChain = &cacheDescriptor;
 	}
+#endif
 
 	deviceDescriptor.SetUncapturedErrorCallback
 	(
@@ -767,7 +828,14 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 	//
 	// Main Surface
 	//
+#ifdef __EMSCRIPTEN__
+	wgpu::EmscriptenSurfaceSourceCanvasHTMLSelector canvasSource{};
+	canvasSource.selector = "#canvas";
+	wgpu::SurfaceDescriptor surfaceDescriptor{ .nextInChain = &canvasSource };
+	m_surface = instance.CreateSurface(&surfaceDescriptor);
+#else
 	m_surface = wgpu::Surface{ glfwGetWGPUSurface(instance.Get(), m_window) };
+#endif
 
 	return create_surfaces();
 }
@@ -1615,8 +1683,9 @@ void ax::Window::call_deferred(std::function<void()> func)
 	m_deferred.push_back(std::move(func));
 }
 
+#ifdef _WIN32
 #include "glfw/glfw3native.h"
-bool ax::Window::try_embed_child(DWORD procid)
+bool ax::Window::try_embed_child(ProcessId procid)
 {
 	const auto my_hwnd{ glfwGetWin32Window(m_window) };
 
@@ -1664,7 +1733,7 @@ bool ax::Window::try_embed_child(DWORD procid)
 	return false;
 }
 
-void ax::Window::try_kill_child(DWORD processID)
+void ax::Window::try_kill_child(ProcessId processID)
 {
 	auto it = m_childWindows.find(processID);
 	if (it != m_childWindows.end())
@@ -1679,7 +1748,7 @@ void ax::Window::try_kill_child(DWORD processID)
 	}
 }
 
-void ax::Window::set_embedded_child_position(DWORD processID, int x, int y, int width, int height)
+void ax::Window::set_embedded_child_position(ProcessId processID, int x, int y, int width, int height)
 {
 	auto it = m_childWindows.find(processID);
 	if (it != m_childWindows.end())
@@ -1693,7 +1762,7 @@ void ax::Window::set_embedded_child_position(DWORD processID, int x, int y, int 
 	}
 }
 
-void ax::Window::focus_child(DWORD processID)
+void ax::Window::focus_child(ProcessId processID)
 {
 	auto it = m_childWindows.find(processID);
 	if (it != m_childWindows.end())
@@ -1706,7 +1775,7 @@ void ax::Window::focus_child(DWORD processID)
 	}
 }
 
-void ax::Window::redirect_input_to_child(DWORD processID)
+void ax::Window::redirect_input_to_child(ProcessId processID)
 {
 	auto it = m_childWindows.find(processID);
 	if (it != m_childWindows.end())
@@ -1797,6 +1866,14 @@ void ax::Window::reset_input_redirection()
 	register_window_events();
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
 }
+#else
+bool ax::Window::try_embed_child(ProcessId) { return false; }
+void ax::Window::try_kill_child(ProcessId) {}
+void ax::Window::set_embedded_child_position(ProcessId, int, int, int, int) {}
+void ax::Window::focus_child(ProcessId) {}
+void ax::Window::redirect_input_to_child(ProcessId) {}
+void ax::Window::reset_input_redirection() {}
+#endif
 
 void ax::Window::ensure_uniform_capacity(uint32_t required)
 {
@@ -2058,6 +2135,16 @@ void ax::Window::run_loop()
 		~ApplicationScope() { release(); }
 	};
 	ApplicationScope application{ *this };
+#ifdef __EMSCRIPTEN__
+	// A browser presents a frame when the task that drew it ends, so the loop suspends until the next animation frame
+	// instead of sleeping. The browser paces the loop.
+	struct FrameTimer
+	{
+		void wait(double) const { ax_wait_animation_frame(); }
+	} frameTimer;
+	register_window_events();
+	ImGui_ImplGlfw_InstallCallbacks(m_window);
+#else
 	// Timed waits only end on a system timer tick, 15.6 ms apart by default: a 14 ms wait for the next frame would
 	// last 15 to 31 ms. Ask for 1 ms ticks while the loop runs.
 	struct TimerResolution
@@ -2094,6 +2181,7 @@ void ax::Window::run_loop()
 			spdlog::error("Failed to install Windows input subclass: {}", ::GetLastError());
 	}
 	ImGui_ImplGlfw_InstallCallbacks(m_window);
+#endif
 
 	using Clock = std::chrono::steady_clock;
 	auto previous{ Clock::now() };
@@ -2158,7 +2246,7 @@ void ax::Window::run_loop()
 			stage_sprite_batches();
 			const auto renderStarted{ Clock::now() };
 			auto surfaceFuture =
-				std::async(std::launch::async,
+				std::async(s_surface_acquire_policy,
 					[this]()
 					{
 						// Get current render surface
@@ -2215,7 +2303,21 @@ void ax::Window::run_loop()
 				ZoneScopedN("Window::idle-wait");
 				frameTimer.wait(wait);
 			}
+#ifdef __EMSCRIPTEN__
+			// The browser only runs its own work (input, presenting the frame) while the game is suspended, so an
+			// iteration that took longer than its time must still give control back.
+			else
+			{
+				frameTimer.wait(0.0);
+			}
+#endif
 		}
+#ifdef __EMSCRIPTEN__
+		else
+		{
+			frameTimer.wait(0.0);
+		}
+#endif
 	}
 
 	ax::input::KeyEventHandler::cleanup_events(m_window);
@@ -2804,13 +2906,17 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 
 			{
 				ZoneScopedN("Window::present");
+#ifndef __EMSCRIPTEN__
 				m_surface.Present();
+#endif
 			}
 
 			// Let the device progress
 			{
 				ZoneScopedN("Window::device-tick");
+#ifndef __EMSCRIPTEN__
 				m_device.Tick();
+#endif
 			}
 		}
 

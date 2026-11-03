@@ -8,10 +8,23 @@
 #include <format>
 #include <fstream>
 #include <vector>
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 namespace
 {
+	unsigned long process_id()
+	{
+#ifdef _WIN32
+		return ::GetCurrentProcessId();
+#else
+		return static_cast<unsigned long>(::getpid());
+#endif
+	}
+
 	constexpr std::array<char, 8> s_magic{ 'A', 'X', 'G', 'P', 'U', 'C', '0', '1' };
 	constexpr size_t s_header_size{ s_magic.size() + sizeof(uint64_t) };
 	constexpr uintmax_t s_max_cache_bytes{ 128ull * 1024 * 1024 };
@@ -84,7 +97,7 @@ void ax::GpuBlobCache::store(std::span<const std::byte> key, std::span<const std
 {
 	const auto path{ entry_path(key) };
 	auto tempPath{ path };
-	tempPath += std::format(".{}.{}.tmp", ::GetCurrentProcessId(), m_tempCounter.fetch_add(1, std::memory_order_relaxed));
+	tempPath += std::format(".{}.{}.tmp", process_id(), m_tempCounter.fetch_add(1, std::memory_order_relaxed));
 
 	{
 		std::ofstream file{ tempPath, std::ios::binary | std::ios::trunc };

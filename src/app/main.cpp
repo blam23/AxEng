@@ -1,4 +1,6 @@
+#ifdef _WIN32
 #include <windows.h>
+#endif
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -71,11 +73,13 @@ namespace
 
 int main(int argc, char* argv[])
 {
+#ifdef _WIN32
 	if (GetConsoleOutputCP() != 0 && !SetConsoleOutputCP(CP_UTF8))
 	{
 		spdlog::error("Failed to set console output to UTF-8: Windows error {}", GetLastError());
 		return RET(ax::Error::IO);
 	}
+#endif
 
 	//
 	// Parse Args

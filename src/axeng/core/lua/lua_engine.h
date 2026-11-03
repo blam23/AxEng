@@ -6,6 +6,13 @@
 #include "axeng/core/resource_loader.h"
 
 #include <string>
+// LuaJIT where it runs; PUC Lua 5.4 on WebAssembly, which LuaJIT does not support.
+#ifdef __EMSCRIPTEN__
+#include <lua.hpp>
+#define AX_LUA_RUNTIME_NAME "Lua"
+#define AX_LUA_RUNTIME_VERSION LUA_VERSION
+#define AX_LUA_RUNTIME_VERSION_NUMBER LUA_VERSION_NUM
+#else
 extern "C"
 {
 #include <luajit.h>
@@ -13,6 +20,10 @@ extern "C"
 
 #if !defined(LUAJIT_VERSION)
 #error AxEng requires LuaJIT for its sol2 Lua runtime
+#endif
+#define AX_LUA_RUNTIME_NAME "LuaJIT"
+#define AX_LUA_RUNTIME_VERSION LUAJIT_VERSION
+#define AX_LUA_RUNTIME_VERSION_NUMBER LUAJIT_VERSION_NUM
 #endif
 
 #define SOL_ALL_SAFETIES_ON 1

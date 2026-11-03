@@ -166,9 +166,14 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 	app_table["current_executable_path"] =
 		[]() -> std::string
 		{
+#ifdef _WIN32
 			char path[MAX_PATH];
 			::GetModuleFileNameA(nullptr, path, MAX_PATH);
 			return std::string(path);
+#else
+			// There is no executable file in the browser.
+			return std::string{ "/AxFactory" };
+#endif
 		};
 
 	bind_conditional_to_state(app, state);

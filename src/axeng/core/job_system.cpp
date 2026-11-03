@@ -27,7 +27,15 @@ namespace ax
 	std::size_t JobSystem::default_worker_count() noexcept
 	{
 		const auto hardware{ static_cast<std::size_t>(std::thread::hardware_concurrency()) };
+#ifdef __EMSCRIPTEN__
+		// Browser threads are Web Workers made in advance (the link's -sPTHREAD_POOL_SIZE): a thread started when none is
+		// free waits for the page, which would deadlock the page's own thread. The pool also serves the simulation and
+		// background threads, so the job workers take at most a third of it.
+		constexpr std::size_t s_max_web_workers{ 5 };
+		return std::min(hardware > 2 ? hardware - 2 : std::size_t{}, s_max_web_workers);
+#else
 		return hardware > 2 ? hardware - 2 : 0;
+#endif
 	}
 
 	JobSystem::Group::~Group()

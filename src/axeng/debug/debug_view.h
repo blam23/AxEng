@@ -6,6 +6,8 @@
 #include "axeng/core/lua/lua_engine.h"
 #include "axeng/core/lua/bindings/lua_texture_bindings.h"
 
+#include <list>
+
 namespace ax::debug
 {
 	class Debugger

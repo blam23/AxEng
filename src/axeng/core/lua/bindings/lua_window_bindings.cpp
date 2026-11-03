@@ -714,35 +714,35 @@ void ax::lua::bindings::setup_window_embed_bindings(Application& app, sol::state
 	window_table["try_embed_child"] =
 		[&app](float procIdFloat) -> bool
 		{
-			DWORD processID = static_cast<DWORD>(procIdFloat);
+			const ax::Window::ProcessId processID{ static_cast<ax::Window::ProcessId>(procIdFloat) };
 			return app.window()->try_embed_child(processID);
 		};
 
 	window_table["set_embedded_child_position"] =
 		[&app](float procIdFloat, float x, float y, float width, float height)
 		{
-			DWORD processID = static_cast<DWORD>(procIdFloat);
+			const ax::Window::ProcessId processID{ static_cast<ax::Window::ProcessId>(procIdFloat) };
 			app.window()->set_embedded_child_position(processID, static_cast<int>(x), static_cast<int>(y), static_cast<int>(width), static_cast<int>(height));
 		};
 
 	window_table["try_kill_child"] =
 		[&app](float procIdFloat)
 		{
-			DWORD processID = static_cast<DWORD>(procIdFloat);
+			const ax::Window::ProcessId processID{ static_cast<ax::Window::ProcessId>(procIdFloat) };
 			app.window()->try_kill_child(processID);
 		};
 
 	window_table["focus_child"] =
 		[&app](float procIdFloat)
 		{
-			DWORD processID = static_cast<DWORD>(procIdFloat);
+			const ax::Window::ProcessId processID{ static_cast<ax::Window::ProcessId>(procIdFloat) };
 			return app.window()->focus_child(processID);
 		};
 
 	window_table["redirect_input_to_child"] =
 		[&app](float procIdFloat)
 		{
-			DWORD processID = static_cast<DWORD>(procIdFloat);
+			const ax::Window::ProcessId processID{ static_cast<ax::Window::ProcessId>(procIdFloat) };
 			app.window()->redirect_input_to_child(processID);
 		};
 

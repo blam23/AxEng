@@ -1,7 +1,8 @@
 #pragma once
 
-// Windows
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 // STD
 #include <atomic>
@@ -19,19 +20,24 @@
 #include <vector>
 
 // GLFW
+#ifndef __EMSCRIPTEN__
 #include "axeng/external/glfw3webgpu.h"
+#endif
+#ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
+#endif
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 // GFX
 #include <webgpu/webgpu_cpp.h>
-#include <webgpu/webgpu_cpp_print.h>
+#include "axeng/core/webgpu_print.h"
 
 // AxEng
 #include "axeng/core/helpers.h"
 #include "axeng/core/event.h"
 #include "axeng/core/gpu_blob_cache.h"
+#include "axeng/core/gpu_wait.h"
 #include "axeng/debug/debug_view.h"
 #include "axeng/core/camera.h"
 #include "axeng/core/texture.h"
@@ -268,11 +274,13 @@ namespace ax
 
 		void call_deferred(std::function<void()> func);
 
-		bool try_embed_child(DWORD processID);
-		void try_kill_child(DWORD processID);
-		void set_embedded_child_position(DWORD processID, int x, int y, int width, int height);
-		void focus_child(DWORD processID);
-		void redirect_input_to_child(DWORD processID);
+		// Embedding another process's window is only supported on Windows; elsewhere these do nothing.
+		using ProcessId = std::uint32_t;
+		bool try_embed_child(ProcessId processID);
+		void try_kill_child(ProcessId processID);
+		void set_embedded_child_position(ProcessId processID, int x, int y, int width, int height);
+		void focus_child(ProcessId processID);
+		void redirect_input_to_child(ProcessId processID);
 		void reset_input_redirection();
 
 	private:
@@ -340,12 +348,16 @@ namespace ax
 		GLFWwindow* m_window{ nullptr };
 		void register_window_events();
 		static void window_close_handler(GLFWwindow* window);
+#ifdef _WIN32
 		static LRESULT CALLBACK raw_windows_event(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
 			UINT_PTR subclassId, DWORD_PTR refData);
+#endif
 
 		// WGPU
 		// Declared before the device, which uses it until it is destroyed.
 		std::unique_ptr<GpuBlobCache> m_gpuCache;
+		// The browser's device is only valid while the instance that made it exists.
+		wgpu::Instance m_instance;
 		wgpu::Adapter m_adapter;
 		wgpu::Device m_device;
 		wgpu::Queue m_queue;
@@ -453,7 +465,9 @@ namespace ax
 		std::mutex m_deferredMutex{};
 		std::vector<std::function<void()>> m_deferred{};
 
-		std::map<DWORD, HWND> m_childWindows{};
+#ifdef _WIN32
+		std::map<ProcessId, HWND> m_childWindows{};
+#endif
 		ParticleSystem m_particleSystem;
 	};
 }
