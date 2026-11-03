@@ -31,6 +31,7 @@
 // AxEng
 #include "axeng/core/helpers.h"
 #include "axeng/core/event.h"
+#include "axeng/core/gpu_blob_cache.h"
 #include "axeng/debug/debug_view.h"
 #include "axeng/core/camera.h"
 #include "axeng/core/texture.h"
@@ -55,6 +56,7 @@ namespace ax
 		bool vsync{ true };
 		bool resizable{ true };
 		bool background{ false };	// shown without focus, behind other windows
+		std::filesystem::path gpuCacheDirectory{};	// compiled shader cache, disabled when empty
 	};
 
 	struct WindowFrameImageEvent
@@ -342,6 +344,8 @@ namespace ax
 			UINT_PTR subclassId, DWORD_PTR refData);
 
 		// WGPU
+		// Declared before the device, which uses it until it is destroyed.
+		std::unique_ptr<GpuBlobCache> m_gpuCache;
 		wgpu::Adapter m_adapter;
 		wgpu::Device m_device;
 		wgpu::Queue m_queue;

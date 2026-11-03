@@ -1,6 +1,8 @@
 #include <windows.h>
+#include <filesystem>
 #include <map>
 #include <memory>
+#include <ranges>
 
 #include "axeng/core/axeng.h"
 #include "axeng/comp/compiler.h"
@@ -22,7 +24,46 @@
 #define APPLICATION_NAME_OVERRIDE "AxEng"
 #endif
 
+#ifndef PACKAGED_APPLICATION_ARGUMENTS
+#define PACKAGED_APPLICATION_ARGUMENTS ""
+#endif
+
 #define RET(x) std::to_underlying(x)
+
+#ifdef PACKAGED_APPLICATION_ZIP
+namespace
+{
+	std::filesystem::path executable_directory()
+	{
+		std::wstring path(MAX_PATH, wchar_t{});
+		while (true)
+		{
+			const auto length{ GetModuleFileNameW(nullptr, path.data(), static_cast<DWORD>(path.size())) };
+			if (length < path.size())
+			{
+				path.resize(length);
+				return std::filesystem::path{ path }.parent_path();
+			}
+			path.resize(path.size() * 2);
+		}
+	}
+
+	// Packaged builds launched without arguments run the zipped project beside the executable.
+	std::vector<std::string> packaged_arguments(const std::vector<std::string>& args)
+	{
+		if (args.size() > 1)
+			return args;
+
+		std::vector<std::string> ret{ args.front(), "--run", "--zip", "--in", (executable_directory() / PACKAGED_APPLICATION_ZIP).string() };
+		for (const auto arg : std::views::split(std::string_view{ PACKAGED_APPLICATION_ARGUMENTS }, ' '))
+		{
+			if (!arg.empty())
+				ret.emplace_back(std::string_view{ arg });
+		}
+		return ret;
+	}
+}
+#endif
 
 int main(int argc, char* argv[])
 {
@@ -135,7 +176,14 @@ int main(int argc, char* argv[])
 		.flag()
 		.help("Shows the window behind other windows without taking focus");
 
+#ifdef PACKAGED_APPLICATION_ZIP
+	// Files such as imgui.ini are written relative to the working directory, which a packaged build keeps beside it.
+	if (argc == 1)
+		std::filesystem::current_path(executable_directory());
+	const std::vector<std::string> in_args{ packaged_arguments({ argv, argv + argc }) };
+#else
 	const std::vector<std::string> in_args{ argv, argv + argc };
+#endif
 	std::vector<std::string> out_args{};
 	flag_set<ax::lua::Permission> permissions{};
 

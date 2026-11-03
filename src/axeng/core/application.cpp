@@ -8,6 +8,25 @@
 #include "axeng/core/font_data.h"
 #include "axeng/core/font_sheet.h"
 
+#include <shlobj.h>
+
+namespace
+{
+	// Compiled shaders depend on the GPU and driver, so they belong in the machine local AppData rather than the
+	// roaming one. Entries are keyed by everything that affects them, so every application can share the directory.
+	std::filesystem::path gpu_cache_directory()
+	{
+		PWSTR path{ nullptr };
+		std::filesystem::path directory{};
+		if (SUCCEEDED(::SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &path)))
+			directory = std::filesystem::path{ path } / "AxEng" / "gpu_cache";
+		else
+			spdlog::warn("Failed to get the local AppData directory, compiled shaders will not be cached.");
+		::CoTaskMemFree(path);
+		return directory;
+	}
+}
+
 ax::Application ax::Application::from_directory
 (
 	flag_set<lua::Permission> permissions,
@@ -54,6 +73,7 @@ bool ax::Application::init_window(wgpu::BackendType backendType)
 		.vsync = window["vsync"],
 		.resizable = window["resizable"].get_or(true),
 		.background = m_backgroundWindow,
+		.gpuCacheDirectory = gpu_cache_directory(),
 	});
 
 	bool success{ true };

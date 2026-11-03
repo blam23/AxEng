@@ -30,11 +30,33 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
-#include <fstream>
 #include <format>
 #include <iostream>
 #include <limits>
+#include <span>
 #include <thread>
+
+namespace
+{
+	// #embed paths are resolved relative to this file. The data is not null terminated.
+	constexpr unsigned char s_basic_shader[] = {
+#embed "../../../shaders/basic_shader.wgsl"
+	};
+	constexpr unsigned char s_sdf_shader[] = {
+#embed "../../../shaders/sdf_shader.wgsl"
+	};
+	constexpr unsigned char s_composite_shader[] = {
+#embed "../../../shaders/composite_shader.wgsl"
+	};
+	constexpr unsigned char s_composite_shader_single[] = {
+#embed "../../../shaders/composite_shader_single.wgsl"
+	};
+
+	wgpu::StringView embedded_text(std::span<const unsigned char> data)
+	{
+		return { reinterpret_cast<const char*>(data.data()), data.size() };
+	}
+}
 
 std::map<GLFWwindow*, ax::Window*> s_windows{};
 std::mutex s_windows_mutex{};
@@ -54,6 +76,8 @@ ax::Window::Window(const WindowDefinition& def)
 	, m_vsync{ def.vsync }
 {
 	m_camera.set_position({ 0.0f, 0.0f });
+	if (!def.gpuCacheDirectory.empty())
+		m_gpuCache = std::make_unique<GpuBlobCache>(def.gpuCacheDirectory);
 
 	LogTimer _timer{ "create window" };
 
@@ -632,8 +656,16 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 	//
 	// Get Adapter
 	//
+	// D3D12 compiles shaders with FXC (d3dcompiler_47.dll, part of Windows) rather than DXC, so dxcompiler.dll and
+	// dxil.dll need not ship with the application. The engine uses no feature that requires DXC.
+	static const char* const s_disabled_adapter_toggles[]{ "use_dxc" };
+	wgpu::DawnTogglesDescriptor adapterToggles{};
+	adapterToggles.disabledToggleCount = std::size(s_disabled_adapter_toggles);
+	adapterToggles.disabledToggles = s_disabled_adapter_toggles;
+
 	wgpu::RequestAdapterOptions options
 	{
+		.nextInChain = &adapterToggles,
 		.featureLevel = wgpu::FeatureLevel::Core,
 		.backendType = backendType
 	};
@@ -672,6 +704,30 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 
 	wgpu::DeviceDescriptor deviceDescriptor{};
 	deviceDescriptor.requiredLimits = &limits;
+
+	// Keeps compiled shaders between runs, so only the first run pays for compiling them.
+	wgpu::DawnCacheDeviceDescriptor cacheDescriptor{};
+	if (m_gpuCache)
+	{
+		cacheDescriptor.SetDawnLoadCacheDataCallback
+		(
+			[](std::span<const std::byte> key, std::span<std::byte> value, GpuBlobCache* cache) -> size_t
+			{
+				return cache->load(key, value);
+			},
+			m_gpuCache.get()
+		);
+		cacheDescriptor.SetDawnStoreCacheDataCallback
+		(
+			[](std::span<const std::byte> key, std::span<const std::byte> value, GpuBlobCache* cache)
+			{
+				cache->store(key, value);
+			},
+			m_gpuCache.get()
+		);
+		deviceDescriptor.nextInChain = &cacheDescriptor;
+	}
+
 	deviceDescriptor.SetUncapturedErrorCallback
 	(
 		[](const wgpu::Device&, wgpu::ErrorType error_type, wgpu::StringView message)
@@ -720,43 +776,15 @@ void ax::Window::reload_pipeline()
 {
 	LogTimer _timer{ "pipeline load" };
 
-	// Load shader
-	std::string shaderCode;
-	std::ifstream file{ "shaders/basic_shader.wgsl" };
-	if (file)
-	{
-		std::ostringstream stream;
-		stream << file.rdbuf();
-		shaderCode = stream.str();
-	}
-	else
-	{
-		spdlog::error("Could not load shader file, using fallback.");
-		return;
-	}
-
 	wgpu::ShaderModuleDescriptor shaderDesc{};
 	wgpu::ShaderSourceWGSL shaderCodeDesc;
-	shaderCodeDesc.code = shaderCode.data();
+	shaderCodeDesc.code = embedded_text(s_basic_shader);
 	shaderDesc.nextInChain = &shaderCodeDesc;
 	m_shader = m_device.CreateShaderModule(&shaderDesc);
 
-	std::string sdfShaderCode;
-	std::ifstream sdfFile{ "shaders/sdf_shader.wgsl" };
-	if (sdfFile)
-	{
-		std::ostringstream stream;
-		stream << sdfFile.rdbuf();
-		sdfShaderCode = stream.str();
-	}
-	else
-	{
-		spdlog::error("Could not load distance-field shader file.");
-		return;
-	}
 	wgpu::ShaderModuleDescriptor sdfShaderDesc{};
 	wgpu::ShaderSourceWGSL sdfShaderCodeDesc;
-	sdfShaderCodeDesc.code = sdfShaderCode.data();
+	sdfShaderCodeDesc.code = embedded_text(s_sdf_shader);
 	sdfShaderDesc.nextInChain = &sdfShaderCodeDesc;
 	m_sdfShader = m_device.CreateShaderModule(&sdfShaderDesc);
 
@@ -976,23 +1004,10 @@ void ax::Window::reload_pipeline()
 	pipelineDesc.vertex.module = m_shader;
 	fragmentState.module = m_shader;
 
-	std::string compositeShaderCode;
-	std::ifstream compositeFile{ m_sampleCount > 1
-		? "shaders/composite_shader.wgsl" : "shaders/composite_shader_single.wgsl" };
-	if (compositeFile)
-	{
-		std::ostringstream stream;
-		stream << compositeFile.rdbuf();
-		compositeShaderCode = stream.str();
-	}
-	else
-	{
-		spdlog::error("Could not load OIT composite shader file.");
-		return;
-	}
 	wgpu::ShaderModuleDescriptor compositeShaderDesc{};
 	wgpu::ShaderSourceWGSL compositeShaderCodeDesc;
-	compositeShaderCodeDesc.code = compositeShaderCode.data();
+	compositeShaderCodeDesc.code = m_sampleCount > 1
+		? embedded_text(s_composite_shader) : embedded_text(s_composite_shader_single);
 	compositeShaderDesc.nextInChain = &compositeShaderCodeDesc;
 	m_compositeShader = m_device.CreateShaderModule(&compositeShaderDesc);
 

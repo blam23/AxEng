@@ -21,6 +21,12 @@ option("vcpkg_full_check")
     set_description("Run vcpkg manifest installation and ABI checks")
 option_end()
 
+option("tracy")
+    set_default(true)
+    set_showmenu(true)
+    set_description("Enable the Tracy profiler client")
+option_end()
+
 local vcpkg_debug = is_mode("debug")
 local vcpkg_triplet = "x64-windows-static-md"
 local vcpkg_triplet_dir = path.join(engine_root, "triplets")
@@ -73,7 +79,8 @@ rule("vcpkg.manifest")
             target:add("links", path.basename(lib), {public = true})
         end
     end)
--- Dawn's D3D12 backend needs dxcompiler.dll / dxil.dll next to the executable.
+-- dxcompiler.dll / dxil.dll for Dawn devices that keep the default DXC shader compiler, such as the GPU tests.
+-- ax::Window compiles with FXC, so applications do not need to ship them.
 rule("vcpkg.runtime_dlls")
     after_build(function (target)
         local prefix = path.join(engine_root, "build", "vcpkg_installed", vcpkg_triplet)
@@ -114,12 +121,16 @@ target("AxEngLib")
     add_files(src .. "/axeng/core/shapes/shape_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     add_files(src .. "/axeng/core/particles/particle_system.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     add_files(src .. "/axeng/core/lighting/light_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
+    add_files(src .. "/axeng/core/window.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     -- stb_image.h defines helpers that are only used on some code paths
     add_files(src .. "/axeng/core/texture.cpp", {force = {cxxflags = "-Wno-unused-function"}})
     -- Third-party single file implementations (miniaudio + stb_vorbis)
     add_files(src .. "/axeng/core/audio/miniaudio_impl.c", {force = {cflags = "-w"}})
     add_includedirs(src, {public = true})
-    add_defines("TRACY_ENABLE", "TRACY_ON_DEMAND", "IMGUI_IMPL_WEBGPU_BACKEND_DAWN", {public = true})
+    add_defines("IMGUI_IMPL_WEBGPU_BACKEND_DAWN", {public = true})
+    if has_config("tracy") then
+        add_defines("TRACY_ENABLE", "TRACY_ON_DEMAND", {public = true})
+    end
     add_cxflags("-Wa,-mbig-obj", {tools = {"clang"}})
     add_syslinks("bcrypt", "gdi32", "user32", "shell32", "advapi32", "kernel32", "onecore", "ole32", "comctl32", "dxgi", "dxguid", "d3d11", "d3d12", "d3dcompiler", "synchronization", {public = true})
 
