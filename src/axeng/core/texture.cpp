@@ -1,4 +1,5 @@
 #include "axeng/core/texture.h"
+#include "axeng/core/gpu_wait.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -353,8 +354,7 @@ ax::Error ax::Texture::save_png(const std::filesystem::path& path) const
 		const auto deadline{ std::chrono::steady_clock::now() + std::chrono::seconds{ 10 } };
 		while (!result->complete.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
 		{
-			m_device.Tick();
-			std::this_thread::yield();
+			ax::poll_device(m_device);
 		}
 		if (!result->complete.load(std::memory_order_acquire))
 		{

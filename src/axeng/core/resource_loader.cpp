@@ -2,7 +2,9 @@
 
 #include "spdlog/spdlog.h"
 
+#include <cstring>
 #include <iostream>
+#include <system_error>
 #include <fstream>
 #include <string>
 
@@ -48,10 +50,7 @@ std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::DirectoryResource
 			spdlog::error("IO error, badbit is set");
 
 		if (file.fail())
-		{
-			char err[1024];
-			spdlog::error("IO error: {}", strerror_s(err, 1024, errno));
-		}
+			spdlog::error("IO error: {}", std::generic_category().message(errno));
 
 		return std::unexpected{ ax::ResourceLoadError::CantOpen };
 	}
@@ -84,7 +83,7 @@ std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::EmbeddedResourceL
 	{
 		const auto entry{ idx->second };
 		ret.resize(entry.size);
-		memcpy_s(ret.data(), ret.size(), entry.ptr, entry.size);
+		std::memcpy(ret.data(), entry.ptr, entry.size);
 		return ret;
 	}
 

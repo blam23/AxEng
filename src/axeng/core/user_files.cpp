@@ -10,8 +10,9 @@
 #include <algorithm>
 #include <chrono>
 #include <optional>
-#include <shlobj.h>
 #include <thread>
+#ifdef _WIN32
+#include <shlobj.h>
 #include <windows.h>
 
 std::optional<std::filesystem::path> get_app_data_directory() noexcept
@@ -23,6 +24,21 @@ std::optional<std::filesystem::path> get_app_data_directory() noexcept
 
     return std::nullopt;
 }
+#else
+// The browser build mounts persistent storage here (see the page's startup code); other platforms use the XDG location.
+std::optional<std::filesystem::path> get_app_data_directory() noexcept
+{
+#ifdef __EMSCRIPTEN__
+    return std::filesystem::path{ "/userfs" };
+#else
+    if (const char* data{ std::getenv("XDG_DATA_HOME") }; data && *data)
+        return std::filesystem::path{ data };
+    if (const char* home{ std::getenv("HOME") }; home && *home)
+        return std::filesystem::path{ home } / ".local" / "share";
+    return std::nullopt;
+#endif
+}
+#endif
 
 ax::Error ax::UserFileManager::set_application(const Application& app, const std::filesystem::path& user_directory) noexcept
 {
@@ -151,7 +167,7 @@ std::expected<void, std::string> ax::UserFileManager::create_zip
     }
 
     auto temporary_path{ *output_path };
-    temporary_path += L".tmp";
+    temporary_path += ".tmp";
     std::error_code filesystem_error;
     std::filesystem::remove(temporary_path, filesystem_error);
     if (filesystem_error)
@@ -193,6 +209,7 @@ std::expected<void, std::string> ax::UserFileManager::create_zip
     }
 
     bool replaced{ false };
+#ifdef _WIN32
     DWORD replace_error{};
     auto retryDelay{ std::chrono::milliseconds{ 10 } };
     for (std::uint32_t attempt{}; attempt < 8; ++attempt)
@@ -205,10 +222,16 @@ std::expected<void, std::string> ax::UserFileManager::create_zip
         std::this_thread::sleep_for(retryDelay);
         retryDelay = std::min(retryDelay * 2, std::chrono::milliseconds{ 640 });
     }
+    const std::string replace_message{ "Windows error " + std::to_string(replace_error) };
+#else
+    std::filesystem::rename(temporary_path, *output_path, filesystem_error);
+    replaced = !filesystem_error;
+    const std::string replace_message{ filesystem_error.message() };
+#endif
     if (!replaced)
     {
         std::filesystem::remove(temporary_path, filesystem_error);
-        return std::unexpected{ "Failed to replace ZIP output (Windows error " + std::to_string(replace_error) + ")" };
+        return std::unexpected{ "Failed to replace ZIP output (" + replace_message + ")" };
     }
 
     if (remove_sources)

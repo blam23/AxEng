@@ -1,0 +1,13 @@
+{
+  "name": "lua54",
+  "version": "5.4.8",
+  "description": "PUC-Rio Lua 5.4 for platforms LuaJIT does not support (WebAssembly), with numbers printed the way LuaJIT prints them.",
+  "homepage": "https://www.lua.org",
+  "license": "MIT",
+  "dependencies": [
+    {
+      "name": "vcpkg-cmake",
+      "host": true
+    }
+  ]
+}

@@ -8,6 +8,7 @@
 #include "axeng/core/font_data.h"
 #include "axeng/core/font_sheet.h"
 
+#ifdef _WIN32
 #include <shlobj.h>
 
 namespace
@@ -26,6 +27,16 @@ namespace
 		return directory;
 	}
 }
+#else
+namespace
+{
+	// The browser compiles and caches shaders itself.
+	std::filesystem::path gpu_cache_directory()
+	{
+		return {};
+	}
+}
+#endif
 
 ax::Application ax::Application::from_directory
 (
@@ -272,7 +283,6 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 	if (headless_res.valid())
 		m_create_window = !headless_res.get<bool>();
 
-	const auto& window_manifest{ manifest["window"] };
 	if (m_create_window)
 	{
 		init_window(backendType);
@@ -323,8 +333,11 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 		}
 	}
 
+#ifndef __EMSCRIPTEN__
+	// A browser page takes its icon from the page, not from the window.
 	if (m_create_window)
 	{
+		const auto& window_manifest{ manifest["window"] };
 		const auto& icon{ m_textures.get(window_manifest["icon"]) };
 		if (icon)
 		{
@@ -332,6 +345,7 @@ bool ax::Application::try_load(const std::vector<std::string>& args, wgpu::Backe
 			glfwSetWindowIcon(m_window->glfw_handle(), 1, &img);
 		}
 	}
+#endif
 
 	init_audio(manifest.get<sol::table>());
 

@@ -36,7 +36,7 @@
 
 // GFX
 #include <webgpu/webgpu_cpp.h>
-#include <webgpu/webgpu_cpp_print.h>
+#include "axeng/core/webgpu_print.h"
 
 namespace ax
 {

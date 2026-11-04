@@ -2,6 +2,11 @@
 #include "tests/main/log_capture.h"
 #include "axeng/core/resource_loader.h"
 
+#include <minizip-ng/mz.h>
+#include <minizip-ng/mz_strm.h>
+#include <minizip-ng/mz_zip.h>
+#include <minizip-ng/mz_zip_rw.h>
+
 #include <filesystem>
 #include <fstream>
 
@@ -256,11 +261,14 @@ TEST(ZipResourceLoaderTest, SetupLoadAndCleanupSucceeds)
         ofs.write(contents.data(), static_cast<std::streamsize>(contents.size()));
     }
 
-    std::string cmd = "powershell -NoProfile -Command \"Compress-Archive -LiteralPath '"
-        + filePath.string() + "' -DestinationPath '" + zipPath.string() + "' -Force\"";
-
-    const int rc = std::system(cmd.c_str());
-    ASSERT_EQ(rc, 0) << "Compress-Archive command failed with code: " << rc;
+    void* writer{ mz_zip_writer_create() };
+    ASSERT_NE(writer, nullptr);
+    ASSERT_EQ(mz_zip_writer_open_file(writer, zipPath.string().c_str(), 0, 0), MZ_OK);
+    mz_zip_writer_set_compress_method(writer, MZ_COMPRESS_METHOD_DEFLATE);
+    mz_zip_writer_set_compress_level(writer, MZ_COMPRESS_LEVEL_NORMAL);
+    ASSERT_EQ(mz_zip_writer_add_file(writer, filePath.string().c_str(), "data.txt"), MZ_OK);
+    ASSERT_EQ(mz_zip_writer_close(writer), MZ_OK);
+    mz_zip_writer_delete(&writer);
     ASSERT_TRUE(fs::exists(zipPath)) << "Zip file was not created";
 
     ZipResourceLoader loader(zipPath);
