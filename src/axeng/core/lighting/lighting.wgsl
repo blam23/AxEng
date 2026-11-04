@@ -69,9 +69,13 @@ fn fs_light(in_: InstanceOut) -> @location(0) vec4<f32> {
 }
 
 fn hash21(p : vec2<f32>) -> f32 {
-	var q = fract(p * vec2<f32>(123.34, 456.21));
-	q = q + dot(q, q + 45.32);
-	return fract(q.x * q.y);
+	let x = bitcast<u32>(i32(p.x));
+	let y = bitcast<u32>(i32(p.y));
+	var h = x ^ (y + 0x9e3779b9u + (x << 6u) + (x >> 2u));
+	h = (h ^ (h >> 16u)) * 0x7feb352du;
+	h = (h ^ (h >> 15u)) * 0x846ca68bu;
+	h = h ^ (h >> 16u);
+	return f32(h >> 8u) * (1.0 / 16777216.0);
 }
 
 fn value_noise(p : vec2<f32>) -> f32 {

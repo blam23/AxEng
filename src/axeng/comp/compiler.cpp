@@ -3,9 +3,16 @@
 #include "axeng/core/application.h"
 #include "axeng/core/axeng.h"
 
+#include <minizip-ng/mz.h>
+#include <minizip-ng/mz_strm.h>
+#include <minizip-ng/mz_zip.h>
+#include <minizip-ng/mz_zip_rw.h>
+
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <ranges>
+#include <vector>
 
 static ax::Error setup_directory(std::string_view inDir, std::string_view outDir)
 {
@@ -79,26 +86,62 @@ ax::Error zip(std::string_view outDir)
 		std::filesystem::path zipPath = outPath;
 		zipPath += ".zip";
 
-		std::string pathPattern = outPath.string();
-		if (pathPattern.back() == '/' || pathPattern.back() == '\\')
-			pathPattern += "*";
-		else
-			pathPattern += "\\*";
-
-		// TODO: Replace this with minizip or some such
-		std::string cmd = "powershell -NoProfile -Command \"Compress-Archive -Path '"
-			+ pathPattern + "' -DestinationPath '" + zipPath.string() + "' -Force\"";
-
-		int rc = std::system(cmd.c_str());
-		if (rc != 0)
+		std::vector<std::pair<std::filesystem::path, std::string>> files;
+		for (const auto& entry : std::filesystem::recursive_directory_iterator(outPath))
 		{
-			spdlog::error("Failed to create zip '{}', exit code: {}", zipPath.string(), rc);
-			ret = ax::Error::IO;
+			if (!entry.is_regular_file())
+				continue;
+			files.emplace_back(entry.path(), entry.path().lexically_relative(outPath).generic_string());
 		}
-		else
+		std::ranges::sort(files, [](const auto& lhs, const auto& rhs) { return lhs.second < rhs.second; });
+
+		std::error_code filesystemError;
+		std::filesystem::remove(zipPath, filesystemError);
+		if (filesystemError)
 		{
-			spdlog::info("<Build> Packaged output to '{}'.", zipPath.string());
+			spdlog::error("Failed to clear old ZIP output '{}': {}", zipPath.string(), filesystemError.message());
+			return ax::Error::IO;
 		}
+
+		void* writer{ mz_zip_writer_create() };
+		if (writer == nullptr)
+		{
+			spdlog::error("Failed to create ZIP writer for '{}'.", zipPath.string());
+			return ax::Error::IO;
+		}
+
+		const auto openResult{ mz_zip_writer_open_file(writer, zipPath.string().c_str(), 0, 0) };
+		if (openResult != MZ_OK)
+		{
+			mz_zip_writer_delete(&writer);
+			spdlog::error("Failed to open ZIP output '{}' (minizip error {}).", zipPath.string(), openResult);
+			return ax::Error::IO;
+		}
+
+		mz_zip_writer_set_compress_method(writer, MZ_COMPRESS_METHOD_DEFLATE);
+		mz_zip_writer_set_compress_level(writer, MZ_COMPRESS_LEVEL_NORMAL);
+		for (const auto& [inputPath, entryName] : files)
+		{
+			const auto addResult{ mz_zip_writer_add_file(writer, inputPath.string().c_str(), entryName.c_str()) };
+			if (addResult != MZ_OK)
+			{
+				mz_zip_writer_close(writer);
+				mz_zip_writer_delete(&writer);
+				std::filesystem::remove(zipPath, filesystemError);
+				spdlog::error("Failed to add ZIP entry '{}' (minizip error {}).", entryName, addResult);
+				return ax::Error::IO;
+			}
+		}
+
+		const auto closeResult{ mz_zip_writer_close(writer) };
+		mz_zip_writer_delete(&writer);
+		if (closeResult != MZ_OK)
+		{
+			std::filesystem::remove(zipPath, filesystemError);
+			spdlog::error("Failed to finalize ZIP archive '{}' (minizip error {}).", zipPath.string(), closeResult);
+			return ax::Error::IO;
+		}
+		spdlog::info("<Build> Packaged output to '{}'.", zipPath.string());
 	}
 	catch (const std::exception& ex)
 	{
