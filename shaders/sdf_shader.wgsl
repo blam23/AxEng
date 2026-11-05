@@ -18,6 +18,7 @@ struct Uniforms {
 @group(0) @binding(0) var<storage, read> sprites : array<Uniforms>;
 @group(0) @binding(1) var tex : texture_2d<f32>;
 @group(0) @binding(2) var samp : sampler;
+@group(0) @binding(3) var<storage, read> visible : array<u32>;
 struct CameraUniforms {
 	viewport: vec4<f32>,
 	camera: vec4<f32>,
@@ -39,7 +40,7 @@ struct VSOut {
 @vertex
 fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance: u32) -> VSOut {
 	var out: VSOut;
-	let u = sprites[instance];
+	let u = sprites[visible[instance]];
 	let i = i32(in_idx);
 	let textureSize = vec2<f32>(textureDimensions(tex, 0));
 	let regionOrigin = vec2<f32>(vec2<u32>(u.region.x & 0xFFFFu, u.region.x >> 16u));

@@ -4,6 +4,7 @@
 
 #include "axeng/core/lighting/light_renderer.h"
 #include "axeng/core/particles/particle_system.h"
+#include "axeng/core/sprite_culling.h"
 
 #include <array>
 #include <chrono>
@@ -278,6 +279,20 @@ TEST_F(LightRendererTest, LightBrightensOnlyWithinItsRadius)
 	EXPECT_GT(image.at(64 + 12, 64)[0], 200);
 	EXPECT_TRUE(close_to(image.at(64 + 45, 64), { 26, 26, 26, 255 }, 3));
 	EXPECT_TRUE(close_to(image.at(64, 64 - 45), { 26, 26, 26, 255 }, 3));
+}
+
+TEST_F(LightRendererTest, CulledOffscreenEmitterStillLightsVisiblePixels)
+{
+	ax::SpriteData sprite{};
+	sprite.pos = { 90, 0 };
+	const ax::SpriteCuller culler{ { s_size, s_size }, { 0, 0 }, 1 };
+	ASSERT_FALSE(culler.visible(sprite, 2, 2));
+	const std::array lights{ ax::Light2D{ .position = sprite.pos, .radius = 100.0f, .intensity = 2.0f,
+		.colour = { 1.0f, 0.0f, 0.0f }, .falloff = 1.0f } };
+	const auto image{ render({ 1, 1, 1, 1 }, settings({ 0, 0, 0 }), lights) };
+	EXPECT_GT(image.at(120, 64)[0], 100);
+	EXPECT_EQ(image.at(120, 64)[1], 0);
+	EXPECT_EQ(image.at(0, 64)[0], 0);
 }
 
 TEST_F(LightRendererTest, LightFollowsCamera)

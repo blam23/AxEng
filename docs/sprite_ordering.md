@@ -1,0 +1,13 @@
+# Sprite ordering
+
+Within each rendering layer, static batches precede frame-queued sprites, which precede retained sprites. Static batches keep their explicit batch order and record order. Queued sprites follow insertion under the queue lock. Retained sprites follow allocation sequence, independent of texture-group or active-array storage order. Ordinary and distance-field pipelines switch in that order rather than drawing every distance-field sprite last.
+
+The renderer reserves monotonic 64-bit sequence keys. A retained sprite keeps its key through texture edits, group transfers and hide/show operations. A recycled slot receives a new key. Batch queue insertion reserves its entire key range before inserting records. Exhaustion throws rather than wrapping. Keys and allocation-list links are renderer-owned metadata; consumers edit authored sprite fields, not those links or per-frame upload locations. Keys are not simulation or save state.
+
+Higher z remains closer under reverse-Z. `GreaterEqual` means that later canonical entries win equal-depth opaque overlap. Screen-space blending follows the same canonical order at every depth, while still respecting its existing depth test/write behavior. World OIT uses the same ordered ranges, with fragment alpha determining transparent contributions. Lit, unlit and screen-space pass placement is unchanged.
+
+Only adjacent compatible entries with contiguous packed locations form an instanced draw. Texture changes or storage compaction do not authorize sorting the canonical draw list by texture. Retained allocation order is maintained by an intrusive list. The main list is classified into layers in canonical order and packed into separate ordinary/SDF arrays, with at most one instance upload per format. There are no persistent texture-membership groups to scan on texture changes or deletion.
+
+Pending render-to batches have their own submission-order contract and are not part of this ordering list. GPU overlap tests live in `src/tests/core/test_shape_renderer.cpp` under `SpriteOrderTest`.
+
+The main list uses `SpriteCuller` before packing. World bounds follow the camera and zoom; screen-space bounds use viewport pixels. The conservative rotation radius includes negative scales and packed region dimensions, including the shader's zero-region fallback. Packed screen clips may reject fully clipped sprites. Uncertain bounds stay visible. This filters raster work without editing authored fields, group visibility or ownership; light/glow collection, particles and callbacks remain independent. Pending targets and static batches retain their existing visibility behavior.

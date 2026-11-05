@@ -1,3 +1,4 @@
+#include "axeng/core/render_profiler.h"
 #include "axeng/core/materials/backdrop_blur.h"
 
 #include <algorithm>
@@ -184,7 +185,7 @@ bool ax::BackdropBlur::encode(const wgpu::CommandEncoder& encoder, const wgpu::T
 		passDesc.label = "BackdropBlur resolve";
 		passDesc.colorAttachmentCount = 1;
 		passDesc.colorAttachments = &attachment;
-		encoder.BeginRenderPass(&passDesc).End();
+		profiled_render_pass(encoder, passDesc, "materials/backdrop_blur.cpp:passDesc").End();
 	}
 	else if (frame != nullptr)
 	{
@@ -210,10 +211,10 @@ bool ax::BackdropBlur::encode(const wgpu::CommandEncoder& encoder, const wgpu::T
 		passDesc.label = "BackdropBlur downsample";
 		passDesc.colorAttachmentCount = 1;
 		passDesc.colorAttachments = &attachment;
-		auto pass{ encoder.BeginRenderPass(&passDesc) };
+		auto pass{ profiled_render_pass(encoder, passDesc, "materials/backdrop_blur.cpp:passDesc") };
 		pass.SetPipeline(m_pipeline);
 		pass.SetBindGroup(0, m_downsampleGroups[level - 1]);
-		pass.Draw(3);
+		profiled_draw(RenderCategory::Materials, pass, 3);
 		pass.End();
 	}
 	return true;

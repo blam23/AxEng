@@ -12,8 +12,45 @@ struct Uniforms {
 };
 
 @group(0) @binding(0) var<storage, read> sprites : array<Uniforms>;
-@group(0) @binding(1) var tex : texture_2d<f32>;
+@group(0) @binding(1) var tex0 : texture_2d<f32>;
 @group(0) @binding(2) var samp : sampler;
+@group(0) @binding(3) var tex1 : texture_2d<f32>;
+@group(0) @binding(4) var tex2 : texture_2d<f32>;
+@group(0) @binding(5) var tex3 : texture_2d<f32>;
+@group(0) @binding(6) var tex4 : texture_2d<f32>;
+@group(0) @binding(7) var tex5 : texture_2d<f32>;
+@group(0) @binding(8) var tex6 : texture_2d<f32>;
+@group(0) @binding(9) var tex7 : texture_2d<f32>;
+// Draw order: each instance of a draw reads its record and texture slot from this list.
+@group(0) @binding(10) var<storage, read> visible : array<u32>;
+
+// Each instance names one of the bound textures. Only textureLoad and textureDimensions are used, so the selection
+// may differ between invocations.
+fn texture_size(slot: u32) -> vec2<u32> {
+	switch (slot) {
+		case 1u: { return textureDimensions(tex1, 0); }
+		case 2u: { return textureDimensions(tex2, 0); }
+		case 3u: { return textureDimensions(tex3, 0); }
+		case 4u: { return textureDimensions(tex4, 0); }
+		case 5u: { return textureDimensions(tex5, 0); }
+		case 6u: { return textureDimensions(tex6, 0); }
+		case 7u: { return textureDimensions(tex7, 0); }
+		default: { return textureDimensions(tex0, 0); }
+	}
+}
+
+fn texture_load(slot: u32, coord: vec2<i32>) -> vec4<f32> {
+	switch (slot) {
+		case 1u: { return textureLoad(tex1, coord, 0); }
+		case 2u: { return textureLoad(tex2, coord, 0); }
+		case 3u: { return textureLoad(tex3, coord, 0); }
+		case 4u: { return textureLoad(tex4, coord, 0); }
+		case 5u: { return textureLoad(tex5, coord, 0); }
+		case 6u: { return textureLoad(tex6, coord, 0); }
+		case 7u: { return textureLoad(tex7, coord, 0); }
+		default: { return textureLoad(tex0, coord, 0); }
+	}
+}
 struct CameraUniforms {
 	viewport: vec4<f32>,
 	camera: vec4<f32>,
@@ -27,14 +64,17 @@ struct VSOut {
 	@location(1) tint : vec4<f32>,
 	@location(2) @interpolate(flat) texelBounds : vec4<f32>,
 	@location(3) @interpolate(flat) clip_rect : vec4<f32>,
+	@location(4) @interpolate(flat) slot : u32,
 };
 
 @vertex
 fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance: u32) -> VSOut {
 	var out: VSOut;
-	let u = sprites[instance];
+	let entry = visible[instance];
+	let u = sprites[entry & 0x1FFFFFFFu];
 	let i = i32(in_idx);
-	let textureSize = vec2<f32>(textureDimensions(tex, 0));
+	let slot = entry >> 29u;
+	let textureSize = vec2<f32>(texture_size(slot));
 	let regionOrigin = vec2<f32>(vec2<u32>(u.region.x & 0xFFFFu, u.region.x >> 16u));
 	let regionSize = vec2<f32>(vec2<u32>(u.region.y & 0xFFFFu, u.region.y >> 16u));
 	let useRegion = u.region.y != 0u;
@@ -79,6 +119,7 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	let depth = 0.5 + atan(u.z_idx) / 3.141592653589793;
 	out.pos = vec4<f32>(ndcX, ndcY, depth, 1.0);
 	out.uv = uv;
+	out.slot = slot;
 	out.tint = vec4<f32>(unpack2x16float(u.tint.x), unpack2x16float(u.tint.y));
 	out.clip_rect = vec4<f32>(
 		f32(u.clip.x & 0xFFFFu), f32(u.clip.x >> 16u), f32(u.clip.y & 0xFFFFu), f32(u.clip.y >> 16u));
@@ -89,27 +130,27 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	return out;
 }
 
-fn texel(coord: vec2<i32>, bounds: vec4<f32>) -> vec4<f32> {
-	let pixel = textureLoad(tex, clamp(coord, vec2<i32>(bounds.xy), vec2<i32>(bounds.zw)), 0);
+fn texel(slot: u32, coord: vec2<i32>, bounds: vec4<f32>) -> vec4<f32> {
+	let pixel = texture_load(slot, clamp(coord, vec2<i32>(bounds.xy), vec2<i32>(bounds.zw)));
 	return vec4<f32>(pixel.rgb * pixel.a, pixel.a);
 }
 
-fn sample_texture(uv: vec2<f32>, bounds: vec4<f32>) -> vec4<f32> {
-	let texturePixelSize = vec2<f32>(1.0) / vec2<f32>(textureDimensions(tex, 0));
+fn sample_texture(slot: u32, uv: vec2<f32>, bounds: vec4<f32>) -> vec4<f32> {
+	let texturePixelSize = vec2<f32>(1.0) / vec2<f32>(texture_size(slot));
 	let texelPos = uv / texturePixelSize - vec2<f32>(0.5);
 	let base = vec2<i32>(floor(texelPos));
 	let fraction = fract(texelPos);
 	let top = mix(
-		texel(base, bounds),
-		texel(base + vec2<i32>(1, 0), bounds), fraction.x);
+		texel(slot, base, bounds),
+		texel(slot, base + vec2<i32>(1, 0), bounds), fraction.x);
 	let bottom = mix(
-		texel(base + vec2<i32>(0, 1), bounds),
-		texel(base + vec2<i32>(1, 1), bounds), fraction.x);
+		texel(slot, base + vec2<i32>(0, 1), bounds),
+		texel(slot, base + vec2<i32>(1, 1), bounds), fraction.x);
 	return mix(top, bottom, fraction.y);
 }
 
 fn sprite_color(in_: VSOut) -> vec4<f32> {
-	let texturePixelSize = vec2<f32>(1.0) / vec2<f32>(textureDimensions(tex, 0));
+	let texturePixelSize = vec2<f32>(1.0) / vec2<f32>(texture_size(in_.slot));
 	let spriteScreenResolution = vec2<f32>(1.0) / fwidth(in_.uv);
 	let uvPixelSrc = floor(in_.uv / texturePixelSize + vec2<f32>(0.499));
 	let edge = uvPixelSrc * texturePixelSize * spriteScreenResolution;
@@ -117,7 +158,7 @@ fn sprite_color(in_: VSOut) -> vec4<f32> {
 	let uvFactor = clamp(uvPixel - edge + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0));
 	// Pixel art keeps texels sharp. Clamp each tap to the sprite region, not just the full atlas.
 	let uv = (mix(uvPixelSrc - vec2<f32>(1.0), uvPixelSrc, uvFactor) + vec2<f32>(0.5)) * texturePixelSize;
-	let pixel = sample_texture(uv, in_.texelBounds);
+	let pixel = sample_texture(in_.slot, uv, in_.texelBounds);
 	// The render passes expect straight alpha; unpremultiply only after filtering.
 	var rgb = vec3<f32>(0.0);
 	if (pixel.a > 0.0) {

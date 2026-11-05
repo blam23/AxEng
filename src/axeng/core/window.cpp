@@ -1,3 +1,5 @@
+#include "axeng/core/render_profiler.h"
+#include "axeng/core/sprite_culling.h"
 #include "axeng/core/imgui_helper.h"
 #include "axeng/core/imgui_style.h"
 #include "axeng/core/log_timer.h"
@@ -145,6 +147,15 @@ ax::Window::~Window()
 	m_particleSystem.shutdown();
 	if (m_window)
 	{
+#ifdef _WIN32
+		// Remove the outer subclass before ImGui restores its inner WndProc and releases backend data.
+		const auto hwnd{ glfwGetWin32Window(m_window) };
+		{
+			std::lock_guard lock{ s_redirectMutex };
+			::RemoveWindowSubclass(hwnd, raw_windows_event, s_window_subclass_id);
+			s_redirectHandles.erase(hwnd);
+		}
+#endif
 		{
 			std::lock_guard lock{ s_windows_mutex };
 			s_windows.erase(m_window);
@@ -161,14 +172,6 @@ ax::Window::~Window()
 				}
 			}
 		}
-#ifdef _WIN32
-		const auto hwnd{ glfwGetWin32Window(m_window) };
-		{
-			std::lock_guard lock{ s_redirectMutex };
-			::RemoveWindowSubclass(hwnd, raw_windows_event, s_window_subclass_id);
-			s_redirectHandles.erase(hwnd);
-		}
-#endif
 		glfwDestroyWindow(m_window);
 	}
 
@@ -763,6 +766,12 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 
 	wgpu::DeviceDescriptor deviceDescriptor{};
 	deviceDescriptor.requiredLimits = &limits;
+	const auto timestampFeature{ wgpu::FeatureName::TimestampQuery };
+	if (m_adapter.HasFeature(timestampFeature))
+	{
+		deviceDescriptor.requiredFeatureCount = 1;
+		deviceDescriptor.requiredFeatures = &timestampFeature;
+	}
 
 	// Keeps compiled shaders between runs, so only the first run pays for compiling them.
 #ifndef __EMSCRIPTEN__
@@ -824,6 +833,7 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 	}
 
 	m_queue = m_device.GetQueue();
+	m_renderProfiler.initialize(m_device);
 
 	//
 	// Main Surface
@@ -907,18 +917,6 @@ void ax::Window::reload_pipeline()
 	pipelineDesc.multisample.mask = ~0u;
 	pipelineDesc.multisample.alphaToCoverageEnabled = false;
 
-	// SpriteGpuData matches the WGSL instance layout.
-	m_uniformStride = SpriteGpuData::gpuDataSize;
-	wgpu::BufferDescriptor bufferDesc{};
-	bufferDesc.size = static_cast<uint64_t>(m_uniformStride) * static_cast<uint64_t>(m_uniformsCapacity);
-	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
-	bufferDesc.mappedAtCreation = false;
-	bufferDesc.label = "SpriteBatch";
-	m_uniforms = m_device.CreateBuffer(&bufferDesc);
-	bufferDesc.size = static_cast<uint64_t>(SdfSpriteGpuData::gpuDataSize) * static_cast<uint64_t>(m_sdfUniformsCapacity);
-	bufferDesc.label = "SdfSpriteBatch";
-	m_sdfUniforms = m_device.CreateBuffer(&bufferDesc);
-
 	// Viewport
 	wgpu::BufferDescriptor vpDesc{};
 	vpDesc.size = 8 * sizeof(float);
@@ -937,27 +935,7 @@ void ax::Window::reload_pipeline()
 	// Bind Groups
 	//
 
-	auto bindGroupEntries{ std::vector<wgpu::BindGroupLayoutEntry>{ 3 } };
-
-	// Uniforms
-	bindGroupEntries[0].binding = 0;
-	bindGroupEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-	bindGroupEntries[0].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
-	// Ordinary and distance-field sprites bind buffers of different element sizes to the same layout.
-	bindGroupEntries[0].buffer.minBindingSize = 0;
-	bindGroupEntries[0].buffer.hasDynamicOffset = false;
-	
-
-	// Texture
-	bindGroupEntries[1].binding = 1;
-	bindGroupEntries[1].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-	bindGroupEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
-	bindGroupEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
-	
-	// Sampler
-	bindGroupEntries[2].binding = 2;
-	bindGroupEntries[2].visibility = wgpu::ShaderStage::Fragment;
-	bindGroupEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+	create_sprite_group_layouts();
 
 	// Viewport
 	auto globalEntries{ std::vector<wgpu::BindGroupLayoutEntry>{ 1 } };
@@ -970,12 +948,6 @@ void ax::Window::reload_pipeline()
 	// Layout
 	//
 	
-	// Group 0
-	wgpu::BindGroupLayoutDescriptor layoutDesc{};
-	layoutDesc.entryCount = bindGroupEntries.size();
-	layoutDesc.entries = bindGroupEntries.data();
-	m_groupLayout = m_device.CreateBindGroupLayout(&layoutDesc);
-
 	// Group 1
 	wgpu::BindGroupLayoutDescriptor globalLayoutDesc{};
 	globalLayoutDesc.entryCount = globalEntries.size();
@@ -983,11 +955,13 @@ void ax::Window::reload_pipeline()
 	m_globalLayout = m_device.CreateBindGroupLayout(&globalLayoutDesc);
 
 	// Bind em
-	wgpu::BindGroupLayout layouts[2] = { m_groupLayout, m_globalLayout };
+	wgpu::BindGroupLayout layouts[2] = { m_spriteGroupLayout, m_globalLayout };
 	wgpu::PipelineLayoutDescriptor pipelineLayoutDesc{};
 	pipelineLayoutDesc.bindGroupLayoutCount = 2;
 	pipelineLayoutDesc.bindGroupLayouts = layouts;
 	wgpu::PipelineLayout layout{ m_device.CreatePipelineLayout(&pipelineLayoutDesc) };
+	layouts[0] = m_groupLayout;
+	wgpu::PipelineLayout sdfLayout{ m_device.CreatePipelineLayout(&pipelineLayoutDesc) };
 
 	wgpu::BindGroupDescriptor vpBindDesc{};
 	vpBindDesc.layout = m_globalLayout;
@@ -1023,6 +997,7 @@ void ax::Window::reload_pipeline()
 
 	pipelineDesc.vertex.module = m_sdfShader;
 	fragmentState.module = m_sdfShader;
+	pipelineDesc.layout = sdfLayout;
 	m_sdfPipeline = m_device.CreateRenderPipeline(&pipelineDesc);
 	colorTarget.blend = &spriteBlend;
 	fragmentState.entryPoint = "fs_main";
@@ -1035,6 +1010,7 @@ void ax::Window::reload_pipeline()
 	fragmentState.entryPoint = "fs_opaque";
 	pipelineDesc.vertex.module = m_shader;
 	fragmentState.module = m_shader;
+	pipelineDesc.layout = layout;
 
 	ShapeRenderer::init(m_device, {
 		.colourFormat = m_surfaceFormat,
@@ -1068,9 +1044,11 @@ void ax::Window::reload_pipeline()
 	m_oitPipeline = m_device.CreateRenderPipeline(&pipelineDesc);
 	pipelineDesc.vertex.module = m_sdfShader;
 	fragmentState.module = m_sdfShader;
+	pipelineDesc.layout = sdfLayout;
 	m_sdfOitPipeline = m_device.CreateRenderPipeline(&pipelineDesc);
 	pipelineDesc.vertex.module = m_shader;
 	fragmentState.module = m_shader;
+	pipelineDesc.layout = layout;
 
 	wgpu::ShaderModuleDescriptor compositeShaderDesc{};
 	wgpu::ShaderSourceWGSL compositeShaderCodeDesc;
@@ -1147,8 +1125,21 @@ void ax::Window::create_composite_bind_group()
 	m_compositeBindGroup = m_device.CreateBindGroup(&bindGroupDesc);
 }
 
+std::uint64_t ax::Window::reserve_sprite_sequences(std::uint64_t count)
+{
+	auto next{ m_nextSpriteSequence.load(std::memory_order_relaxed) };
+	for (;;)
+	{
+		if (count > std::numeric_limits<std::uint64_t>::max() - next)
+			throw std::overflow_error("Sprite sequence space exhausted");
+		if (m_nextSpriteSequence.compare_exchange_weak(next, next + count, std::memory_order_relaxed))
+			return next;
+	}
+}
+
 ax::SpriteDefinition* ax::Window::allocate_sprite()
 {
+	const auto sequence{ reserve_sprite_sequences(1) };
 	SpriteDefinition* sprite;
 	if (m_freeSpriteSlots.empty())
 	{
@@ -1167,6 +1158,11 @@ ax::SpriteDefinition* ax::Window::allocate_sprite()
 	sprite->activeIndex = m_activeSprites.size() - 1;
 	sprite->allocated = true;
 	sprite->generation = ++m_spriteGeneration;
+	sprite->sequence = sequence;
+	sprite->previous = m_lastSprite;
+	if (m_lastSprite) m_lastSprite->next = sprite;
+	else m_firstSprite = sprite;
+	m_lastSprite = sprite;
 	return sprite;
 }
 
@@ -1251,7 +1247,8 @@ void ax::Window::stage_sprite_batches()
 		try
 		{
 			auto buffer{ upload_static_sprites(m_device, *batch->m_data, batch->m_atlasOffset) };
-			batch->m_bindGroup = setup_bind_groups(batch->m_texture->view(), buffer);
+			ensure_identity_indices(2048);
+				batch->m_bindGroup = setup_bind_groups(batch->m_texture->view(), buffer, m_identityIndices, false);
 			batch->m_buffer = std::move(buffer);
 			++m_staticUploads;
 		}
@@ -1269,6 +1266,12 @@ void ax::Window::free_sprite(SpriteDefinition* sprite)
 	if (!sprite || !sprite->allocated)
 		return;
 	const auto index{ sprite->activeIndex };
+	if (sprite->recordSlot != no_sprite_record)
+	{
+		// Queue writes follow every earlier submission, so the slot may be reused by the next frame's packing.
+		if (sprite->recordSdf) m_sdfStore.release(sprite->recordSlot);
+		else m_ordinaryStore.release(sprite->recordSlot);
+	}
 	if (sprite->group)
 	{
 		auto& members{ sprite->group->m_sprites };
@@ -1277,16 +1280,14 @@ void ax::Window::free_sprite(SpriteDefinition* sprite)
 		members.pop_back();
 	}
 
-	if (sprite->groupedTexture != nullptr)
-	{
-		auto group = m_spriteGroups.find(sprite->groupedTexture);
-		if (group != m_spriteGroups.end())
-			group->second.erase(std::remove(group->second.begin(), group->second.end(), sprite), group->second.end());
-	}
 
 	m_activeSprites.back()->activeIndex = index;
 	m_activeSprites[index] = m_activeSprites.back();
 	m_activeSprites.pop_back();
+	if (sprite->previous) sprite->previous->next = sprite->next;
+	else m_firstSprite = sprite->next;
+	if (sprite->next) sprite->next->previous = sprite->previous;
+	else m_lastSprite = sprite->previous;
 	*sprite = {};
 	m_freeSpriteSlots.push_back(sprite);
 	++m_spriteFrees;
@@ -1309,7 +1310,9 @@ void ax::Window::invalidate_texture_bind_group(Texture* texture)
 		return;
 
 	std::lock_guard lock{ m_textureBindGroupsMutex };
-	m_textureBindGroups.erase(texture);
+	const auto contains{ [texture](const auto& entry) { return std::ranges::find(entry.first, texture) != entry.first.end(); } };
+	std::erase_if(m_textureBindGroups, contains);
+	std::erase_if(m_pendingBindGroups, contains);
 }
 
 bool ax::Window::submit_pending_draw_batch(PendingDrawBatch batch)
@@ -1349,7 +1352,7 @@ wgpu::RenderPipeline ax::Window::setup_pending_pipeline(wgpu::TextureFormat form
 		return found->second;
 	const auto& shader{ distanceField ? m_sdfShader : m_shader };
 
-	wgpu::BindGroupLayout layouts[2]{ m_groupLayout, m_globalLayout };
+	wgpu::BindGroupLayout layouts[2]{ distanceField ? m_groupLayout : m_spriteGroupLayout, m_globalLayout };
 	wgpu::PipelineLayoutDescriptor layoutDesc{};
 	layoutDesc.bindGroupLayoutCount = 2;
 	layoutDesc.bindGroupLayouts = layouts;
@@ -1405,6 +1408,7 @@ wgpu::RenderPipeline ax::Window::setup_pending_pipeline(wgpu::TextureFormat form
 
 void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::TextureView& screenView)
 {
+	RenderCpuScope cpu{ RenderCategory::Pending };
 	const auto targetView{ batch.target != nullptr ? batch.target->view() : screenView };
 	const auto format{ batch.target != nullptr ? batch.target->texture().GetFormat() : m_surfaceFormat };
 	const auto width{ batch.target != nullptr ? batch.target->width() : m_width };
@@ -1457,7 +1461,7 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 		static_cast<float>(width), static_cast<float>(height), 0.f, 0.f,
 		m_camera.position().x, m_camera.position().y, m_camera.zoom(), 0.f,
 	};
-	m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
+	profiled_write_buffer(RenderCategory::Pending, m_queue, m_viewportBuffer, 0, vp, sizeof(vp));
 
 	wgpu::CommandEncoderDescriptor encoderDesc{};
 	encoderDesc.label = "pending draw encoder";
@@ -1470,7 +1474,7 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 	wgpu::RenderPassDescriptor passDesc{};
 	passDesc.colorAttachmentCount = 1;
 	passDesc.colorAttachments = &colorAttachment;
-	auto pass{ encoder.BeginRenderPass(&passDesc) };
+	auto pass{ profiled_render_pass(encoder, passDesc, "Pending") };
 
 	if (!sprites.empty())
 	{
@@ -1499,12 +1503,14 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 			else
 				m_spriteUploadData.push_back(sprite->tex->gpu_data_for(sprite->gpuData));
 		}
-		ensure_uniform_capacity(static_cast<uint32_t>(m_spriteUploadData.size()));
-		ensure_sdf_uniform_capacity(static_cast<uint32_t>(m_sdfUploadData.size()));
+		ensure_pending_capacity(static_cast<uint32_t>(m_spriteUploadData.size()), static_cast<uint32_t>(m_sdfUploadData.size()));
+		if (auto* profiler{ RenderProfiler::current() })
+			profiler->record_packed(RenderCategory::Pending, m_spriteUploadData.size() + m_sdfUploadData.size());
 		if (!m_spriteUploadData.empty())
-			m_queue.WriteBuffer(m_uniforms, 0, m_spriteUploadData.data(), m_spriteUploadData.size() * m_uniformStride);
+			profiled_write_buffer(RenderCategory::Pending, m_queue, m_pendingUniforms, 0, m_spriteUploadData.data(),
+				m_spriteUploadData.size() * SpriteGpuData::gpuDataSize);
 		if (!m_sdfUploadData.empty())
-			m_queue.WriteBuffer(m_sdfUniforms, 0, m_sdfUploadData.data(),
+			profiled_write_buffer(RenderCategory::Pending, m_queue, m_pendingSdfUniforms, 0, m_sdfUploadData.data(),
 				m_sdfUploadData.size() * SdfSpriteGpuData::gpuDataSize);
 
 		pass.SetBindGroup(1, m_viewportBindGroup);
@@ -1517,8 +1523,8 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 				pass.SetPipeline(setup_pending_pipeline(format, run.distanceField, run.screenSpace));
 				current = variant;
 			}
-			pass.SetBindGroup(0, get_texture_bind_group(run.tex));
-			pass.Draw(6, run.count, 0, run.first);
+			pass.SetBindGroup(0, get_pending_bind_group(run.tex));
+			profiled_draw(RenderCategory::Pending, pass, 6, run.count, 0, run.first);
 		}
 	}
 
@@ -1529,6 +1535,7 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 	wgpu::CommandBufferDescriptor commandDesc{};
 	commandDesc.label = "pending draw command buffer";
 	auto command{ encoder.Finish(&commandDesc) };
+	if (auto* profiler{ RenderProfiler::current() }) profiler->record_submit();
 	m_queue.Submit(1, &command);
 	if (batch.target != nullptr)
 		batch.target->m_gpuModified = true;
@@ -1537,6 +1544,7 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 void ax::Window::queue_texture(SpriteDefinition sprite)
 {
 	std::lock_guard lock{ m_pendingTextureMutex };
+	sprite.sequence = reserve_sprite_sequences(1);
 	m_queuedTextures.push_back(std::move(sprite));
 }
 
@@ -1549,8 +1557,12 @@ void ax::Window::render_textures(std::vector<SpriteDefinition> sprites)
 {
 	std::lock_guard lock{ m_pendingTextureMutex };
 	m_queuedTextures.reserve(m_queuedTextures.size() + sprites.size());
+	auto sequence{ reserve_sprite_sequences(sprites.size()) };
 	for (auto& sprite : sprites)
+	{
+		sprite.sequence = sequence++;
 		m_queuedTextures.push_back(std::move(sprite));
+	}
 }
 
 void ax::Window::render_texture(Texture* tex, glm::vec2 position, std::shared_ptr<Texture> keepAlive)
@@ -1875,44 +1887,130 @@ void ax::Window::redirect_input_to_child(ProcessId) {}
 void ax::Window::reset_input_redirection() {}
 #endif
 
-void ax::Window::ensure_uniform_capacity(uint32_t required)
+void ax::Window::ensure_identity_indices(uint32_t count)
 {
-	if (required <= m_uniformsCapacity)
+	if (m_identityIndices.Get() != nullptr && count <= m_identityCapacity)
 		return;
-
-	while (m_uniformsCapacity < required)
-		m_uniformsCapacity *= 2;
-
+	while (m_identityCapacity < count)
+		m_identityCapacity *= 2;
+	std::vector<uint32_t> indices(m_identityCapacity);
+	for (uint32_t i{}; i < m_identityCapacity; ++i)
+		indices[i] = i;
 	wgpu::BufferDescriptor bufferDesc{};
-	bufferDesc.size = static_cast<uint64_t>(m_uniformStride) * static_cast<uint64_t>(m_uniformsCapacity);
+	bufferDesc.size = static_cast<uint64_t>(m_identityCapacity) * sizeof(uint32_t);
 	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
-	bufferDesc.mappedAtCreation = false;
-	bufferDesc.label = "SpriteBatch";
-	m_uniforms = m_device.CreateBuffer(&bufferDesc);
-	{
-		std::lock_guard lock{ m_textureBindGroupsMutex };
-		m_textureBindGroups.clear();
-	}
+	bufferDesc.label = "SpriteIdentityIndices";
+	m_identityIndices = m_device.CreateBuffer(&bufferDesc);
+	m_queue.WriteBuffer(m_identityIndices, 0, indices.data(), bufferDesc.size);
+	std::lock_guard lock{ m_textureBindGroupsMutex };
+	m_pendingBindGroups.clear();
 }
 
-void ax::Window::ensure_sdf_uniform_capacity(uint32_t required)
+void ax::Window::ensure_pending_capacity(uint32_t ordinary, uint32_t sdf)
 {
-	if (required <= m_sdfUniformsCapacity)
-		return;
+	ensure_identity_indices((std::max)(ordinary, sdf));
+	const auto grow{ [this](wgpu::Buffer& buffer, uint32_t& capacity, uint32_t required, std::size_t stride, const char* label)
+	{
+		if (buffer.Get() != nullptr && required <= capacity)
+			return;
+		if (auto* profiler{ RenderProfiler::current() }) profiler->record_growth();
+		while (capacity < required)
+			capacity *= 2;
+		wgpu::BufferDescriptor bufferDesc{};
+		bufferDesc.size = static_cast<uint64_t>(stride) * capacity;
+		bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
+		bufferDesc.label = label;
+		buffer = m_device.CreateBuffer(&bufferDesc);
+		std::lock_guard lock{ m_textureBindGroupsMutex };
+		m_pendingBindGroups.clear();
+	} };
+	grow(m_pendingUniforms, m_pendingUniformsCapacity, ordinary, SpriteGpuData::gpuDataSize, "PendingSpriteBatch");
+	grow(m_pendingSdfUniforms, m_pendingSdfUniformsCapacity, sdf, SdfSpriteGpuData::gpuDataSize, "PendingSdfSpriteBatch");
+}
 
-	while (m_sdfUniformsCapacity < required)
-		m_sdfUniformsCapacity *= 2;
-
-	wgpu::BufferDescriptor bufferDesc{};
-	bufferDesc.size = static_cast<uint64_t>(SdfSpriteGpuData::gpuDataSize) * static_cast<uint64_t>(m_sdfUniformsCapacity);
-	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
-	bufferDesc.mappedAtCreation = false;
-	bufferDesc.label = "SdfSpriteBatch";
-	m_sdfUniforms = m_device.CreateBuffer(&bufferDesc);
+// Writes what changed this frame: dirty persistent records (nearby ones in one write), the transient records after them
+// and the visible-index list. A replacement buffer starts with every persistent record dirty, rewritten from the CPU
+// mirror, so growth never copies on the GPU. Buffers still referenced by encoded commands stay alive on their own.
+template<class Record>
+void ax::Window::upload_sprite_store(SpriteInstanceStore<Record>& store, const char* label)
+{
+	constexpr std::size_t stride{ sizeof(Record) };
+	const auto persistent{ store.persistent_count() };
+	const auto needed{ persistent + static_cast<uint32_t>(store.transient.size()) };
+	bool replaced{ false };
+	if (store.instances.Get() == nullptr || needed > store.capacity)
+	{
+		if (store.instances.Get() != nullptr)
+			if (auto* profiler{ RenderProfiler::current() }) profiler->record_growth();
+		while (store.capacity < needed)
+			store.capacity *= 2;
+		wgpu::BufferDescriptor bufferDesc{};
+		bufferDesc.size = static_cast<uint64_t>(stride) * store.capacity;
+		bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
+		bufferDesc.label = label;
+		store.instances = m_device.CreateBuffer(&bufferDesc);
+		store.allDirty = true;
+		replaced = true;
+	}
+	if (store.indexBuffer.Get() == nullptr || store.indices.size() > store.indexCapacity)
+	{
+		while (store.indexCapacity < store.indices.size())
+			store.indexCapacity *= 2;
+		wgpu::BufferDescriptor bufferDesc{};
+		bufferDesc.size = static_cast<uint64_t>(sizeof(uint32_t)) * store.indexCapacity;
+		bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
+		bufferDesc.label = "SpriteVisibleIndices";
+		store.indexBuffer = m_device.CreateBuffer(&bufferDesc);
+		replaced = true;
+	}
+	if (replaced)
 	{
 		std::lock_guard lock{ m_textureBindGroupsMutex };
 		m_textureBindGroups.clear();
 	}
+
+	if (store.allDirty)
+	{
+		if (persistent > 0)
+			profiled_write_buffer(RenderCategory::Sprites, m_queue, store.instances, 0, store.records.data(), persistent * stride);
+		std::ranges::fill(store.dirtyFlags, std::uint8_t{});
+		store.dirtyCount = 0;
+		store.allDirty = false;
+	}
+	else if (store.dirtyCount != 0)
+	{
+		// Scanning the flags yields the dirty slots in order, so nearby ones merge into one write.
+		constexpr std::uint32_t gap{ 32 };
+		std::uint32_t slot{};
+		while (slot < persistent)
+		{
+			if (store.dirtyFlags[slot] == 0)
+			{
+				++slot;
+				continue;
+			}
+			const auto begin{ slot };
+			auto end{ slot + 1 };
+			std::uint32_t scan{ end };
+			while (scan < persistent && scan - end <= gap)
+			{
+				if (store.dirtyFlags[scan] != 0)
+					end = scan + 1;
+				++scan;
+			}
+			std::fill(store.dirtyFlags.begin() + begin, store.dirtyFlags.begin() + end, std::uint8_t{});
+			profiled_write_buffer(RenderCategory::Sprites, m_queue, store.instances, static_cast<uint64_t>(begin) * stride,
+				store.records.data() + begin, static_cast<std::size_t>(end - begin) * stride);
+			slot = end;
+		}
+		store.dirtyCount = 0;
+	}
+	if (!store.transient.empty())
+		profiled_write_buffer(RenderCategory::Sprites, m_queue, store.instances, static_cast<uint64_t>(persistent) * stride,
+			store.transient.data(), store.transient.size() * stride);
+	if (!store.indices.empty())
+		profiled_write_buffer(RenderCategory::Sprites, m_queue, store.indexBuffer, 0, store.indices.data(),
+			store.indices.size() * sizeof(uint32_t));
 }
 
 glm::vec2 ax::Window::global_to_viewport(const glm::vec2& position) const
@@ -1946,48 +2044,141 @@ bool ax::Window::screen_contains_region(const glm::vec4& rect) const
 			&& transformedRect.y <= m_height;
 }
 
-wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view)
+void ax::Window::create_sprite_group_layouts()
 {
-	return setup_bind_groups(view, m_uniforms);
+	// Ordinary sprites: binding 0 holds the instances, 1 the first texture, 2 the sampler, 3 to 9 textures 1 to 7 and
+	// 10 the visible-index list. Distance fields bind one texture and put the index list at 3.
+	std::array<wgpu::BindGroupLayoutEntry, 3 + sprite_texture_slots> entries{};
+	entries[0].binding = 0;
+	entries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+	entries[0].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+	// Ordinary and distance-field sprites bind buffers of different element sizes.
+	entries[0].buffer.minBindingSize = 0;
+	entries[0].buffer.hasDynamicOffset = false;
+	for (std::uint32_t slot{}; slot < sprite_texture_slots; ++slot)
+	{
+		const std::uint32_t binding{ slot == 0 ? 1u : 2u + slot };
+		auto& texture{ entries[binding] };
+		texture.binding = binding;
+		texture.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+		texture.texture.sampleType = wgpu::TextureSampleType::Float;
+		texture.texture.viewDimension = wgpu::TextureViewDimension::e2D;
+	}
+	entries[2].binding = 2;
+	entries[2].visibility = wgpu::ShaderStage::Fragment;
+	entries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+	auto& visible{ entries[2 + sprite_texture_slots] };
+	visible.binding = 2 + sprite_texture_slots;
+	visible.visibility = wgpu::ShaderStage::Vertex;
+	visible.buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+	visible.buffer.minBindingSize = 0;
+
+	wgpu::BindGroupLayoutDescriptor desc{};
+	desc.entryCount = entries.size();
+	desc.entries = entries.data();
+	m_spriteGroupLayout = m_device.CreateBindGroupLayout(&desc);
+
+	std::array<wgpu::BindGroupLayoutEntry, 4> sdfEntries{ entries[0], entries[1], entries[2], visible };
+	sdfEntries[3].binding = 3;
+	desc.entryCount = sdfEntries.size();
+	desc.entries = sdfEntries.data();
+	m_groupLayout = m_device.CreateBindGroupLayout(&desc);
 }
 
-wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view, const wgpu::Buffer& buffer)
+wgpu::BindGroup ax::Window::setup_bind_groups(const wgpu::TextureView& view, const wgpu::Buffer& instances,
+	const wgpu::Buffer& indices, bool distanceField)
 {
-	auto bindGroups{ std::vector<wgpu::BindGroupEntry>{ 3 } };
+	std::array<wgpu::TextureView, sprite_texture_slots> views{};
+	views.fill(view);
+	return setup_sprite_bind_group(views, instances, indices, distanceField);
+}
 
-	// Uniforms
-	bindGroups[0].binding = 0;
-	bindGroups[0].buffer = buffer;
-	bindGroups[0].offset = 0;
-	bindGroups[0].size = buffer.GetSize();
-
-	// Texture
-	bindGroups[1].binding = 1;
-	bindGroups[1].textureView = view;
-
-	// Sampler
-	bindGroups[2].binding = 2;
-	bindGroups[2].sampler = m_linearSampler;
+wgpu::BindGroup ax::Window::setup_sprite_bind_group(const std::array<wgpu::TextureView, sprite_texture_slots>& views,
+	const wgpu::Buffer& instances, const wgpu::Buffer& indices, bool distanceField)
+{
+	std::array<wgpu::BindGroupEntry, 3 + sprite_texture_slots> entries{};
+	entries[0].binding = 0;
+	entries[0].buffer = instances;
+	entries[0].offset = 0;
+	entries[0].size = instances.GetSize();
+	entries[1].binding = 1;
+	entries[1].textureView = views[0];
+	entries[2].binding = 2;
+	entries[2].sampler = m_linearSampler;
+	std::size_t count{ 3 };
+	if (distanceField)
+	{
+		entries[3].binding = 3;
+		entries[3].buffer = indices;
+		entries[3].size = indices.GetSize();
+		count = 4;
+	}
+	else
+	{
+		for (std::uint32_t slot{ 1 }; slot < sprite_texture_slots; ++slot)
+		{
+			entries[2 + slot].binding = 2 + slot;
+			entries[2 + slot].textureView = views[slot];
+		}
+		auto& visible{ entries[2 + sprite_texture_slots] };
+		visible.binding = 2 + sprite_texture_slots;
+		visible.buffer = indices;
+		visible.size = indices.GetSize();
+		count = entries.size();
+	}
 
 	wgpu::BindGroupDescriptor bindGroupDesc{};
-	bindGroupDesc.layout = m_groupLayout;
-	bindGroupDesc.entryCount = bindGroups.size();
-	bindGroupDesc.entries = bindGroups.data();
-	wgpu::BindGroup binds = m_device.CreateBindGroup(&bindGroupDesc);
-	return binds;
+	bindGroupDesc.layout = distanceField ? m_groupLayout : m_spriteGroupLayout;
+	bindGroupDesc.entryCount = count;
+	bindGroupDesc.entries = entries.data();
+	return m_device.CreateBindGroup(&bindGroupDesc);
 }
 
 wgpu::BindGroup ax::Window::get_texture_bind_group(Texture* texture)
 {
 	if (texture == nullptr)
 		return {};
+	TextureSet set{};
+	set.fill(texture);
+	return get_texture_bind_group(set);
+}
+
+wgpu::BindGroup ax::Window::get_texture_bind_group(const TextureSet& textures)
+{
+	if (textures[0] == nullptr)
+		return {};
 
 	std::lock_guard lock{ m_textureBindGroupsMutex };
-	if (const auto it{ m_textureBindGroups.find(texture) }; it != m_textureBindGroups.end())
+	if (const auto it{ m_textureBindGroups.find(textures) }; it != m_textureBindGroups.end())
 		return it->second;
 
-	auto bindGroup{ setup_bind_groups(texture->view(), texture->distance_field() ? m_sdfUniforms : m_uniforms) };
-	m_textureBindGroups.emplace(texture, bindGroup);
+	// Sets depend on what is on screen, so bound the cache. Bind groups in encoded commands outlive their entry.
+	if (m_textureBindGroups.size() >= 512)
+		m_textureBindGroups.clear();
+	const bool distanceField{ textures[0]->distance_field() };
+	std::array<wgpu::TextureView, sprite_texture_slots> views{};
+	for (std::size_t slot{}; slot < views.size(); ++slot)
+		views[slot] = textures[slot]->view();
+	auto bindGroup{ distanceField
+		? setup_sprite_bind_group(views, m_sdfStore.instances, m_sdfStore.indexBuffer, true)
+		: setup_sprite_bind_group(views, m_ordinaryStore.instances, m_ordinaryStore.indexBuffer, false) };
+	m_textureBindGroups.emplace(textures, bindGroup);
+	return bindGroup;
+}
+
+wgpu::BindGroup ax::Window::get_pending_bind_group(Texture* texture)
+{
+	if (texture == nullptr)
+		return {};
+	TextureSet set{};
+	set.fill(texture);
+	if (const auto it{ m_pendingBindGroups.find(set) }; it != m_pendingBindGroups.end())
+		return it->second;
+	if (m_pendingBindGroups.size() >= 512)
+		m_pendingBindGroups.clear();
+	auto bindGroup{ setup_bind_groups(texture->view(), texture->distance_field() ? m_pendingSdfUniforms : m_pendingUniforms,
+		m_identityIndices, texture->distance_field()) };
+	m_pendingBindGroups.emplace(set, bindGroup);
 	return bindGroup;
 }
 
@@ -2335,6 +2526,12 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		create_surfaces();
 		return false;
 	}
+	m_renderProfiler.begin_frame();
+	struct ProfileFrame
+	{
+		RenderProfiler& profiler;
+		~ProfileFrame() { profiler.end_frame(); }
+	} profileFrame{ m_renderProfiler };
 	{
 		ZoneScopedN("Window::pre-render");
 
@@ -2440,7 +2637,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			static_cast<float>(m_width), static_cast<float>(m_height), 0.f, 0.f,
 			m_camera.position().x, m_camera.position().y, m_camera.zoom(), 0.f,
 		};
-		m_queue.WriteBuffer(m_viewportBuffer, 0, vp, sizeof(vp));
+		profiled_write_buffer(RenderCategory::Sprites, m_queue, m_viewportBuffer, 0, vp, sizeof(vp));
 		ShapeRenderer::init(m_device, {
 			.colourFormat = m_surfaceFormat,
 			.depthFormat = m_depthTextureFormat,
@@ -2520,7 +2717,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			passDesc.colorAttachmentCount = 1;
 			passDesc.colorAttachments = &colorAttachment;
 			passDesc.depthStencilAttachment = &depthAttachment;
-			return encoder.BeginRenderPass(&passDesc);
+			return profiled_render_pass(encoder, passDesc, clear ? "Scene" : "Scene continuation");
 		} };
 
 		// Transparent sprites (and, with the lit sprites, particles) accumulate order independently and are then
@@ -2564,7 +2761,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			oitPassDesc.colorAttachmentCount = 2;
 			oitPassDesc.colorAttachments = oitColorAttachments;
 			oitPassDesc.depthStencilAttachment = &oitDepthAttachment;
-			auto oitPass = encoder.BeginRenderPass(&oitPassDesc);
+			auto oitPass = profiled_render_pass(encoder, oitPassDesc, layer == SpriteLayer::Unlit ? "OIT unlit" : "OIT world");
 			draw_transparent_sprites(oitPass, layer);
 			if (layer != SpriteLayer::Unlit)
 				m_particleSystem.draw(oitPass);
@@ -2584,10 +2781,10 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			wgpu::RenderPassDescriptor compositePassDesc{};
 			compositePassDesc.colorAttachmentCount = 1;
 			compositePassDesc.colorAttachments = &compositeColorAttachment;
-			auto compositePass = encoder.BeginRenderPass(&compositePassDesc);
+			auto compositePass = profiled_render_pass(encoder, compositePassDesc, layer == SpriteLayer::Unlit ? "Composite unlit" : "Composite world");
 			compositePass.SetPipeline(m_compositePipeline);
 			compositePass.SetBindGroup(0, m_compositeBindGroup);
-			compositePass.Draw(3, 1, 0, 0);
+			profiled_draw(RenderCategory::Sprites, compositePass, 3, 1, 0, 0);
 			compositePass.End();
 			}
 		} };
@@ -2621,7 +2818,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			overlayPassDesc.colorAttachmentCount = 1;
 			overlayPassDesc.colorAttachments = &overlayColorAttachment;
 			overlayPassDesc.depthStencilAttachment = &overlayDepthAttachment;
-			auto overlayPass = encoder.BeginRenderPass(&overlayPassDesc);
+			auto overlayPass = profiled_render_pass(encoder, overlayPassDesc, "Overlay");
 			ShapeRenderer::draw(overlayPass, shapes);
 			overlayPass.End();
 		} };
@@ -2722,7 +2919,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			materialDesc.colorAttachmentCount = 1;
 			materialDesc.colorAttachments = &materialColour;
 			materialDesc.depthStencilAttachment = &materialDepth;
-			auto materialPass = encoder.BeginRenderPass(&materialDesc);
+			auto materialPass = profiled_render_pass(encoder, materialDesc, "Screen materials");
 			drawMaterials(materialPass, MaterialPass::Screen);
 			materialPass.End();
 		}
@@ -2811,7 +3008,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			interfaceDesc.colorAttachmentCount = 1;
 			interfaceDesc.colorAttachments = &interfaceColour;
 			interfaceDesc.depthStencilAttachment = &interfaceDepth;
-			auto interfacePass{ encoder.BeginRenderPass(&interfaceDesc) };
+			auto interfacePass{ profiled_render_pass(encoder, interfaceDesc, "Interface") };
 			drawMaterials(interfacePass, MaterialPass::Backdrop);
 			for (const auto& call : m_interfaceShapes.calls())
 				ShapeRenderer::draw(interfacePass, call);
@@ -2848,7 +3045,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		uiPassDesc.colorAttachmentCount = 1;
 		uiPassDesc.colorAttachments = &uiColorAttachment;
 		uiPassDesc.depthStencilAttachment = &uiDepthAttachment;
-		auto uiPass = encoder.BeginRenderPass(&uiPassDesc);
+		auto uiPass = profiled_render_pass(encoder, uiPassDesc, "UI");
 		{
 			ZoneScopedN("Window::ui");
 			render_gui(uiPass, delta);
@@ -2871,6 +3068,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			}
 			{
 				ZoneScopedN("Window::queue-submit");
+				if (auto* profiler{ RenderProfiler::current() }) profiler->record_submit();
 				m_queue.Submit(1, &command);
 			}
 
@@ -2900,6 +3098,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				wgpu::CommandBufferDescriptor copyBufferDesc{};
 				copyBufferDesc.label = "frame image copy command";
 				auto copyCommand{ copyEncoder.Finish(&copyBufferDesc) };
+				if (auto* profiler{ RenderProfiler::current() }) profiler->record_submit();
 				m_queue.Submit(1, &copyCommand);
 				frameImageCopyQueued = true;
 			}
@@ -2966,137 +3165,160 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 
 	{
 		ZoneScopedN("Window::sprite-batch");
-
-		// Group sprite records by texture so we can issue one instanced draw per texture.
+		RenderCpuScope cpu{ RenderCategory::Sprites };
+		// One pass culls, classifies and emits. Retained sprites own persistent records that are repacked only when their
+		// authored fields change; queued sprites pack into transient records. Each layer builds its own index lists
+		// (queued entries first, then retained, which is draw order) and ranges, which are then joined per format.
+		m_litIndices.clear();
+		m_unlitIndices.clear();
+		m_screenSpaceIndices.clear();
+		m_ordinaryStore.transient.clear();
+		m_sdfStore.transient.clear();
+		m_ordinaryStore.indices.clear();
+		m_sdfStore.indices.clear();
+		m_spriteGroupRanges.clear();
+		m_unlitSpriteGroupRanges.clear();
+		m_screenSpaceSpriteGroupRanges.clear();
+		const SpriteCuller culler{ { static_cast<float>(m_width), static_cast<float>(m_height) },
+			m_camera.position(), m_camera.zoom() };
+		std::size_t repacked{};
+		const auto emit{ [](SpriteLayerIndices& layer, std::vector<SpriteGroupRange>& ranges, Texture* tex,
+			std::uint32_t record, bool transient)
 		{
-			ZoneScopedN("Window::sprite-grouping");
-			m_spriteGroupRanges.clear();
-			m_unlitSpriteGroupRanges.clear();
-			m_screenSpaceSpriteGroupRanges.clear();
-			for (auto* sprite : m_activeSprites)
+			if (tex->distance_field())
 			{
-				if (sprite->tex == sprite->groupedTexture)
-					continue;
-
-				if (sprite->groupedTexture != nullptr)
-				{
-					auto& oldGroup = m_spriteGroups[sprite->groupedTexture];
-					oldGroup.erase(std::remove(oldGroup.begin(), oldGroup.end(), sprite), oldGroup.end());
-				}
-
-				sprite->groupedTexture = sprite->tex;
-				if (sprite->tex != nullptr)
-					m_spriteGroups[sprite->tex].push_back(sprite);
-			}
-
-			for (auto& group : m_pendingSpriteGroups)
-				group.second.clear();
-			for (const auto& sprite : m_pendingTextures)
-				if (sprite.tex != nullptr)
-					m_pendingSpriteGroups[sprite.tex].push_back(&sprite);
-
-		}
-
-		size_t spriteCount = 0;
-		size_t sdfSpriteCount = 0;
-		// Groups of destroyed textures linger empty, so only a group with sprites may touch its texture.
-		const auto countGroups = [&](const auto& groups)
-		{
-			for (const auto& group : groups)
-				if (!group.second.empty())
-					(group.first->distance_field() ? sdfSpriteCount : spriteCount) += group.second.size();
-		};
-		countGroups(m_spriteGroups);
-		countGroups(m_pendingSpriteGroups);
-
-		ensure_uniform_capacity(static_cast<uint32_t>(spriteCount));
-		ensure_sdf_uniform_capacity(static_cast<uint32_t>(sdfSpriteCount));
-		m_spriteGroupRanges.reserve(m_spriteGroups.size());
-		m_screenSpaceSpriteGroupRanges.reserve(m_spriteGroups.size());
-		m_spriteUploadData.reserve(spriteCount);
-
-		uint32_t instanceCursor = 0;
-		uint32_t sdfInstanceCursor = 0;
-		auto uploadGroup = [this, &instanceCursor, &sdfInstanceCursor, splitUnlit](Texture* tex, const std::vector<const SpriteDefinition*>& activeSprites, const std::vector<const SpriteDefinition*>* pendingSprites)
-		{
-			ZoneScopedN("Window::sprite-upload-group");
-			m_spriteUploadSources.clear();
-			if (pendingSprites != nullptr)
-				for (const auto* sprite : *pendingSprites)
-					m_spriteUploadSources.push_back(sprite);
-			for (const auto* sprite : activeSprites)
-				if (!sprite->group || sprite->group->visible())
-					m_spriteUploadSources.push_back(sprite);
-
-			if (m_spriteUploadSources.empty())
-				return;
-
-			// Keep screen-space sprites after scene rendering even when no lighting split is active.
-			m_litUploadScratch.clear();
-			m_unlitUploadScratch.clear();
-			m_screenSpaceUploadScratch.clear();
-			for (const auto* sprite : m_spriteUploadSources)
-			{
-				if (sprite->gpuData.screenSpace != 0)
-					m_screenSpaceUploadScratch.push_back(sprite);
-				else if (splitUnlit && sprite_unlit(sprite->gpuData))
-					m_unlitUploadScratch.push_back(sprite);
+				// Distance fields bind one texture, so each change of texture starts a range.
+				if (!ranges.empty() && ranges.back().distanceField && ranges.back().textures[0] == tex)
+					++ranges.back().count;
 				else
-					m_litUploadScratch.push_back(sprite);
-			}
-
-			const bool distanceField{ tex->distance_field() };
-			auto& cursor{ distanceField ? sdfInstanceCursor : instanceCursor };
-			m_spriteUploadData.clear();
-			m_sdfUploadData.clear();
-			const auto append = [&](const std::vector<const SpriteDefinition*>& sprites,
-				std::vector<SpriteGroupRange>& ranges)
-			{
-				if (sprites.empty())
-					return;
-				ranges.push_back({ tex, cursor + static_cast<uint32_t>(distanceField ? m_sdfUploadData.size() : m_spriteUploadData.size()),
-					static_cast<uint32_t>(sprites.size()), distanceField });
-				for (const auto* sprite : sprites)
 				{
-					if (distanceField)
-						m_sdfUploadData.push_back(tex->sdf_gpu_data_for(*sprite));
-					else
-						m_spriteUploadData.push_back(tex->gpu_data_for(sprite->gpuData));
+					ranges.push_back({ {}, 1, static_cast<std::uint32_t>(layer.sdf.size()), 1, true });
+					ranges.back().textures.fill(tex);
 				}
-			};
-			append(m_litUploadScratch, m_spriteGroupRanges);
-			append(m_unlitUploadScratch, m_unlitSpriteGroupRanges);
-			append(m_screenSpaceUploadScratch, m_screenSpaceSpriteGroupRanges);
-
-			if (distanceField)
+				layer.sdf.push_back(record);
+				if (transient) ++layer.sdfTransient;
+				return;
+			}
+			// A range grows over consecutive sprites until they need more textures than a bind group holds, so
+			// draw order never changes and textures need not be sorted.
+			std::uint32_t slot{};
+			bool extend{ !ranges.empty() && !ranges.back().distanceField };
+			if (extend)
 			{
-				m_queue.WriteBuffer(m_sdfUniforms, static_cast<uint64_t>(cursor) * SdfSpriteGpuData::gpuDataSize,
-					m_sdfUploadData.data(), m_sdfUploadData.size() * SdfSpriteGpuData::gpuDataSize);
-				cursor += static_cast<uint32_t>(m_sdfUploadData.size());
+				const auto& last{ ranges.back() };
+				while (slot < last.textureCount && last.textures[slot] != tex) ++slot;
+				if (slot == last.textureCount && last.textureCount == sprite_texture_slots)
+					extend = false;
+			}
+			if (!extend)
+			{
+				ranges.push_back({ {}, 1, static_cast<std::uint32_t>(layer.ordinary.size()), 0, false });
+				ranges.back().textures.fill(tex);
+				slot = 0;
+			}
+			else if (auto& last{ ranges.back() }; slot == last.textureCount)
+			{
+				for (auto i{ slot }; i < sprite_texture_slots; ++i) last.textures[i] = tex;
+				++last.textureCount;
+			}
+			++ranges.back().count;
+			layer.ordinary.push_back(record | slot << sprite_index_slot_shift);
+			if (transient) ++layer.ordinaryTransient;
+		} };
+		// Returns the sprite's persistent record, repacking it first if anything it was built from has changed.
+		const auto retain{ [&repacked](auto& store, SpriteDefinition& sprite, bool sdf)
+		{
+			using Record = std::decay_t<decltype(store.records.front())>;
+			std::uint32_t slot{ sprite.recordSlot };
+			bool changed{ false };
+			if (slot != no_sprite_record && sprite.recordSdf != sdf)
+				slot = no_sprite_record;
+			if (slot == no_sprite_record)
+			{
+				slot = store.acquire();
+				sprite.recordSlot = slot;
+				sprite.recordSdf = sdf;
+				changed = true;
 			}
 			else
+				changed = !store.shadows[slot].matches(sprite);
+			if (changed)
 			{
-				m_queue.WriteBuffer(m_uniforms, static_cast<uint64_t>(cursor) * m_uniformStride,
-					m_spriteUploadData.data(), m_spriteUploadData.size() * m_uniformStride);
-				cursor += static_cast<uint32_t>(m_spriteUploadData.size());
+				store.shadows[slot].assign(sprite);
+				if constexpr (std::is_same_v<Record, SdfSpriteGpuData>)
+					store.records[slot] = sprite.tex->sdf_gpu_data_for(sprite);
+				else
+					store.records[slot] = sprite.tex->gpu_data_for(sprite.gpuData);
+				store.mark_dirty(slot);
+				++repacked;
 			}
-		};
-
-		for (const auto& group : m_spriteGroups)
+			return slot;
+		} };
+		const auto visit{ [&](SpriteDefinition& sprite, bool queued)
 		{
-			auto pendingGroup = m_pendingSpriteGroups.find(group.first);
-			uploadGroup(group.first, group.second, pendingGroup == m_pendingSpriteGroups.end() ? nullptr : &pendingGroup->second);
-		}
-		static const std::vector<const SpriteDefinition*> emptyGroup;
-		for (const auto& group : m_pendingSpriteGroups)
-		{
-			if (m_spriteGroups.find(group.first) == m_spriteGroups.end())
-				uploadGroup(group.first, emptyGroup, &group.second);
-		}
+			if (!sprite.tex) return;
+			if (!culler.visible(sprite.gpuData, sprite.tex->width(), sprite.tex->height())) return;
+			Texture* const tex{ sprite.tex };
+			const bool sdf{ tex->distance_field() };
+			auto& layer{ sprite.gpuData.screenSpace != 0 ? m_screenSpaceIndices
+				: splitUnlit && sprite_unlit(sprite.gpuData) ? m_unlitIndices : m_litIndices };
+			auto& ranges{ sprite.gpuData.screenSpace != 0 ? m_screenSpaceSpriteGroupRanges
+				: splitUnlit && sprite_unlit(sprite.gpuData) ? m_unlitSpriteGroupRanges : m_spriteGroupRanges };
+			if (!queued && sprite.recordSlot != no_sprite_record && sprite.recordSdf != sdf)
+			{
+				// A texture change to the other format moves the sprite to that format's store.
+				if (sprite.recordSdf) m_sdfStore.release(sprite.recordSlot);
+				else m_ordinaryStore.release(sprite.recordSlot);
+				sprite.recordSlot = no_sprite_record;
+			}
+			std::uint32_t record;
+			if (queued)
+			{
+				if (sdf)
+				{
+					record = static_cast<std::uint32_t>(m_sdfStore.transient.size());
+					m_sdfStore.transient.push_back(tex->sdf_gpu_data_for(sprite));
+				}
+				else
+				{
+					record = static_cast<std::uint32_t>(m_ordinaryStore.transient.size());
+					m_ordinaryStore.transient.push_back(tex->gpu_data_for(sprite.gpuData));
+				}
+				++repacked;
+			}
+			else
+				record = sdf ? retain(m_sdfStore, sprite, true) : retain(m_ordinaryStore, sprite, false);
+			emit(layer, ranges, tex, record, queued);
+		} };
+		for (auto& sprite : m_pendingTextures) visit(sprite, true);
+		for (auto* sprite{ m_firstSprite }; sprite; sprite = sprite->next)
+			if (!sprite->group || sprite->group->visible()) visit(*sprite, false);
 
+		// Join the layers. Transient records follow the persistent ones, whose count is final only now.
+		const auto ordinaryPersistent{ m_ordinaryStore.persistent_count() };
+		const auto sdfPersistent{ m_sdfStore.persistent_count() };
+		const auto join{ [&](SpriteLayerIndices& layer, std::vector<SpriteGroupRange>& ranges)
+		{
+			const auto ordinaryBase{ static_cast<std::uint32_t>(m_ordinaryStore.indices.size()) };
+			const auto sdfBase{ static_cast<std::uint32_t>(m_sdfStore.indices.size()) };
+			for (auto& range : ranges)
+				range.start += range.distanceField ? sdfBase : ordinaryBase;
+			for (std::uint32_t i{}; i < layer.ordinaryTransient; ++i)
+				layer.ordinary[i] += ordinaryPersistent;
+			for (std::uint32_t i{}; i < layer.sdfTransient; ++i)
+				layer.sdf[i] += sdfPersistent;
+			m_ordinaryStore.indices.insert(m_ordinaryStore.indices.end(), layer.ordinary.begin(), layer.ordinary.end());
+			m_sdfStore.indices.insert(m_sdfStore.indices.end(), layer.sdf.begin(), layer.sdf.end());
+		} };
+		join(m_litIndices, m_spriteGroupRanges);
+		join(m_unlitIndices, m_unlitSpriteGroupRanges);
+		join(m_screenSpaceIndices, m_screenSpaceSpriteGroupRanges);
+		upload_sprite_store(m_ordinaryStore, "SpriteBatch");
+		upload_sprite_store(m_sdfStore, "SdfSpriteBatch");
+		if (auto* profiler{ RenderProfiler::current() })
+			profiler->record_packed(RenderCategory::Sprites, repacked);
 		draw_sprite_batches(pass, m_pipeline, m_sdfPipeline, splitUnlit ? SpriteLayer::Lit : SpriteLayer::All);
 	}
-
 }
 
 
@@ -3114,27 +3336,21 @@ void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::
 			|| (layer == SpriteLayer::Lit && batch->unlit()) || (layer == SpriteLayer::Unlit && !batch->unlit()))
 			continue;
 		pass.SetBindGroup(0, batch->m_bindGroup);
-		pass.Draw(6, static_cast<std::uint32_t>(batch->size()));
+		profiled_draw(RenderCategory::Sprites, pass, 6, static_cast<std::uint32_t>(batch->size()));
 	}
 	const auto& ranges{ layer == SpriteLayer::Unlit ? m_unlitSpriteGroupRanges
 		: layer == SpriteLayer::ScreenSpace ? m_screenSpaceSpriteGroupRanges : m_spriteGroupRanges };
-	// Distance-field ranges follow the ordinary ones; depth decides the order between them.
-	for (const auto distanceField : { false, true })
+	bool currentDistanceField{};
+	for (const auto& range : ranges)
 	{
-		bool pipelineSet{};
-		for (const auto& range : ranges)
+		if (range.distanceField != currentDistanceField)
 		{
-			if (range.distanceField != distanceField)
-				continue;
-			if (!pipelineSet)
-			{
-				pass.SetPipeline(distanceField ? sdfPipeline : pipeline);
-				pass.SetBindGroup(1, m_viewportBindGroup);
-				pipelineSet = true;
-			}
-			pass.SetBindGroup(0, get_texture_bind_group(range.tex));
-			pass.Draw(6, range.count, 0, range.start);
+			pass.SetPipeline(range.distanceField ? sdfPipeline : pipeline);
+			pass.SetBindGroup(1, m_viewportBindGroup);
+			currentDistanceField = range.distanceField;
 		}
+		pass.SetBindGroup(0, get_texture_bind_group(range.textures));
+		profiled_draw(RenderCategory::Sprites, pass, 6, range.count, 0, range.start);
 	}
 }
 

@@ -23,6 +23,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <limits>
 #include <numbers>
 #include <string>
 #include <thread>
@@ -102,32 +103,12 @@ namespace ax
 			window.m_queue = device.GetQueue();
 			window.m_surfaceFormat = wgpu::TextureFormat::RGBA8Unorm;
 
-			wgpu::BufferDescriptor uniformDesc{};
-			uniformDesc.size = static_cast<uint64_t>(window.m_uniformStride) * window.m_uniformsCapacity;
-			uniformDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
-			window.m_uniforms = device.CreateBuffer(&uniformDesc);
-
 			wgpu::BufferDescriptor viewportDesc{};
 			viewportDesc.size = 8 * sizeof(float);
 			viewportDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
 			window.m_viewportBuffer = device.CreateBuffer(&viewportDesc);
 
-			std::array<wgpu::BindGroupLayoutEntry, 3> spriteEntries{};
-			spriteEntries[0].binding = 0;
-			spriteEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-			spriteEntries[0].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
-			spriteEntries[0].buffer.minBindingSize = ax::SpriteGpuData::gpuDataSize;
-			spriteEntries[1].binding = 1;
-			spriteEntries[1].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-			spriteEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
-			spriteEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
-			spriteEntries[2].binding = 2;
-			spriteEntries[2].visibility = wgpu::ShaderStage::Fragment;
-			spriteEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
-			wgpu::BindGroupLayoutDescriptor spriteLayoutDesc{};
-			spriteLayoutDesc.entryCount = spriteEntries.size();
-			spriteLayoutDesc.entries = spriteEntries.data();
-			window.m_groupLayout = device.CreateBindGroupLayout(&spriteLayoutDesc);
+			window.create_sprite_group_layouts();
 
 			wgpu::BindGroupLayoutEntry viewportEntry{};
 			viewportEntry.binding = 0;
@@ -194,6 +175,42 @@ namespace ax
 			for (const auto& batch : window.m_pendingDrawBatches)
 				window.draw_pending_batch(batch, screenView);
 			window.m_pendingDrawBatches.clear();
+		}
+		static void draw_sprites(Window& window, wgpu::RenderPassEncoder& pass)
+		{
+			window.m_pendingTextures.swap(window.m_queuedTextures);
+			window.m_queuedTextures.clear();
+			const float viewport[]{ static_cast<float>(s_size), static_cast<float>(s_size), 0, 0,
+				window.m_camera.position().x, window.m_camera.position().y, window.m_camera.zoom(), 0 };
+			window.m_queue.WriteBuffer(window.m_viewportBuffer, 0, viewport, sizeof(viewport));
+			window.handle_render_pass(pass, 0.0, false);
+			window.draw_sprite_batches(pass, window.m_screenSpacePipeline, window.m_sdfScreenSpacePipeline,
+				Window::SpriteLayer::ScreenSpace);
+		}
+		static void initialize_sprite_pipeline(Window& window, const wgpu::Device& device)
+		{
+			initialize(window, device);
+			wgpu::TextureDescriptor desc{};
+			desc.size = { s_size, s_size };
+			desc.sampleCount = window.m_sampleCount;
+			desc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
+			desc.format = wgpu::TextureFormat::RGBA16Float;
+			window.m_oitAccumulationTexture = device.CreateTexture(&desc);
+			window.m_oitAccumulationView = window.m_oitAccumulationTexture.CreateView();
+			desc.format = wgpu::TextureFormat::R8Unorm;
+			window.m_oitRevealageTexture = device.CreateTexture(&desc);
+			window.m_oitRevealageView = window.m_oitRevealageTexture.CreateView();
+			window.reload_pipeline();
+		}
+		static void exhaust_sequences(Window& window)
+		{
+			window.m_nextSpriteSequence.store(std::numeric_limits<std::uint64_t>::max());
+		}
+		static std::vector<std::uint64_t> queued_sequences(const Window& window)
+		{
+			std::vector<std::uint64_t> result;
+			for (const auto& sprite : window.m_queuedTextures) result.push_back(sprite.sequence);
+			return result;
 		}
 
 		static WindowFrameImageEvent compare_texture(Window& window, Texture& reference)
@@ -411,6 +428,276 @@ protected:
 //
 // Rectangles
 //
+
+class SpriteOrderTest : public ShapeRendererTest
+{
+protected:
+	void SetUp() override
+	{
+		ShapeRendererTest::SetUp();
+		if (!s_device) return;
+		ASSERT_TRUE(ax::setup_glfw());
+		glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+	}
+	void TearDown() override
+	{
+		ax::teardown_glfw();
+		ShapeRendererTest::TearDown();
+	}
+	static ax::SpriteDefinition* add(ax::Window& window, ax::Texture* texture, glm::vec4 tint, bool screen = false)
+	{
+		auto* sprite{ window.allocate_sprite() };
+		sprite->tex = texture;
+		sprite->gpuData.pos = screen ? glm::vec2{ 8.0f } : glm::vec2{ 0.0f };
+		sprite->gpuData.scale = { 16.0f, 16.0f };
+		sprite->gpuData.tint = tint;
+		sprite->gpuData.screenSpace = screen ? 1u : 0u;
+		return sprite;
+	}
+	static Image draw(ax::Window& window)
+	{
+		return render_pass([&window](wgpu::RenderPassEncoder& pass) { ax::WindowTestAccess::draw_sprites(window, pass); });
+	}
+};
+
+TEST_F(SpriteOrderTest, AllocationSequenceWinsAcrossTexturesFormatsDeletionAndTransfer)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+	auto ordinary{ app.textures().create_temporary("order_ordinary", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	auto alternate{ app.textures().create_temporary("order_alternate", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	auto sdf{ app.textures().create_temporary("order_sdf", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	ASSERT_TRUE(ordinary && alternate && sdf);
+	sdf->set_sdf(true);
+	ax::Window window({ .width = s_size, .height = s_size, .title = "sprite ordering" });
+	ax::WindowTestAccess::initialize_sprite_pipeline(window, s_device);
+	auto* first{ add(window, ordinary.get(), s_red) };
+	auto* second{ add(window, sdf.get(), s_blue) };
+	auto* third{ add(window, ordinary.get(), s_green) };
+	const auto thirdSequence{ third->sequence };
+	EXPECT_LT(first->sequence, second->sequence);
+	EXPECT_LT(second->sequence, thirdSequence);
+	EXPECT_PIXEL(draw(window), 72, 72, s_green);
+	window.free_sprite(first);
+	third->tex = alternate.get();
+	auto group{ window.create_sprite_group() };
+	group->set_visible(true);
+	window.transfer_sprite(second, group);
+	EXPECT_EQ(third->sequence, thirdSequence);
+	EXPECT_PIXEL(draw(window), 72, 72, s_green);
+	window.free_sprite(third);
+	auto* replacement{ add(window, ordinary.get(), s_red) };
+	EXPECT_EQ(replacement, third);
+	EXPECT_GT(replacement->sequence, thirdSequence);
+	EXPECT_PIXEL(draw(window), 72, 72, s_red);
+	window.free_sprite(second);
+	window.free_sprite(replacement);
+	EXPECT_PIXEL(draw(window), 72, 72, s_black);
+}
+
+TEST_F(SpriteOrderTest, QueuedSpritesPrecedeRetainedSpritesAndKeepQueueInsertionOrder)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+	auto ordinary{ app.textures().create_temporary("queue_ordinary", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	auto sdf{ app.textures().create_temporary("queue_sdf", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	sdf->set_sdf(true);
+	ax::Window window({ .width = s_size, .height = s_size, .title = "queued sprite ordering" });
+	ax::WindowTestAccess::initialize_sprite_pipeline(window, s_device);
+	auto* retained{ add(window, ordinary.get(), s_green) };
+	ax::SpriteDefinition queued{};
+	queued.tex = sdf.get();
+	queued.gpuData = retained->gpuData;
+	queued.gpuData.tint = s_blue;
+	window.render_sprite(queued);
+	EXPECT_PIXEL(draw(window), 72, 72, s_green);
+	window.free_sprite(retained);
+	queued.gpuData.tint = s_red;
+	window.render_textures({ queued });
+	queued.tex = ordinary.get();
+	queued.gpuData.tint = s_green;
+	window.render_sprite(queued);
+	const auto keys{ ax::WindowTestAccess::queued_sequences(window) };
+	ASSERT_EQ(keys.size(), 2u);
+	EXPECT_LT(keys[0], keys[1]);
+	EXPECT_PIXEL(draw(window), 72, 72, s_green);
+	ax::WindowTestAccess::exhaust_sequences(window);
+	EXPECT_THROW(window.allocate_sprite(), std::overflow_error);
+	EXPECT_THROW(window.render_sprite(queued), std::overflow_error);
+	EXPECT_THROW(window.render_textures({ queued, queued }), std::overflow_error);
+	EXPECT_TRUE(ax::WindowTestAccess::queued_sequences(window).empty());
+}
+
+TEST_F(SpriteOrderTest, ScreenBlendingKeepsCrossFormatSequenceAtUnequalDepths)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+	auto ordinary{ app.textures().create_temporary("blend_ordinary", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	auto sdf{ app.textures().create_temporary("blend_sdf", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	sdf->set_sdf(true);
+	ax::Window window({ .width = s_size, .height = s_size, .title = "blended sprite ordering" });
+	ax::WindowTestAccess::initialize_sprite_pipeline(window, s_device);
+	auto* red{ add(window, ordinary.get(), { 1, 0, 0, .5f }, true) };
+	auto* blue{ add(window, sdf.get(), { 0, 0, 1, .5f }, true) };
+	auto* green{ add(window, ordinary.get(), { 0, 1, 0, .5f }, true) };
+	red->gpuData.z = 0;
+	blue->gpuData.z = 1;
+	green->gpuData.z = 2;
+	EXPECT_PIXEL_NEAR(draw(window), 16, 16, (Pixel{ 32, 128, 64, 255 }), 1);
+}
+
+TEST_F(SpriteOrderTest, ConsolidatesInstanceUploadsAcrossTexturesAndFormats)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+	auto first{ app.textures().create_temporary("upload_first", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	auto second{ app.textures().create_temporary("upload_second", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	auto sdf{ app.textures().create_temporary("upload_sdf", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	ASSERT_TRUE(first && second && sdf);
+	sdf->set_sdf(true);
+	ax::Window window({ .width = s_size, .height = s_size, .title = "sprite upload consolidation" });
+	ax::WindowTestAccess::initialize_sprite_pipeline(window, s_device);
+	add(window, first.get(), s_red);
+	auto* edited{ add(window, second.get(), s_green) };
+	add(window, sdf.get(), s_blue);
+	add(window, first.get(), s_green);
+	const auto frame{ [&window]
+	{
+		ax::RenderProfiler profiler;
+		profiler.begin_frame();
+		auto image{ draw(window) };
+		profiler.end_frame();
+		return std::pair{ std::move(image), profiler.statistics().categories[static_cast<std::size_t>(ax::RenderCategory::Sprites)] };
+	} };
+	// First frame: one write per format for the new records and one per format for the visible-index lists.
+	const auto [image, sprites]{ frame() };
+	EXPECT_PIXEL(image, 72, 72, s_green);
+	EXPECT_EQ(sprites.writes, 4u);
+	EXPECT_EQ(sprites.bytes, 3 * ax::SpriteGpuData::gpuDataSize + ax::SdfSpriteGpuData::gpuDataSize + 4 * sizeof(std::uint32_t));
+	EXPECT_EQ(sprites.packed, 4u);
+	// Nothing changed: no record is repacked or uploaded, only the index lists.
+	const auto [unchangedImage, unchanged]{ frame() };
+	EXPECT_PIXEL(unchangedImage, 72, 72, s_green);
+	EXPECT_EQ(unchanged.writes, 2u);
+	EXPECT_EQ(unchanged.bytes, 4 * sizeof(std::uint32_t));
+	EXPECT_EQ(unchanged.packed, 0u);
+	// One edit repacks and uploads exactly that record.
+	edited->gpuData.tint = s_red;
+	const auto [editedImage, changed]{ frame() };
+	EXPECT_PIXEL(editedImage, 72, 72, s_green);
+	EXPECT_EQ(changed.writes, 3u);
+	EXPECT_EQ(changed.bytes, ax::SpriteGpuData::gpuDataSize + 4 * sizeof(std::uint32_t));
+	EXPECT_EQ(changed.packed, 1u);
+}
+
+TEST_F(SpriteOrderTest, OneDrawSelectsAmongManyTexturesAndKeepsOrderBeyondTheBindGroupLimit)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+	constexpr std::uint32_t textureCount{ ax::sprite_texture_slots + 2 };
+	const auto colour{ [](std::uint32_t index)
+	{
+		return Pixel{ static_cast<std::uint8_t>(20 + index * 20), static_cast<std::uint8_t>(240 - index * 20), 100, 255 };
+	} };
+	std::vector<std::shared_ptr<ax::Texture>> textures{};
+	for (std::uint32_t index{}; index < textureCount; ++index)
+	{
+		const auto pixel{ colour(index) };
+		std::vector<std::uint8_t> data{};
+		for (int texel{}; texel < 4; ++texel)
+			data.insert(data.end(), pixel.begin(), pixel.end());
+		textures.push_back(app.textures().create_temporary("many_" + std::to_string(index), data, 2, 2));
+		ASSERT_TRUE(textures.back());
+	}
+	ax::Window window({ .width = s_size, .height = s_size, .title = "many texture sprites" });
+	ax::WindowTestAccess::initialize_sprite_pipeline(window, s_device);
+	const auto place{ [](ax::SpriteDefinition* sprite, std::uint32_t index)
+	{
+		sprite->gpuData.pos = { static_cast<float>(index % 5) * 24.0f - 60.0f, static_cast<float>(index / 5) * 40.0f - 40.0f };
+	} };
+	for (std::uint32_t index{}; index < textureCount; ++index)
+		place(add(window, textures[index].get(), { 1, 1, 1, 1 }), index);
+	// The last two overlap sprite 9 at equal depth: the later one wins even though it reuses a bound texture.
+	place(add(window, textures[0].get(), { 1, 1, 1, 1 }), 9);
+	place(add(window, textures[8].get(), { 1, 1, 1, 1 }), 9);
+	ax::RenderProfiler profiler;
+	profiler.begin_frame();
+	const auto image{ draw(window) };
+	profiler.end_frame();
+	for (std::uint32_t index{}; index < textureCount - 1; ++index)
+		EXPECT_PIXEL_NEAR(image, 64 + (index % 5) * 24 - 60 + 8, 64 + (index / 5) * 40 - 40 + 8, colour(index), 1);
+	EXPECT_PIXEL_NEAR(image, 64 + 4 * 24 - 60 + 8, 64 + 8, colour(8), 1);
+	const auto& sprites{ profiler.statistics().categories[static_cast<std::size_t>(ax::RenderCategory::Sprites)] };
+	EXPECT_EQ(sprites.draws, 2u);
+	EXPECT_EQ(sprites.packed, textureCount + 2);
+}
+
+TEST_F(SpriteOrderTest, GrowthRewritesRecordsAndSlotReuseRepacksOnlyTheNewOwner)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+	auto texture{ app.textures().create_temporary("growth_source", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	ASSERT_TRUE(texture);
+	ax::Window window({ .width = s_size, .height = s_size, .title = "sprite record growth" });
+	ax::WindowTestAccess::initialize_sprite_pipeline(window, s_device);
+	std::vector<ax::SpriteDefinition*> sprites{};
+	for (int i{}; i < 20; ++i)
+		sprites.push_back(add(window, texture.get(), s_red));
+	const auto frame{ [&window]
+	{
+		ax::RenderProfiler profiler;
+		profiler.begin_frame();
+		auto image{ draw(window) };
+		profiler.end_frame();
+		return std::pair{ std::move(image), profiler.statistics().categories[static_cast<std::size_t>(ax::RenderCategory::Sprites)] };
+	} };
+	EXPECT_PIXEL(frame().first, 72, 72, s_red);
+	// Passing the initial 1024 records replaces the buffer; every record must still draw with its own data.
+	for (int i{}; i < 1100; ++i)
+		sprites.push_back(add(window, texture.get(), s_green));
+	sprites.push_back(add(window, texture.get(), s_blue));
+	const auto [grown, growth]{ frame() };
+	EXPECT_PIXEL(grown, 72, 72, s_blue);
+	EXPECT_EQ(growth.packed, 1101u);
+	// A freed slot goes to the next sprite, which alone is repacked.
+	window.free_sprite(sprites.back());
+	sprites.pop_back();
+	auto* reused{ add(window, texture.get(), s_red) };
+	const auto [afterReuse, reuse]{ frame() };
+	EXPECT_PIXEL(afterReuse, 72, 72, s_red);
+	EXPECT_EQ(reuse.packed, 1u);
+	EXPECT_NE(reused, nullptr);
+	const auto [steady, idle]{ frame() };
+	EXPECT_PIXEL(steady, 72, 72, s_red);
+	EXPECT_EQ(idle.packed, 0u);
+}
+
+TEST_F(SpriteOrderTest, CullsDistantSpritesBeforePackingAndKeepsRotatedZoomedEdges)
+{
+	auto app{ ax::Application::from_embedded({}, ax::EmbeddedResourceLayout{}) };
+	app.textures().set_device(s_device);
+	auto texture{ app.textures().create_temporary("cull_source", std::vector<std::uint8_t>(16, 255), 2, 2) };
+	ASSERT_TRUE(texture);
+	ax::Window window({ .width = s_size, .height = s_size, .title = "sprite culling" });
+	ax::WindowTestAccess::initialize_sprite_pipeline(window, s_device);
+	window.camera().set_position({ 10, -20 });
+	window.camera().set_zoom(2);
+	auto* sprite{ add(window, texture.get(), s_green) };
+	sprite->gpuData.pos = { 10000, 10000 };
+	ax::RenderProfiler profiler;
+	profiler.begin_frame();
+	const auto empty{ draw(window) };
+	profiler.end_frame();
+	EXPECT_PIXEL(empty, 64, 64, s_black);
+	EXPECT_EQ(profiler.statistics().categories[static_cast<std::size_t>(ax::RenderCategory::Sprites)].packed, 0u);
+	sprite->gpuData.pos = { 45, -20 };
+	sprite->gpuData.rotation = .7853982f;
+	EXPECT_PIXEL(draw(window), 127, 96, s_green);
+	sprite->gpuData.scale.x = -16;
+	EXPECT_PIXEL(draw(window), 127, 96, s_green);
+	window.camera().set_zoom(4);
+	EXPECT_PIXEL(draw(window), 127, 96, s_green);
+}
 
 TEST_F(ShapeRendererTest, RectangleFillsExactPixelArea)
 {

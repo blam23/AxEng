@@ -315,6 +315,33 @@ namespace
 				"rendered_update", stats.renderedUpdate, "failed_frames", stats.failedFrames,
 				"update_ms", stats.updateMilliseconds, "render_ms", stats.renderMilliseconds);
 		};
+		window_table["set_render_profiling"] = [&app](bool counters, bool timestamps)
+		{
+			app.window()->set_render_profiling(counters, timestamps);
+		};
+		window_table["render_stats"] = [&app](sol::this_state lua)
+		{
+			sol::state_view view{ lua };
+			const auto& stats{ app.window()->render_statistics() };
+			const auto& gpu{ app.window()->render_gpu_statistics() };
+			auto result{ view.create_table_with("frame", stats.frame, "enabled", stats.enabled,
+				"submits", stats.submits, "tessellations", stats.tessellations, "buffer_growths", stats.bufferGrowths,
+				"gpu_supported", gpu.supported, "gpu_enabled", gpu.enabled, "gpu_valid", gpu.valid,
+				"gpu_frame", gpu.frame, "gpu_skipped_frames", gpu.skippedFrames,
+				"gpu_dropped_passes", gpu.droppedPasses, "gpu_failed_readbacks", gpu.failedReadbacks) };
+			constexpr const char* names[]{ "sprites", "pending", "shapes", "lighting", "materials", "particles", "other" };
+			for (std::size_t i{}; i < stats.categories.size(); ++i)
+			{
+				const auto& category{ stats.categories[i] };
+				result[names[i]] = view.create_table_with("writes", category.writes, "bytes", category.bytes,
+					"draws", category.draws, "packed", category.packed, "cpu_ms", category.cpuMilliseconds);
+			}
+			auto passes{ view.create_table() };
+			for (std::size_t i{}; i < gpu.passes.size(); ++i)
+				passes[i + 1] = view.create_table_with("name", gpu.passes[i].name, "ms", gpu.passes[i].milliseconds);
+			result["gpu_passes"] = passes;
+			return result;
+		};
 
 		auto on_prepare_frame_table{ state.create_table() };
 		on_prepare_frame_table["subscribe"] = [&app](sol::protected_function f) -> ax::EventID

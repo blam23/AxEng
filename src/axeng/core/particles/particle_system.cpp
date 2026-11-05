@@ -1,3 +1,4 @@
+#include "axeng/core/render_profiler.h"
 #include "axeng/core/particles/particle_system.h"
 
 #include <algorithm>
@@ -728,11 +729,11 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 		if (config.particleLight.enabled)
 			++m_emissionLightEmitters;
 
-		queue.WriteBuffer(emitter->m_uniformBuffer, 0, &params, sizeof(params));
+		profiled_write_buffer(RenderCategory::Particles, queue, emitter->m_uniformBuffer, 0, &params, sizeof(params));
 		const std::uint32_t zero{};
-		queue.WriteBuffer(emitter->m_spawnCounterBuffer, 0, &zero, sizeof(zero));
+		profiled_write_buffer(RenderCategory::Particles, queue, emitter->m_spawnCounterBuffer, 0, &zero, sizeof(zero));
 		const DrawArguments args{};
-		queue.WriteBuffer(emitter->m_drawArgumentsBuffer, 0, &args, sizeof(args));
+		profiled_write_buffer(RenderCategory::Particles, queue, emitter->m_drawArgumentsBuffer, 0, &args, sizeof(args));
 		m_frameEmitters.push_back(std::move(emitter));
 	}
 
@@ -741,7 +742,7 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 
 	wgpu::ComputePassDescriptor passDesc{};
 	passDesc.label = "ParticleSimulationAndCulling";
-	auto pass{ encoder.BeginComputePass(&passDesc) };
+	auto pass{ profiled_compute_pass(encoder, passDesc, "particles/particle_system.cpp:passDesc") };
 	pass.SetPipeline(m_computePipeline);
 	for (const auto& emitter : m_frameEmitters)
 	{
@@ -766,7 +767,7 @@ void ax::ParticleSystem::draw(wgpu::RenderPassEncoder& pass)
 		if (!emitter->m_config.visible)
 			continue;
 		pass.SetBindGroup(1, emitter->m_renderBindGroup);
-		pass.DrawIndirect(emitter->m_drawArgumentsBuffer, 0);
+		profiled_draw_indirect(RenderCategory::Particles, pass, emitter->m_drawArgumentsBuffer, 0);
 	}
 }
 
@@ -788,7 +789,7 @@ void ax::ParticleSystem::draw_lights(wgpu::RenderPassEncoder& pass)
 			bound = true;
 		}
 		pass.SetBindGroup(1, emitter->m_renderBindGroup);
-		pass.DrawIndirect(emitter->m_drawArgumentsBuffer, 0);
+		profiled_draw_indirect(RenderCategory::Particles, pass, emitter->m_drawArgumentsBuffer, 0);
 	}
 }
 

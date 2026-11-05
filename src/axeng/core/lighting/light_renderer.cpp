@@ -1,3 +1,4 @@
+#include "axeng/core/render_profiler.h"
 #include "axeng/core/lighting/light_renderer.h"
 
 #include <spdlog/spdlog.h>
@@ -249,7 +250,7 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		mapped.camera.w = static_cast<float>(divisor);
 		return mapped;
 	}() };
-	queue.WriteBuffer(m_uniforms, 0, &mappedUniforms, sizeof(mappedUniforms));
+	profiled_write_buffer(RenderCategory::Lighting, queue, m_uniforms, 0, &mappedUniforms, sizeof(mappedUniforms));
 
 	{
 		ZoneScopedN("LightRenderer::light-map");
@@ -262,15 +263,15 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		wgpu::RenderPassDescriptor passDesc{};
 		passDesc.colorAttachmentCount = 1;
 		passDesc.colorAttachments = &attachment;
-		auto pass{ encoder.BeginRenderPass(&passDesc) };
+		auto pass{ profiled_render_pass(encoder, passDesc, "Light map") };
 		if (!lights.empty())
 		{
 			const auto bytes{ lights.size_bytes() };
 			ensure_buffer(device, m_lights, bytes, "Lights");
-			queue.WriteBuffer(m_lights.buffer, 0, lights.data(), bytes);
+			profiled_write_buffer(RenderCategory::Lighting, queue, m_lights.buffer, 0, lights.data(), bytes);
 			pass.SetPipeline(m_lightPipeline);
 			pass.SetBindGroup(0, m_lights.bindGroup);
-			pass.Draw(s_instance_vertices, static_cast<std::uint32_t>(lights.size()));
+			profiled_draw(RenderCategory::Lighting, pass, s_instance_vertices, static_cast<std::uint32_t>(lights.size()));
 		}
 		if (extraLights)
 			extraLights(pass);
@@ -279,7 +280,7 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 			if (m_lights.buffer == nullptr) ensure_buffer(device, m_lights, sizeof(Light2D), "Noise shadow binding");
 			pass.SetPipeline(m_shadowPipeline);
 			pass.SetBindGroup(0, m_lights.bindGroup);
-			pass.Draw(3);
+			profiled_draw(RenderCategory::Lighting, pass, 3);
 		}
 		pass.End();
 	}
@@ -294,18 +295,18 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		wgpu::RenderPassDescriptor passDesc{};
 		passDesc.colorAttachmentCount = 1;
 		passDesc.colorAttachments = &attachment;
-		auto pass{ encoder.BeginRenderPass(&passDesc) };
+		auto pass{ profiled_render_pass(encoder, passDesc, "Light apply") };
 		pass.SetPipeline(settings.maxExposure > 1.0f ? m_brightApplyPipeline : m_applyPipeline);
 		pass.SetBindGroup(0, m_applyBindGroup);
-		pass.Draw(3);
+		profiled_draw(RenderCategory::Lighting, pass, 3);
 		if (!glows.empty())
 		{
 			const auto bytes{ glows.size_bytes() };
 			ensure_buffer(device, m_glows, bytes, "Glows");
-			queue.WriteBuffer(m_glows.buffer, 0, glows.data(), bytes);
+			profiled_write_buffer(RenderCategory::Lighting, queue, m_glows.buffer, 0, glows.data(), bytes);
 			pass.SetPipeline(m_glowPipeline);
 			pass.SetBindGroup(0, m_glows.bindGroup);
-			pass.Draw(s_instance_vertices, static_cast<std::uint32_t>(glows.size()));
+			profiled_draw(RenderCategory::Lighting, pass, s_instance_vertices, static_cast<std::uint32_t>(glows.size()));
 		}
 		pass.End();
 	}

@@ -5,6 +5,7 @@
 #endif
 
 // STD
+#include <array>
 #include <atomic>
 #include <deque>
 #include <filesystem>
@@ -42,6 +43,8 @@
 #include "axeng/core/camera.h"
 #include "axeng/core/texture.h"
 #include "axeng/core/retained_sprites.h"
+#include "axeng/core/sprite_instance_store.h"
+#include "axeng/core/render_profiler.h"
 #include "axeng/core/shapes/shape.h"
 #include "axeng/core/lighting/light_renderer.h"
 #include "axeng/core/materials/backdrop_blur.h"
@@ -110,6 +113,9 @@ namespace ax
 		// change the rate of a running loop, which restarts the loop's timing.
 		void set_fixed_update_rate(double rate);
 		const WindowLoopStatistics& loop_statistics() const noexcept { return m_loopStatistics; }
+		const RenderStatistics& render_statistics() const noexcept { return m_renderProfiler.statistics(); }
+		const RenderGpuStatistics& render_gpu_statistics() const noexcept { return m_renderProfiler.gpu_statistics(); }
+		void set_render_profiling(bool counters, bool timestamps) { m_renderProfiler.configure(counters, timestamps); }
 		// Called on the window thread: `acquire` before the loop runs fixed updates (and the input events handled
 		// between catch-up updates) or deferred functions, and `release` after them. The lock is free while the
 		// window polls input between updates, renders and waits, so other threads can use what the update callbacks
@@ -231,8 +237,23 @@ namespace ax
 		bool lighting_ran() const noexcept { return m_lightingRan; }
 		LightRenderer::Stats lighting_stats() const noexcept { return m_lightRenderer.last_stats(); }
 
-		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view);
-		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view, const wgpu::Buffer& buffer);
+		// The textures one ordinary sprite draw may select between; unused slots repeat the first texture.
+		using TextureSet = std::array<Texture*, sprite_texture_slots>;
+		struct TextureSetHash
+		{
+			std::size_t operator()(const TextureSet& set) const noexcept
+			{
+				std::size_t hash{};
+				for (const auto* texture : set)
+					hash = hash * 1099511628211ull ^ std::hash<const Texture*>{}(texture);
+				return hash;
+			}
+		};
+		void create_sprite_group_layouts();
+		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view, const wgpu::Buffer& instances,
+			const wgpu::Buffer& indices, bool distanceField = false);
+		wgpu::BindGroup setup_sprite_bind_group(const std::array<wgpu::TextureView, sprite_texture_slots>& views,
+			const wgpu::Buffer& instances, const wgpu::Buffer& indices, bool distanceField);
 		void reload_pipeline();
 		bool create_surfaces();
 
@@ -299,6 +320,8 @@ namespace ax
 		void draw_transparent_sprites(wgpu::RenderPassEncoder& pass, SpriteLayer layer = SpriteLayer::All);
 		void draw_pending_batch(const PendingDrawBatch& batch, const wgpu::TextureView& screenView);
 		wgpu::BindGroup get_texture_bind_group(Texture* texture);
+		wgpu::BindGroup get_texture_bind_group(const TextureSet& textures);
+		wgpu::BindGroup get_pending_bind_group(Texture* texture);
 		void render_gui(wgpu::RenderPassEncoder& pass, double delta);
 		bool run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTexture> surfaceFuture);
 		double m_fixedUpdateRate{};
@@ -307,14 +330,17 @@ namespace ax
 		std::atomic<bool> m_suspended{};
 		double m_particleDeltaPending{};
 		WindowLoopStatistics m_loopStatistics{};
+		RenderProfiler m_renderProfiler;
 		WindowFrameImageEvent read_frame_image
 		(
 			const FrameImageRequest& request,
 			wgpu::Buffer& readback,
 			uint32_t bytesPerRow
 		);
-		void ensure_uniform_capacity(uint32_t required);
-		void ensure_sdf_uniform_capacity(uint32_t required);
+		void ensure_pending_capacity(uint32_t ordinary, uint32_t sdf);
+		void ensure_identity_indices(uint32_t count);
+		template<class Record>
+		void upload_sprite_store(SpriteInstanceStore<Record>& store, const char* label);
 		void create_composite_bind_group();
 		wgpu::RenderPipeline setup_pending_pipeline(wgpu::TextureFormat format, bool distanceField, bool screenSpace);
 		void queue_texture(SpriteDefinition sprite);
@@ -385,15 +411,24 @@ namespace ax
 		wgpu::TextureView m_oitRevealageView;
 		wgpu::BindGroupLayout m_compositeGroupLayout;
 		wgpu::BindGroup m_compositeBindGroup;
-		wgpu::Buffer m_uniforms;
-		wgpu::Buffer m_sdfUniforms;
+		// Pending draws pack into their own instance buffers so they never disturb the retained records.
+		wgpu::Buffer m_pendingUniforms;
+		wgpu::Buffer m_pendingSdfUniforms;
+		uint32_t m_pendingUniformsCapacity{ 1024 };
+		uint32_t m_pendingSdfUniformsCapacity{ 1024 };
+		// 0, 1, 2, ...: the index list of draws that use records in order (static batches, pending draws).
+		wgpu::Buffer m_identityIndices;
+		uint32_t m_identityCapacity{ 2048 };
+		std::unordered_map<TextureSet, wgpu::BindGroup, TextureSetHash> m_pendingBindGroups;
 		wgpu::Sampler m_nearestSampler;
 		wgpu::Sampler m_linearSampler;
+		// One texture, for distance-field sprites; ordinary sprites bind several (see sprite_texture_slots).
 		wgpu::BindGroupLayout m_groupLayout;
+		wgpu::BindGroupLayout m_spriteGroupLayout;
 		wgpu::BindGroupLayout m_globalLayout;
 		wgpu::Buffer m_viewportBuffer;
 		wgpu::BindGroup m_viewportBindGroup;
-		std::unordered_map<Texture*, wgpu::BindGroup> m_textureBindGroups;
+		std::unordered_map<TextureSet, wgpu::BindGroup, TextureSetHash> m_textureBindGroups;
 		std::mutex m_textureBindGroupsMutex{};
 		std::map<std::tuple<wgpu::TextureFormat, bool, bool>, wgpu::RenderPipeline> m_pendingPipelines;
 
@@ -411,13 +446,19 @@ namespace ax
 
 		struct SpriteGroupRange
 		{
-			Texture* tex;
+			// Ordinary ranges draw any sprites that use these textures; sprites choose by slot.
+			TextureSet textures;
+			uint32_t textureCount;
 			uint32_t start;
 			uint32_t count;
 			bool distanceField;
 		};
 
 		std::deque<SpriteDefinition> m_spriteSlots;
+		std::uint64_t reserve_sprite_sequences(std::uint64_t count);
+		std::atomic_uint64_t m_nextSpriteSequence{ 1 };
+		SpriteDefinition* m_firstSprite{};
+		SpriteDefinition* m_lastSprite{};
 		std::vector<SpriteDefinition*> m_activeSprites;
 		std::vector<SpriteDefinition*> m_freeSpriteSlots;
 		std::vector<std::shared_ptr<SpriteGroup>> m_spriteVisibilityGroups;
@@ -431,11 +472,8 @@ namespace ax
 		std::mutex m_pendingTextureMutex{};
 		std::vector<SpriteDefinition> m_queuedTextures;
 		std::vector<SpriteDefinition> m_pendingTextures;
-		std::unordered_map<Texture*, std::vector<const SpriteDefinition*>> m_spriteGroups;
-		std::unordered_map<Texture*, std::vector<const SpriteDefinition*>> m_pendingSpriteGroups;
 		std::vector<SpriteGpuData> m_spriteUploadData;
 		std::vector<SdfSpriteGpuData> m_sdfUploadData;
-		std::vector<const SpriteDefinition*> m_spriteUploadSources;
 		std::vector<SpriteGroupRange> m_spriteGroupRanges;
 		std::vector<SpriteGroupRange> m_unlitSpriteGroupRanges;
 		std::vector<SpriteGroupRange> m_screenSpaceSpriteGroupRanges;
@@ -445,9 +483,6 @@ namespace ax
 		ShapeList m_interfaceOverlayShapes;
 		BackdropBlur m_backdropBlur;
 		bool m_interfaceActive{};
-		std::vector<const SpriteDefinition*> m_litUploadScratch;
-		std::vector<const SpriteDefinition*> m_unlitUploadScratch;
-		std::vector<const SpriteDefinition*> m_screenSpaceUploadScratch;
 
 		LightRenderer m_lightRenderer;
 		mutable std::mutex m_lightingMutex{};
@@ -458,9 +493,6 @@ namespace ax
 		std::vector<Glow2D> m_queuedGlows, m_frameGlows;
 		std::optional<NoiseShadow2D> m_queuedNoiseShadow{};
 		bool m_lightingRan{};
-		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };
-		uint32_t m_uniformsCapacity{ 1024 };
-		uint32_t m_sdfUniformsCapacity{ 1024 };
 
 		std::mutex m_deferredMutex{};
 		std::vector<std::function<void()>> m_deferred{};
@@ -469,5 +501,11 @@ namespace ax
 		std::map<ProcessId, HWND> m_childWindows{};
 #endif
 		ParticleSystem m_particleSystem;
+
+		SpriteInstanceStore<SpriteGpuData> m_ordinaryStore;
+		SpriteInstanceStore<SdfSpriteGpuData> m_sdfStore;
+		SpriteLayerIndices m_litIndices;
+		SpriteLayerIndices m_unlitIndices;
+		SpriteLayerIndices m_screenSpaceIndices;
 	};
 }

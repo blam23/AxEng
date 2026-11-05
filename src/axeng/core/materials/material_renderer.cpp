@@ -1,3 +1,4 @@
+#include "axeng/core/render_profiler.h"
 #include "axeng/core/materials/material_renderer.h"
 
 #include "spdlog/spdlog.h"
@@ -458,12 +459,12 @@ void ax::MaterialRenderer::draw(wgpu::RenderPassEncoder& pass, const MaterialDra
 	const std::uint64_t globalsOffset{ state.slot * s_slotStride };
 	const std::uint64_t paramsOffset{ globalsOffset + s_globalsStride };
 	++state.slot;
-	state.queue.WriteBuffer(state.uniforms, globalsOffset, globals, sizeof(globals));
+	profiled_write_buffer(RenderCategory::Materials, state.queue, state.uniforms, globalsOffset, globals, sizeof(globals));
 	glm::vec4 params[MaterialRenderer::parameterCount]{};
 	const auto count{ std::min(draw.params.size(), MaterialRenderer::parameterCount) };
 	for (std::size_t i = 0; i < count; ++i)
 		params[i] = draw.params[i];
-	state.queue.WriteBuffer(state.uniforms, paramsOffset, params, sizeof(params));
+	profiled_write_buffer(RenderCategory::Materials, state.queue, state.uniforms, paramsOffset, params, sizeof(params));
 
 	std::vector<QuadVertex> data(draw.quads.size());
 	for (std::size_t i = 0; i < draw.quads.size(); ++i)
@@ -473,7 +474,7 @@ void ax::MaterialRenderer::draw(wgpu::RenderPassEncoder& pass, const MaterialDra
 	}
 	const auto quadOffset{ state.quadOffset };
 	state.quadOffset += quadBytes;
-	state.queue.WriteBuffer(state.quads, quadOffset, data.data(), quadBytes);
+	profiled_write_buffer(RenderCategory::Materials, state.queue, state.quads, quadOffset, data.data(), quadBytes);
 
 	const std::uint32_t offsets[2]{ static_cast<std::uint32_t>(globalsOffset), static_cast<std::uint32_t>(paramsOffset) };
 	pass.SetPipeline(entry.pipeline);
@@ -481,5 +482,5 @@ void ax::MaterialRenderer::draw(wgpu::RenderPassEncoder& pass, const MaterialDra
 	if (entry.definition.backdrop)
 		pass.SetBindGroup(1, state.backdropBindGroup);
 	pass.SetVertexBuffer(0, state.quads, quadOffset, quadBytes);
-	pass.Draw(6, static_cast<std::uint32_t>(draw.quads.size()));
+	profiled_draw(RenderCategory::Materials, pass, 6, static_cast<std::uint32_t>(draw.quads.size()));
 }

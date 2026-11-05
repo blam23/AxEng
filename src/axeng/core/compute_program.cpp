@@ -1,3 +1,4 @@
+#include "axeng/core/render_profiler.h"
 #include "compute_program.h"
 
 #include <array>
@@ -84,7 +85,7 @@ bool ax::ComputeProgram::encode_many(wgpu::CommandEncoder& encoder,
 		if (!m_pipelines.contains(std::string{ dispatch.entryPoint }) || !dispatch.bindGroup
 			|| dispatch.x == 0 || dispatch.y == 0 || dispatch.z == 0) return false;
 	wgpu::ComputePassDescriptor descriptor{};
-	auto pass{ encoder.BeginComputePass(&descriptor) };
+	auto pass{ profiled_compute_pass(encoder, descriptor, "compute_program.cpp:descriptor") };
 	for (const auto& dispatch : dispatches)
 	{
 		pass.SetPipeline(m_pipelines.at(std::string{ dispatch.entryPoint }));

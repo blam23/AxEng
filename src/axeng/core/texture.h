@@ -106,6 +106,9 @@ namespace ax
 		static constexpr std::size_t gpuDataSize{ 48 };
 	};
 
+	// Ordinary sprite bind groups hold this many textures. A draw's visible-index list entries choose between them.
+	inline constexpr std::uint32_t sprite_texture_slots{ 8u };
+
 	struct SdfSpriteGpuData : SpriteGpuData
 	{
 		// Bit 0 is MSDF (distance in the median of rgb rather than alpha); bits 1-2 are the effect kind.
@@ -163,14 +166,19 @@ namespace ax
 	{
 		SpriteData gpuData{};
 		Texture* tex{ nullptr };
-		Texture* groupedTexture{ nullptr };
 		SpriteGroup* group{ nullptr };
 		std::size_t groupIndex{};
 		std::size_t activeIndex{};
 		bool allocated{ false };
 		std::uint64_t generation{};
+		std::uint64_t sequence{};
+		SpriteDefinition* previous{};
+		SpriteDefinition* next{};
 		std::shared_ptr<Texture> keepAlive{};
 		SpriteEffect effect{};
+		// The retained instance record this sprite owns, once it has been drawn, and the format store it lives in.
+		std::uint32_t recordSlot{ ~0u };
+		bool recordSdf{ false };
 	};
 
 	static_assert(sizeof(glm::vec2) == 2 * sizeof(float));

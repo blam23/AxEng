@@ -166,18 +166,31 @@ protected:
 		wgpu::ShaderModuleDescriptor shaderDesc{};
 		shaderDesc.nextInChain = &source;
 		const auto shader{ s_device.CreateShaderModule(&shaderDesc) };
-		std::array<wgpu::BindGroupLayoutEntry, 3> spriteLayoutEntries{};
+		// Ordinary sprites bind several textures (bindings 1 and 3 up, around the sampler at 2); distance fields one.
+		const bool ordinary{ recordSize == sizeof(ax::SpriteGpuData) };
+		const std::uint32_t textureSlots{ ordinary ? ax::sprite_texture_slots : 1u };
+		const std::uint32_t indexBinding{ ordinary ? 2u + ax::sprite_texture_slots : 3u };
+		std::array<wgpu::BindGroupLayoutEntry, 3 + ax::sprite_texture_slots> spriteLayoutEntries{};
 		spriteLayoutEntries[0].binding = 0;
 		spriteLayoutEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
 		spriteLayoutEntries[0].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
-		spriteLayoutEntries[1].binding = 1;
-		spriteLayoutEntries[1].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-		spriteLayoutEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
+		for (std::uint32_t slot{}; slot < textureSlots; ++slot)
+		{
+			auto& entry{ spriteLayoutEntries[slot == 0 ? 1 : 2 + slot] };
+			entry.binding = slot == 0 ? 1 : 2 + slot;
+			entry.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+			entry.texture.sampleType = wgpu::TextureSampleType::Float;
+		}
 		spriteLayoutEntries[2].binding = 2;
 		spriteLayoutEntries[2].visibility = wgpu::ShaderStage::Fragment;
 		spriteLayoutEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+		// The visible-index list takes the next free entry after the textures and sampler.
+		auto& indexLayout{ spriteLayoutEntries[2 + textureSlots] };
+		indexLayout.binding = indexBinding;
+		indexLayout.visibility = wgpu::ShaderStage::Vertex;
+		indexLayout.buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
 		wgpu::BindGroupLayoutDescriptor layoutDesc{};
-		layoutDesc.entryCount = spriteLayoutEntries.size();
+		layoutDesc.entryCount = 3 + textureSlots;
 		layoutDesc.entries = spriteLayoutEntries.data();
 		const auto spriteLayout{ s_device.CreateBindGroupLayout(&layoutDesc) };
 		wgpu::BindGroupLayoutEntry cameraLayoutEntry{};
@@ -255,17 +268,35 @@ protected:
 		wgpu::SamplerDescriptor samplerDesc{};
 		samplerDesc.magFilter = wgpu::FilterMode::Linear;
 		samplerDesc.minFilter = wgpu::FilterMode::Linear;
-		std::array<wgpu::BindGroupEntry, 3> entries{};
+		std::array<wgpu::BindGroupEntry, 3 + ax::sprite_texture_slots> entries{};
 		entries[0].binding = 0;
 		entries[0].buffer = spriteBuffer;
 		entries[0].size = spriteBuffer.GetSize();
-		entries[1].binding = 1;
-		entries[1].textureView = texture.CreateView();
+		const auto textureView{ texture.CreateView() };
+		for (std::uint32_t slot{}; slot < textureSlots; ++slot)
+		{
+			auto& entry{ entries[slot == 0 ? 1 : 2 + slot] };
+			entry.binding = slot == 0 ? 1 : 2 + slot;
+			entry.textureView = textureView;
+		}
 		entries[2].binding = 2;
 		entries[2].sampler = s_device.CreateSampler(&samplerDesc);
+		// Records are drawn in order: an identity index list.
+		const auto identityCount{ static_cast<std::uint32_t>((std::max<std::size_t>)(recordCount, 2048)) };
+		std::vector<std::uint32_t> identity(identityCount);
+		for (std::uint32_t i{}; i < identityCount; ++i)
+			identity[i] = i;
+		wgpu::BufferDescriptor identityDesc{};
+		identityDesc.size = identityCount * sizeof(std::uint32_t);
+		identityDesc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+		const auto identityBuffer{ s_device.CreateBuffer(&identityDesc) };
+		s_device.GetQueue().WriteBuffer(identityBuffer, 0, identity.data(), identityDesc.size);
+		entries[2 + textureSlots].binding = indexBinding;
+		entries[2 + textureSlots].buffer = identityBuffer;
+		entries[2 + textureSlots].size = identityDesc.size;
 		wgpu::BindGroupDescriptor groupDesc{};
 		groupDesc.layout = pipeline.GetBindGroupLayout(0);
-		groupDesc.entryCount = entries.size();
+		groupDesc.entryCount = 3 + textureSlots;
 		groupDesc.entries = entries.data();
 		const auto spriteGroup{ s_device.CreateBindGroup(&groupDesc) };
 		wgpu::BindGroupEntry cameraEntry{};

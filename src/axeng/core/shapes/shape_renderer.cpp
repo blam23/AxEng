@@ -1,3 +1,4 @@
+#include "axeng/core/render_profiler.h"
 #include <tracy/Tracy.hpp>
 #include "axeng/core/shapes/shape_renderer.h"
 
@@ -509,6 +510,7 @@ namespace
 
 	void tessellate(State& state, const ax::Shape& shape)
 	{
+		if (auto* profiler{ ax::RenderProfiler::current() }) profiler->record_tessellation();
 		const auto params{ params_of(shape) };
 		const float pixelScale{ params.screenSpace ? 1.0f : std::max(state.view.zoom, 1e-3f) };
 
@@ -587,7 +589,7 @@ namespace
 		const std::uint64_t indexBytes{ indexCount * sizeof(std::uint32_t) };
 
 		const auto offset{ allocate(state, vertexBytes + indexBytes) };
-		state.queue.WriteBuffer(state.arena, offset, mesh.vertices.data() + first.firstVertex, vertexBytes);
+		ax::profiled_write_buffer(ax::RenderCategory::Shapes, state.queue, state.arena, offset, mesh.vertices.data() + first.firstVertex, vertexBytes);
 
 		const std::uint32_t* indices{ mesh.indices.data() + first.firstIndex };
 		if (first.firstVertex != 0)
@@ -597,11 +599,11 @@ namespace
 				i -= first.firstVertex;
 			indices = state.rebased.data();
 		}
-		state.queue.WriteBuffer(state.arena, offset + vertexBytes, indices, indexBytes);
+		ax::profiled_write_buffer(ax::RenderCategory::Shapes, state.queue, state.arena, offset + vertexBytes, indices, indexBytes);
 
 		pass.SetVertexBuffer(0, state.arena, offset, vertexBytes);
 		pass.SetIndexBuffer(state.arena, wgpu::IndexFormat::Uint32, offset + vertexBytes, indexBytes);
-		pass.DrawIndexed(indexCount);
+		ax::profiled_draw_indexed(ax::RenderCategory::Shapes, pass, indexCount);
 
 		state.stats.drawCalls++;
 		state.stats.vertices += vertexCount;
@@ -797,11 +799,12 @@ void ax::ShapeRenderer::begin_frame(const ShapeView& view)
 		view.viewport.x, view.viewport.y, 0.0f, 0.0f,
 		view.cameraPosition.x, view.cameraPosition.y, view.zoom, 0.0f,
 	};
-	s_state->queue.WriteBuffer(s_state->viewBuffer, 0, data, sizeof(data));
+	ax::profiled_write_buffer(ax::RenderCategory::Shapes, s_state->queue, s_state->viewBuffer, 0, data, sizeof(data));
 }
 
 void ax::ShapeRenderer::draw(wgpu::RenderPassEncoder& pass, const ShapeList& shapes)
 {
+	ax::RenderCpuScope cpu{ ax::RenderCategory::Shapes };
 	ZoneScopedN("Shapes mesh build and draw");
 	if (!s_state)
 	{
