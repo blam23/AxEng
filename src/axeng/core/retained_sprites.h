@@ -1,12 +1,13 @@
 #pragma once
 
+#include "axeng/debug/gpu_memory.h"
 #include "axeng/core/native_tasks.h"
 
 #include <span>
 
 namespace ax
 {
-	wgpu::Buffer upload_static_sprites(const wgpu::Device& device, const SpriteBuffer& data, glm::vec2 atlasOffset);
+	gpu::TrackedBuffer upload_static_sprites(const wgpu::Device& device, const SpriteBuffer& data, glm::vec2 atlasOffset);
 	class SpriteGroup
 	{
 	public:
@@ -53,7 +54,7 @@ namespace ax
 		Texture* m_texture{};
 		glm::vec2 m_atlasOffset{};
 		std::int64_t m_order{};
-		wgpu::Buffer m_buffer;
+		gpu::TrackedBuffer m_buffer;
 		wgpu::BindGroup m_bindGroup;
 		friend class Window;
 	};

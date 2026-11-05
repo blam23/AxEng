@@ -147,7 +147,7 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	uniformDesc.size = sizeof(Uniforms);
 	uniformDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
 	uniformDesc.label = "Lighting uniforms";
-	m_uniforms = device.CreateBuffer(&uniformDesc);
+	m_uniforms = gpu::create_buffer(device, uniformDesc, "Lighting");
 
 	wgpu::SamplerDescriptor samplerDesc{};
 	samplerDesc.addressModeU = wgpu::AddressMode::ClampToEdge;
@@ -202,7 +202,7 @@ void ax::LightRenderer::ensure_buffer(const wgpu::Device& device, InstanceBuffer
 	desc.size = instances.capacity;
 	desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
 	desc.label = label;
-	instances.buffer = device.CreateBuffer(&desc);
+	instances.buffer = gpu::create_buffer(device, desc, "Lighting");
 	// The whole buffer is bound, so the bind group only changes with the buffer; draws read just their instances.
 	std::array<wgpu::BindGroupEntry, 2> entries{};
 	entries[0].binding = 0;

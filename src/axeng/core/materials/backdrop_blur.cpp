@@ -135,7 +135,7 @@ bool ax::BackdropBlur::resize(std::uint32_t width, std::uint32_t height)
 	desc.format = m_format;
 	desc.mipLevelCount = mips;
 	desc.sampleCount = 1;
-	m_texture = m_device.CreateTexture(&desc);
+	m_texture = gpu::create_texture(m_device, desc, "BackdropBlur");
 	if (m_texture == nullptr)
 		return false;
 	m_chainView = m_texture.CreateView();

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "axeng/debug/gpu_memory.h"
 #include "axeng/core/lighting/light_renderer.h"
 
 #include <webgpu/webgpu_cpp.h>
@@ -136,11 +137,11 @@ namespace ax
 		bool m_suspended{};
 		bool m_resumePlaying{};
 		bool m_resumeVisible{};
-		wgpu::Buffer m_particleBuffer;
-		wgpu::Buffer m_uniformBuffer;
-		wgpu::Buffer m_spawnCounterBuffer;
-		wgpu::Buffer m_visibleBuffer;
-		wgpu::Buffer m_drawArgumentsBuffer;
+		gpu::TrackedBuffer m_particleBuffer;
+		gpu::TrackedBuffer m_uniformBuffer;
+		gpu::TrackedBuffer m_spawnCounterBuffer;
+		gpu::TrackedBuffer m_visibleBuffer;
+		gpu::TrackedBuffer m_drawArgumentsBuffer;
 		wgpu::BindGroup m_computeBindGroup;
 		wgpu::BindGroup m_renderBindGroup;
 

@@ -53,13 +53,13 @@ namespace
 	static_assert(sizeof(ParticleParametersGpu) == 208);
 	static_assert(sizeof(DrawArguments) == 16);
 
-	wgpu::Buffer create_buffer(const wgpu::Device& device, std::uint64_t size, wgpu::BufferUsage usage, const char* label)
+	ax::gpu::TrackedBuffer create_buffer(const wgpu::Device& device, std::uint64_t size, wgpu::BufferUsage usage, const char* label)
 	{
 		wgpu::BufferDescriptor desc{};
 		desc.size = size;
 		desc.usage = usage;
 		desc.label = label;
-		return device.CreateBuffer(&desc);
+		return ax::gpu::create_buffer(device, desc, "Particles");
 	}
 
 	wgpu::BindGroupLayoutEntry storage_entry(std::uint32_t binding, wgpu::ShaderStage visibility,

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <deque>
+#include <map>
 #include <imgui.h>
 #include <cstring>
 #include <memory>
@@ -20,6 +21,7 @@
 #include "axeng/core/application.h"
 #include "axeng/core/window.h"
 #include "axeng/core/imgui_helper.h"
+#include "axeng/debug/gpu_memory.h"
 
 #undef min
 #undef max
@@ -250,6 +252,115 @@ void ax::debug::ViewManager::console_view_callback(Debugger& debugger, Applicati
 	ImGui::End();
 }
 
+namespace gpu = ax::gpu;
+
+static void gpu_memory_window()
+{
+	ImGui::Begin(ICON_FA_MICROCHIP " GPU Memory");
+	{
+		static char search[128]{};
+		static int kindFilter = 0;
+		static bool byCategory = false;
+
+		const auto data{ gpu::snapshot() };
+		ImGui::Text("Total: %s in %zu allocations", gpu::format_bytes(data.totalBytes).c_str(), data.allocations.size());
+		ImGui::Text("Buffers: %s   Textures: %s", gpu::format_bytes(data.bufferBytes).c_str(),
+			gpu::format_bytes(data.textureBytes).c_str());
+		ImGui::Text("Created: %llu   Released: %llu", data.totalCreated, data.totalReleased);
+		ImGui::TextDisabled("Estimated from descriptors; ImGui backend and swap chain images are not tracked.");
+
+		ImGui::SetNextItemWidth(220.0f);
+		ImGui::InputTextWithHint("##gpu_search", "Search name, category, usage...", search, sizeof(search));
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(110.0f);
+		ImGui::Combo("##gpu_kind", &kindFilter, "All\0Buffers\0Textures\0");
+		ImGui::SameLine();
+		ImGui::Checkbox("By category", &byCategory);
+		ImGui::SameLine();
+		if (ImGui::Button("Dump to file"))
+			gpu::dump_report("gpu_memory.txt", "debug view");
+		ImGui::SameLine();
+		if (ImGui::Button("Copy"))
+			ImGui::SetClipboardText(gpu::format_report("debug view").c_str());
+
+		ImGui::Separator();
+		const float total{ data.totalBytes > 0 ? static_cast<float>(data.totalBytes) : 1.0f };
+
+		if (byCategory)
+		{
+			std::map<std::string, std::pair<std::uint64_t, std::size_t>> groups;
+			for (const auto& a : data.allocations)
+			{
+				auto& g{ groups[a.category] };
+				g.first += a.bytes;
+				++g.second;
+			}
+			std::vector<std::pair<std::string, std::pair<std::uint64_t, std::size_t>>> sorted{ groups.begin(), groups.end() };
+			std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
+			if (ImGui::BeginTable("##gpu_categories", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable))
+			{
+				ImGui::TableSetupColumn("Category");
+				ImGui::TableSetupColumn("Size");
+				ImGui::TableSetupColumn("Share");
+				ImGui::TableSetupColumn("Count");
+				ImGui::TableHeadersRow();
+				for (const auto& [name, g] : sorted)
+				{
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(name.c_str());
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(gpu::format_bytes(g.first).c_str());
+					ImGui::TableNextColumn();
+					ImGui::ProgressBar(static_cast<float>(g.first) / total, ImVec2(-1.0f, 0.0f));
+					ImGui::TableNextColumn();
+					ImGui::Text("%zu", g.second);
+				}
+				ImGui::EndTable();
+			}
+		}
+		else if (ImGui::BeginTable("##gpu_allocs", 6,
+			ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY))
+		{
+			ImGui::TableSetupScrollFreeze(0, 1);
+			ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+			ImGui::TableSetupColumn("Share", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+			ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+			ImGui::TableSetupColumn("Name");
+			ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+			ImGui::TableSetupColumn("Details");
+			ImGui::TableHeadersRow();
+			for (const auto& a : data.allocations)
+			{
+				if (kindFilter == 1 && a.kind != gpu::AllocationKind::Buffer)
+					continue;
+				if (kindFilter == 2 && a.kind != gpu::AllocationKind::Texture)
+					continue;
+				if (!contains_case_insensitive(a.name, search) && !contains_case_insensitive(a.category, search)
+					&& !contains_case_insensitive(a.usage, search) && !contains_case_insensitive(a.details, search))
+					continue;
+
+				ImGui::TableNextRow();
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(gpu::format_bytes(a.bytes).c_str());
+				ImGui::TableNextColumn();
+				ImGui::ProgressBar(static_cast<float>(a.bytes) / total, ImVec2(-1.0f, 0.0f));
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(a.kind == gpu::AllocationKind::Buffer ? "Buffer" : "Texture");
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(a.name.c_str());
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(a.category.c_str());
+				ImGui::TableNextColumn();
+				const std::string details{ a.details.empty() ? a.usage : a.details + " | " + a.usage };
+				ImGui::TextUnformatted(details.c_str());
+			}
+			ImGui::EndTable();
+		}
+	}
+	ImGui::End();
+}
+
 void ax::debug::ViewManager::setup_console_logging()
 {
 	std::lock_guard<std::mutex> lock(console_log_sink_mutex);
@@ -287,6 +398,7 @@ void ax::debug::ViewManager::teardown_console_logging()
 void ax::debug::ViewManager::debug_view_callback(Debugger& debugger, Application& app, const WindowUIEvent& e)
 {
 	ZoneScopedN("DebugView");
+	gpu_memory_window();
 	ImGui::ShowDemoWindow();
 
 	ImGui::Begin(ICON_FA_PAINTBRUSH " Renderer");

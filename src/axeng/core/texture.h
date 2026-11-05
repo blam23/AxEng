@@ -1,5 +1,6 @@
 #pragma once
 
+#include "axeng/debug/gpu_memory.h"
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -247,7 +248,7 @@ namespace ax
 		inline static std::vector<Texture*> s_live{};
 
 		wgpu::TextureFormat m_format{ wgpu::TextureFormat::RGBA8Unorm };
-		wgpu::Texture m_texture;
+		gpu::TrackedTexture m_texture;
 		wgpu::TextureView m_view;
 		wgpu::Device m_device;
 		void* m_stbiPtr{ nullptr };

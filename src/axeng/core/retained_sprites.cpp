@@ -1,6 +1,6 @@
 #include "axeng/core/retained_sprites.h"
 
-wgpu::Buffer ax::upload_static_sprites(const wgpu::Device& device, const SpriteBuffer& data, glm::vec2 atlasOffset)
+ax::gpu::TrackedBuffer ax::upload_static_sprites(const wgpu::Device& device, const SpriteBuffer& data, glm::vec2 atlasOffset)
 {
 	if (!data.sealed() || data.size() * SpriteGpuData::gpuDataSize > 65536)
 		throw sol::error("Static sprite upload requires 1-1024 sealed records");
@@ -9,7 +9,7 @@ wgpu::Buffer ax::upload_static_sprites(const wgpu::Device& device, const SpriteB
 	descriptor.usage = wgpu::BufferUsage::Storage;
 	descriptor.mappedAtCreation = true;
 	descriptor.label = "RetainedSpriteBatch";
-	auto buffer{ device.CreateBuffer(&descriptor) };
+	auto buffer{ gpu::create_buffer(device, descriptor, "RetainedSprites") };
 	auto mapped{ static_cast<SpriteGpuData*>(buffer.GetMappedRange()) };
 	if (!mapped)
 		throw std::runtime_error("Failed to map retained sprite batch");

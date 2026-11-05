@@ -1,3 +1,4 @@
+#include "axeng/debug/gpu_memory.h"
 #include "axeng/core/materials/material_renderer.h"
 
 #include "spdlog/spdlog.h"
@@ -136,9 +137,9 @@ fn fs_main(in_ : VSOut) -> @location(0) vec4<f32> {
 		wgpu::PipelineLayout backdropPipelineLayout;
 		wgpu::Sampler backdropSampler;
 		wgpu::BindGroup backdropBindGroup;
-		wgpu::Buffer uniforms;
+		ax::gpu::TrackedBuffer uniforms;
 		wgpu::BindGroup bindGroup;
-		wgpu::Buffer quads;
+		ax::gpu::TrackedBuffer quads;
 		std::uint64_t slot{ 0 };
 		std::uint64_t quadOffset{ 0 };
 		ax::MaterialView view{};
@@ -337,7 +338,7 @@ bool ax::MaterialRenderer::init(const wgpu::Device& device, const MaterialRender
 	uniformDesc.label = "MaterialUniforms";
 	uniformDesc.size = s_slotStride * s_slotCount;
 	uniformDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
-	state->uniforms = device.CreateBuffer(&uniformDesc);
+	state->uniforms = ax::gpu::create_buffer(device, uniformDesc, "Materials");
 
 	wgpu::BindGroupEntry bindings[2]{};
 	bindings[0].binding = 0;
@@ -358,7 +359,7 @@ bool ax::MaterialRenderer::init(const wgpu::Device& device, const MaterialRender
 	quadDesc.label = "MaterialQuads";
 	quadDesc.size = s_quadArenaSize;
 	quadDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Vertex;
-	state->quads = device.CreateBuffer(&quadDesc);
+	state->quads = ax::gpu::create_buffer(device, quadDesc, "Materials");
 
 	state->generation = s_state ? s_state->generation + 1 : 1;
 	if (s_state)

@@ -1,6 +1,7 @@
 #pragma once
 
 #ifdef _WIN32
+#include "axeng/debug/gpu_memory.h"
 #include <windows.h>
 #endif
 
@@ -365,10 +366,10 @@ namespace ax
 		wgpu::TextureFormat m_surfaceFormat{};
 		bool m_surfaceSupportsCopySource{ false };
 		wgpu::Color m_clearColor{ 0.0, 0.0, 0.0, 1.0 };
-		wgpu::Texture m_depthTexture;
+		gpu::TrackedTexture m_depthTexture;
 		wgpu::TextureView m_depthTextureView;
 		wgpu::TextureFormat m_depthTextureFormat{ wgpu::TextureFormat::Depth24Plus };
-		wgpu::Texture m_multisampleTexture;
+		gpu::TrackedTexture m_multisampleTexture;
 		wgpu::ShaderModule m_shader;
 		wgpu::ShaderModule m_sdfShader;
 		wgpu::ShaderModule m_compositeShader;
@@ -379,19 +380,19 @@ namespace ax
 		wgpu::RenderPipeline m_sdfScreenSpacePipeline;
 		wgpu::RenderPipeline m_sdfOitPipeline;
 		wgpu::RenderPipeline m_compositePipeline;
-		wgpu::Texture m_oitAccumulationTexture;
+		gpu::TrackedTexture m_oitAccumulationTexture;
 		wgpu::TextureView m_oitAccumulationView;
-		wgpu::Texture m_oitRevealageTexture;
+		gpu::TrackedTexture m_oitRevealageTexture;
 		wgpu::TextureView m_oitRevealageView;
 		wgpu::BindGroupLayout m_compositeGroupLayout;
 		wgpu::BindGroup m_compositeBindGroup;
-		wgpu::Buffer m_uniforms;
-		wgpu::Buffer m_sdfUniforms;
+		gpu::TrackedBuffer m_uniforms;
+		gpu::TrackedBuffer m_sdfUniforms;
 		wgpu::Sampler m_nearestSampler;
 		wgpu::Sampler m_linearSampler;
 		wgpu::BindGroupLayout m_groupLayout;
 		wgpu::BindGroupLayout m_globalLayout;
-		wgpu::Buffer m_viewportBuffer;
+		gpu::TrackedBuffer m_viewportBuffer;
 		wgpu::BindGroup m_viewportBindGroup;
 		std::unordered_map<Texture*, wgpu::BindGroup> m_textureBindGroups;
 		std::mutex m_textureBindGroupsMutex{};

@@ -207,7 +207,7 @@ void ax::Texture::upload(const std::string& name, const void* rgbaPixels, uint32
 		.mipLevelCount = 1,
 		.sampleCount = 1,
 	};
-	m_texture = device.CreateTexture(&textureDesc);
+	m_texture = gpu::create_texture(device, textureDesc, "Texture");
 
 	// Create view
 	wgpu::TextureViewDescriptor viewDesc
@@ -322,7 +322,7 @@ ax::Error ax::Texture::save_png(const std::filesystem::path& path) const
 		readbackDesc.size = bufferSize;
 		readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
 		readbackDesc.label = "Texture PNG readback";
-		auto readback{ m_device.CreateBuffer(&readbackDesc) };
+		auto readback{ gpu::create_buffer(m_device, readbackDesc, "Readback") };
 
 		wgpu::CommandEncoderDescriptor encoderDesc{};
 		encoderDesc.label = "Texture PNG readback encoder";

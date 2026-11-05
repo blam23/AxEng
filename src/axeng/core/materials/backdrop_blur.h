@@ -1,5 +1,6 @@
 #pragma once
 
+#include "axeng/debug/gpu_memory.h"
 #include <webgpu/webgpu_cpp.h>
 
 #include <cstdint>
@@ -30,7 +31,7 @@ namespace ax
 		wgpu::TextureFormat m_format{ wgpu::TextureFormat::Undefined };
 		std::uint32_t m_levels{};
 		std::uint32_t m_width{}, m_height{};
-		wgpu::Texture m_texture;
+		gpu::TrackedTexture m_texture;
 		wgpu::TextureView m_chainView;
 		std::vector<wgpu::TextureView> m_levelViews;
 		std::vector<wgpu::BindGroup> m_downsampleGroups;

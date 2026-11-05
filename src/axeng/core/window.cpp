@@ -268,6 +268,7 @@ bool ax::Window::create_surfaces()
 	//
 	wgpu::TextureDescriptor depthTextureDesc
 	{
+		.label = "WindowDepth",
 		.usage = wgpu::TextureUsage::RenderAttachment,
 		.dimension = wgpu::TextureDimension::e2D,
 		.size = { m_width, m_height },
@@ -277,7 +278,7 @@ bool ax::Window::create_surfaces()
 		.viewFormatCount = 1,
 		.viewFormats = &m_depthTextureFormat,
 	};
-	m_depthTexture = m_device.CreateTexture(&depthTextureDesc);
+	m_depthTexture = gpu::create_texture(m_device, depthTextureDesc, "Window");
 
 	wgpu::TextureViewDescriptor depthTextureViewDesc
 	{
@@ -292,23 +293,25 @@ bool ax::Window::create_surfaces()
 	m_depthTextureView = m_depthTexture.CreateView(&depthTextureViewDesc);
 
 	wgpu::TextureDescriptor accumulationTextureDesc{};
+	accumulationTextureDesc.label = "WindowOitAccumulation";
 	accumulationTextureDesc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
 	accumulationTextureDesc.dimension = wgpu::TextureDimension::e2D;
 	accumulationTextureDesc.size = { m_width, m_height };
 	accumulationTextureDesc.format = wgpu::TextureFormat::RGBA16Float;
 	accumulationTextureDesc.mipLevelCount = 1;
 	accumulationTextureDesc.sampleCount = m_sampleCount;
-	m_oitAccumulationTexture = m_device.CreateTexture(&accumulationTextureDesc);
+	m_oitAccumulationTexture = gpu::create_texture(m_device, accumulationTextureDesc, "Window");
 	m_oitAccumulationView = m_oitAccumulationTexture.CreateView();
 
 	wgpu::TextureDescriptor revealageTextureDesc{};
+	revealageTextureDesc.label = "WindowOitRevealage";
 	revealageTextureDesc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
 	revealageTextureDesc.dimension = wgpu::TextureDimension::e2D;
 	revealageTextureDesc.size = { m_width, m_height };
 	revealageTextureDesc.format = wgpu::TextureFormat::R8Unorm;
 	revealageTextureDesc.mipLevelCount = 1;
 	revealageTextureDesc.sampleCount = m_sampleCount;
-	m_oitRevealageTexture = m_device.CreateTexture(&revealageTextureDesc);
+	m_oitRevealageTexture = gpu::create_texture(m_device, revealageTextureDesc, "Window");
 	m_oitRevealageView = m_oitRevealageTexture.CreateView();
 
 	//
@@ -543,7 +546,7 @@ ax::WindowFrameImageEvent ax::Window::read_frame_image
 		readbackDesc.size = bufferSize;
 		readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
 		readbackDesc.label = "Frame comparison reference readback";
-		auto referenceReadback{ reference.m_device.CreateBuffer(&readbackDesc) };
+		auto referenceReadback{ gpu::create_buffer(reference.m_device, readbackDesc, "Readback") };
 
 		wgpu::CommandEncoderDescriptor encoderDesc{};
 		encoderDesc.label = "Frame comparison reference readback encoder";
@@ -914,10 +917,10 @@ void ax::Window::reload_pipeline()
 	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
 	bufferDesc.mappedAtCreation = false;
 	bufferDesc.label = "SpriteBatch";
-	m_uniforms = m_device.CreateBuffer(&bufferDesc);
+	m_uniforms = gpu::create_buffer(m_device, bufferDesc, "Window");
 	bufferDesc.size = static_cast<uint64_t>(SdfSpriteGpuData::gpuDataSize) * static_cast<uint64_t>(m_sdfUniformsCapacity);
 	bufferDesc.label = "SdfSpriteBatch";
-	m_sdfUniforms = m_device.CreateBuffer(&bufferDesc);
+	m_sdfUniforms = gpu::create_buffer(m_device, bufferDesc, "Window");
 
 	// Viewport
 	wgpu::BufferDescriptor vpDesc{};
@@ -925,7 +928,7 @@ void ax::Window::reload_pipeline()
 	vpDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
 	vpDesc.mappedAtCreation = false;
 	vpDesc.label = "ViewportUBO";
-	m_viewportBuffer = m_device.CreateBuffer(&vpDesc);
+	m_viewportBuffer = gpu::create_buffer(m_device, vpDesc, "Window");
 
 	auto vpEntries{ std::vector<wgpu::BindGroupEntry>{ 1 } };
 	vpEntries[0].binding = 0;
@@ -1888,7 +1891,7 @@ void ax::Window::ensure_uniform_capacity(uint32_t required)
 	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
 	bufferDesc.mappedAtCreation = false;
 	bufferDesc.label = "SpriteBatch";
-	m_uniforms = m_device.CreateBuffer(&bufferDesc);
+	m_uniforms = gpu::create_buffer(m_device, bufferDesc, "Window");
 	{
 		std::lock_guard lock{ m_textureBindGroupsMutex };
 		m_textureBindGroups.clear();
@@ -1908,7 +1911,7 @@ void ax::Window::ensure_sdf_uniform_capacity(uint32_t required)
 	bufferDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
 	bufferDesc.mappedAtCreation = false;
 	bufferDesc.label = "SdfSpriteBatch";
-	m_sdfUniforms = m_device.CreateBuffer(&bufferDesc);
+	m_sdfUniforms = gpu::create_buffer(m_device, bufferDesc, "Window");
 	{
 		std::lock_guard lock{ m_textureBindGroupsMutex };
 		m_textureBindGroups.clear();
@@ -2355,6 +2358,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		{
 			wgpu::TextureDescriptor msaaDesc
 			{
+				.label = "WindowMsaa",
 				.usage = wgpu::TextureUsage::RenderAttachment,
 				.dimension = wgpu::TextureDimension::e2D,
 				.size = { m_width, m_height },
@@ -2364,7 +2368,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				.viewFormatCount = 1,
 				.viewFormats = &m_surfaceFormat,
 			};
-			m_multisampleTexture = m_device.CreateTexture(&msaaDesc);
+			m_multisampleTexture = gpu::create_texture(m_device, msaaDesc, "Window");
 		}
 
 		targetView = surfaceView;
@@ -2393,7 +2397,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_frameImageRequest.reset();
 		}
 
-		wgpu::Buffer frameImageReadback{};
+		gpu::TrackedBuffer frameImageReadback{};
 		uint32_t frameImageBytesPerRow{};
 		WindowFrameImageEvent frameImageError{};
 		bool frameImageCopyQueued{ false };
@@ -2420,7 +2424,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				readbackDesc.size = paddedRowBytes * m_height;
 				readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
 				readbackDesc.label = "Frame image readback";
-				frameImageReadback = m_device.CreateBuffer(&readbackDesc);
+				frameImageReadback = gpu::create_buffer(m_device, readbackDesc, "Readback");
 				if (frameImageReadback.Get() == nullptr)
 					frameImageError.message = "Failed to create frame image readback buffer.";
 			}

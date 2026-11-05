@@ -11,6 +11,7 @@
 #include "axeng/core/lua/bindings/lua_sprite_bindings.h"
 #include "axeng/core/lua/bindings/lua_user_io_bindings.h"
 #include "axeng/core/lua/bindings/lua_window_bindings.h"
+#include "axeng/debug/gpu_memory.h"
 #include "axeng/core/window.h"
 #include "spdlog/spdlog.h"
 #include <chrono>
@@ -26,6 +27,12 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 	app_table["clock"] = []()
 	{
 		return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+	};
+
+	// Live GPU buffers and textures as a text report, for self-test diagnostics.
+	app_table["gpu_memory_report"] = [](sol::optional<std::string> heading)
+	{
+		return ax::gpu::format_report(heading.value_or(""));
 	};
 
 	// Describes how the engine executable was built (not the project's build.json config).

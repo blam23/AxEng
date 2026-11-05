@@ -1,5 +1,6 @@
 #pragma once
 
+#include "axeng/debug/gpu_memory.h"
 #include <webgpu/webgpu_cpp.h>
 #include <glm/glm.hpp>
 
@@ -120,7 +121,7 @@ namespace ax
 	private:
 		struct InstanceBuffer
 		{
-			wgpu::Buffer buffer{};
+			gpu::TrackedBuffer buffer{};
 			std::size_t capacity{};
 			wgpu::BindGroup bindGroup{};
 		};
@@ -132,7 +133,7 @@ namespace ax
 		std::uint32_t m_sampleCount{};
 		wgpu::RenderPipeline m_lightPipeline{}, m_shadowPipeline{}, m_applyPipeline{}, m_brightApplyPipeline{}, m_glowPipeline{};
 		wgpu::BindGroupLayout m_instanceLayout{}, m_applyLayout{};
-		wgpu::Buffer m_uniforms{};
+		gpu::TrackedBuffer m_uniforms{};
 		InstanceBuffer m_lights{}, m_glows{};
 		std::unique_ptr<Texture> m_lightMap{};
 		wgpu::Sampler m_sampler{};

@@ -1,3 +1,4 @@
+#include "axeng/debug/gpu_memory.h"
 #include <tracy/Tracy.hpp>
 #include "axeng/core/shapes/shape_renderer.h"
 
@@ -67,10 +68,10 @@ namespace
 		ax::ShapeRendererConfig config;
 		wgpu::RenderPipeline opaquePipeline;
 		wgpu::RenderPipeline translucentPipeline;
-		wgpu::Buffer viewBuffer;
+		ax::gpu::TrackedBuffer viewBuffer;
 		wgpu::BindGroup viewBindGroup;
 
-		wgpu::Buffer arena;
+		ax::gpu::TrackedBuffer arena;
 		std::uint64_t arenaCapacity{ 0 };
 		std::uint64_t arenaOffset{ 0 };
 		std::uint64_t maxChunkSize{ s_max_chunk_size };
@@ -567,7 +568,7 @@ namespace
 			desc.label = "ShapeArena";
 			desc.size = capacity;
 			desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Vertex | wgpu::BufferUsage::Index;
-			state.arena = state.device.CreateBuffer(&desc);
+			state.arena = ax::gpu::create_buffer(state.device, desc, "Shapes");
 			state.arenaCapacity = capacity;
 			state.arenaOffset = 0;
 		}
@@ -747,7 +748,7 @@ bool ax::ShapeRenderer::init(const wgpu::Device& device, const ShapeRendererConf
 	viewDesc.label = "ShapeView";
 	viewDesc.size = 8 * sizeof(float);
 	viewDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
-	state->viewBuffer = device.CreateBuffer(&viewDesc);
+	state->viewBuffer = ax::gpu::create_buffer(device, viewDesc, "Shapes");
 
 	wgpu::BindGroupEntry viewBinding{};
 	viewBinding.binding = 0;
