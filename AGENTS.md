@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Notes for AI agents working on AxEng. AxEng is a WIP WebGPU (Dawn) + Lua game engine. It is Windows-only and built with xmake, clang and C++23. See [README.md](README.md) for user-facing CLI docs.
+Notes for AI agents working on AxEng. AxEng is a WIP WebGPU (Dawn) + Lua game engine. It currently builds for Windows and Web (WASM+WebGPU) and is built with xmake, clang and C++23. See [README.md](README.md) for user-facing CLI docs.
 
 ## Project agnosticism
 
