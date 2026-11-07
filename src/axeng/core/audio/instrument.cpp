@@ -421,13 +421,14 @@ bool ax::audio::SynthInstrumentVoice::next(float& sample) noexcept
 	return true;
 }
 
-std::optional<ax::audio::AudioSampleData> ax::audio::render_synth_sample(
-	const SynthInstrumentDefinition& definition, std::uint8_t note, float velocity, float holdSeconds,
-	std::uint32_t sampleRate, std::string& error)
+std::optional<ax::audio::AudioSampleData> ax::audio::render_voice_sample(
+	const VoiceRenderRequest& request, std::string& error)
 {
 	error.clear();
+	const auto holdSeconds{ request.holdSeconds };
+	const auto sampleRate{ request.sampleRate };
 	if (!std::isfinite(holdSeconds) || !(holdSeconds > 0.0f)
-		|| !finite_between(holdSeconds + definition.envelope.release, 0.0f, synth_sample_max_seconds))
+		|| !finite_between(holdSeconds + request.releaseSeconds, 0.0f, synth_sample_max_seconds))
 	{
 		error = "synth sample hold plus release must be positive and no longer than 30 seconds";
 		return std::nullopt;
@@ -437,9 +438,7 @@ std::optional<ax::audio::AudioSampleData> ax::audio::render_synth_sample(
 		error = "synth sample rate must be between 8000 and 96000 Hz";
 		return std::nullopt;
 	}
-
-	SynthInstrumentVoice voice{ definition, note, velocity, sampleRate };
-	if (!voice.valid())
+	if (!request.voiceValid)
 	{
 		error = "synth sample has an invalid instrument definition, note, or velocity";
 		return std::nullopt;
@@ -448,7 +447,7 @@ std::optional<ax::audio::AudioSampleData> ax::audio::render_synth_sample(
 	const auto holdFrames{ static_cast<std::uint64_t>(std::llround(
 		static_cast<double>(holdSeconds) * static_cast<double>(sampleRate))) };
 	const auto releaseFrames{ static_cast<std::uint64_t>(std::llround(
-		static_cast<double>(definition.envelope.release) * static_cast<double>(sampleRate))) };
+		static_cast<double>(request.releaseSeconds) * static_cast<double>(sampleRate))) };
 	if (holdFrames == 0 || holdFrames > std::numeric_limits<std::size_t>::max() - releaseFrames)
 	{
 		error = "synth sample duration is outside the supported range";
@@ -462,9 +461,9 @@ std::optional<ax::audio::AudioSampleData> ax::audio::render_synth_sample(
 	for (std::uint64_t frame{}; frame < holdFrames + releaseFrames; ++frame)
 	{
 		if (frame == holdFrames)
-			voice.note_off();
+			request.noteOff();
 		float sample{};
-		if (!voice.next(sample))
+		if (!request.next(sample))
 			break;
 		rendered.samples[static_cast<std::size_t>(frame)] = sample;
 	}
@@ -484,6 +483,17 @@ std::optional<ax::audio::AudioSampleData> ax::audio::render_synth_sample(
 		return std::nullopt;
 	}
 	return rendered;
+}
+
+std::optional<ax::audio::AudioSampleData> ax::audio::render_synth_sample(
+	const SynthInstrumentDefinition& definition, std::uint8_t note, float velocity, float holdSeconds,
+	std::uint32_t sampleRate, std::string& error)
+{
+	SynthInstrumentVoice voice{ definition, note, velocity, sampleRate };
+	return render_voice_sample({ .holdSeconds = holdSeconds, .releaseSeconds = definition.envelope.release,
+		.sampleRate = sampleRate, .voiceValid = voice.valid(),
+		.next = [&voice](float& sample) { return voice.next(sample); },
+		.noteOff = [&voice] { voice.note_off(); } }, error);
 }
 
 ax::audio::SamplerInstrumentVoice::SamplerInstrumentVoice(const AudioSampleData& sample,

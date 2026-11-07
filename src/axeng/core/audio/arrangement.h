@@ -7,6 +7,7 @@
 #include <variant>
 #include <vector>
 
+#include "axeng/core/audio/fm_voice.h"
 #include "axeng/core/audio/instrument.h"
 
 namespace ax::audio
@@ -20,8 +21,10 @@ namespace ax::audio
 
 	struct ArrangementInstrument
 	{
-		std::variant<SynthInstrumentDefinition, SamplerInstrumentDefinition> definition{};
+		std::variant<SynthInstrumentDefinition, SamplerInstrumentDefinition, FmInstrumentDefinition> definition{};
 		const AudioSampleData* sample{};
+		float chorusSend{}; // 0..1: 1 is an even blend of the dry and chorused sound
+		float reverbSend{ 1.0f }; // 0..1: how much of the sound reaches the reverb
 	};
 
 	struct ArrangementNote

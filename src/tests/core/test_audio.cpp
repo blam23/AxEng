@@ -478,6 +478,197 @@ TEST(AudioSystem, LuaCanPlaySynthAndSamplerInstruments)
 	EXPECT_EQ(app.audio_samples().get("rendered")->pcm().sampleRate, 22050u);
 }
 
+namespace
+{
+	FmInstrumentDefinition fm_tone()
+	{
+		FmInstrumentDefinition definition{};
+		definition.algorithm = 32;
+		definition.gain = 0.5f;
+		definition.envelope.release = 0.01f;
+		for (auto& op : definition.operators)
+			op.outputLevel = 0;
+		definition.operators[0].outputLevel = 99;
+		return definition;
+	}
+
+	Arrangement fm_arrangement(float chorusSend)
+	{
+		return Arrangement{
+			.tempo = 60.0f,
+			.durationBeats = 4.0f,
+			.instruments = { ArrangementInstrument{ .definition = fm_tone(), .chorusSend = chorusSend } },
+			.notes = { ArrangementNote{ .startBeat = 0.0f, .durationBeats = 3.0f,
+				.instrument = 0, .note = 69, .velocity = 1.0f, .pan = 0.0f } } };
+	}
+
+	float channel_difference(const std::vector<float>& stereo)
+	{
+		float result{};
+		for (std::size_t i{}; i + 1 < stereo.size(); i += 2)
+			result = std::max(result, std::abs(stereo[i] - stereo[i + 1]));
+		return result;
+	}
+}
+
+TEST(AudioSystem, PlaysFmVoices)
+{
+	auto audio{ make_offline_audio() };
+	const auto id{ audio.play_fm(fm_tone(), 69, 1.0f, { .bus = Bus::Music }) };
+	ASSERT_NE(id, 0u);
+	EXPECT_GT(peak(mix_for(audio, 0.1f)), 0.1f);
+	EXPECT_TRUE(audio.note_off(id));
+	mix_for(audio, 0.1f);
+	EXPECT_EQ(audio.voice_count(), 0u);
+
+	auto invalid{ fm_tone() };
+	invalid.algorithm = 0;
+	EXPECT_EQ(audio.play_fm(invalid, 69), 0u);
+}
+
+TEST(Arrangement, FmInstrumentsPlayAndSeek)
+{
+	auto uninterrupted{ make_offline_audio() };
+	auto sought{ make_offline_audio() };
+	std::string error{};
+	ASSERT_TRUE(uninterrupted.define_arrangement("test", fm_arrangement(0.0f), error)) << error;
+	ASSERT_TRUE(sought.define_arrangement("test", fm_arrangement(0.0f), error)) << error;
+	EXPECT_TRUE(uninterrupted.play_arrangement("test", 0.0f));
+	EXPECT_TRUE(sought.play_arrangement("test", 0.0f));
+
+	EXPECT_GT(peak(mix_for(uninterrupted, 1.5f)), 0.1f);
+	ASSERT_TRUE(sought.seek_arrangement(1.5f));
+	const auto expected{ mix_for(uninterrupted, 0.1f) };
+	const auto actual{ mix_for(sought, 0.1f) };
+	ASSERT_EQ(expected.size(), actual.size());
+	// The voice's DC filter restarts on a seek, and for a moment lacks the small phase lead it has when settled.
+	for (std::size_t i{}; i < expected.size(); ++i)
+		EXPECT_NEAR(expected[i], actual[i], 0.03f);
+}
+
+TEST(Arrangement, RejectsInvalidFmInstrumentsAndChorusSends)
+{
+	std::string error{};
+	auto arrangement{ fm_arrangement(0.0f) };
+	std::get<FmInstrumentDefinition>(arrangement.instruments[0].definition).feedback = 8;
+	EXPECT_EQ(prepare_arrangement(std::move(arrangement), 48000, error), nullptr);
+	EXPECT_EQ(prepare_arrangement(fm_arrangement(1.5f), 48000, error), nullptr);
+}
+
+TEST(Arrangement, ChorusWidensACentredSoundAtTheSameLevel)
+{
+	const auto render{ [](float send)
+	{
+		auto audio{ make_offline_audio() };
+		std::string error{};
+		EXPECT_TRUE(audio.define_arrangement("test", fm_arrangement(send), error)) << error;
+		EXPECT_TRUE(audio.play_arrangement("test", 0.0f));
+		return mix_for(audio, 1.0f);
+	} };
+	const auto dry{ render(0.0f) };
+	const auto wide{ render(1.0f) };
+	EXPECT_LT(channel_difference(dry), 1e-6f);
+	EXPECT_GT(channel_difference(wide), 0.05f);
+	EXPECT_NEAR(channel_energy(wide, 0) / channel_energy(dry, 0), 0.75f, 0.35f);
+	EXPECT_LE(peak(wide), peak(dry) * 1.05f);
+}
+
+TEST(Arrangement, ReverbSendKeepsAnInstrumentDry)
+{
+	const auto render{ [](float send)
+	{
+		auto arrangement{ fm_arrangement(0.0f) };
+		arrangement.reverb = { .wet = 0.5f, .decaySeconds = 2.0f, .damping = 0.3f };
+		arrangement.instruments[0].reverbSend = send;
+		auto audio{ make_offline_audio() };
+		std::string error{};
+		EXPECT_TRUE(audio.define_arrangement("test", std::move(arrangement), error)) << error;
+		EXPECT_TRUE(audio.play_arrangement("test", 0.0f));
+		mix_for(audio, 3.1f);
+		return peak(mix_for(audio, 0.5f));
+	} };
+	EXPECT_GT(render(1.0f), 0.01f);
+	EXPECT_LT(render(0.0f), 1e-6f);
+
+	std::string error{};
+	auto invalid{ fm_arrangement(0.0f) };
+	invalid.instruments[0].reverbSend = 1.5f;
+	EXPECT_EQ(prepare_arrangement(std::move(invalid), 48000, error), nullptr);
+}
+
+TEST(Arrangement, SeekClearsTheChorus)
+{
+	auto audio{ make_offline_audio() };
+	std::string error{};
+	ASSERT_TRUE(audio.define_arrangement("test", fm_arrangement(1.0f), error)) << error;
+	ASSERT_TRUE(audio.play_arrangement("test", 0.0f));
+	mix_for(audio, 0.5f);
+	ASSERT_TRUE(audio.seek_arrangement(3.9f));
+	EXPECT_LT(peak(mix_for(audio, 0.01f)), 1e-6f);
+}
+
+TEST(AudioSystem, LuaCanPlayFmInstruments)
+{
+	const std::string manifest{
+		"manifest = { name = 'axeng_test_fm_audio', headless = true, audio = true, permissions = {}, "
+		"scripts = { main = 'main.lua' }, entry_point = 'main' }"
+	};
+	const std::string entry_point{
+		"local op = { output_level = 99, coarse = 2, fine = 10, detune = -3, fixed = false,\n"
+		"  rates = { 99, 40, 30, 50 }, levels = { 99, 70, 0, 0 }, velocity_sensitivity = 3, amp_mod_sensitivity = 1,\n"
+		"  rate_scaling = 2, breakpoint = 39, left_depth = 10, right_depth = 20,\n"
+		"  left_curve = 'neg_exp', right_curve = 'pos_lin' }\n"
+		"local patch = { algorithm = 5, feedback = 4, transpose = -12, gain = 0.5,\n"
+		"  envelope = { attack = 0, decay = 0, sustain = 1, release = 0.01 },\n"
+		"  pitch_envelope = { rates = { 99, 99, 99, 99 }, levels = { 50, 50, 50, 50 } },\n"
+		"  lfo = { wave = 'sample_hold', speed = 30, delay = 10, pitch_depth = 4, amp_depth = 2, pitch_sensitivity = 3 },\n"
+		"  operators = { op, op, op, op, op, op } }\n"
+		"local routing = app.audio.fm_algorithm(4)\n"
+		"assert(#routing.modulators == 6 and routing.modulators[1][1] == 2 and #routing.carriers == 2)\n"
+		"assert(routing.feedback_target == 6 and routing.feedback_source == 4 and app.audio.fm_algorithm(33) == nil)\n"
+		"local voice = app.audio.play_fm(patch, 60, { velocity = 0.8, bus = 'music' })\n"
+		"assert(voice > 0 and app.audio.note_off(voice))\n"
+		"local wav = app.audio.render_fm_sample(patch, 60, { hold_seconds = 0.1, sample_rate = 22050 })\n"
+		"assert(type(wav) == 'string' and app.audio.inspect_sample(wav).sample_rate == 22050)\n"
+		"local instrument = { type = 'fm', chorus_send = 0.5, reverb_send = 0.25 }\n"
+		"for key, value in pairs(patch) do instrument[key] = value end\n"
+		"assert(app.audio.sequence.define('fm', { tempo = 60, duration_beats = 4, instruments = { instrument },\n"
+		"  notes = {{ start_beat = 0, duration_beats = 2, instrument = 1, note = 60 }} }))\n"
+		"assert(app.audio.sequence.play('fm', 0))\n"
+		"return 0"
+	};
+	ax::EmbeddedResourceLayout layout;
+	layout.emplace("manifest.luac", ax::EmbeddedResource{ reinterpret_cast<const std::uint8_t*>(manifest.data()), manifest.size() });
+	layout.emplace("main.lua", ax::EmbeddedResource{ reinterpret_cast<const std::uint8_t*>(entry_point.data()), entry_point.size() });
+
+	auto app{ ax::Application::from_embedded({}, std::move(layout)) };
+	app.set_audio_config(AudioSystem::Config{ .openDevice = false });
+	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
+	EXPECT_EQ(app.audio()->voice_count(), 1u);
+}
+
+TEST(AudioSystem, LuaRejectsBadFmFields)
+{
+	testlog::LogCapture::instance().expect_total_error_count(3);
+	const std::string manifest{
+		"manifest = { name = 'axeng_test_bad_fm', headless = true, audio = true, permissions = {}, "
+		"scripts = { main = 'main.lua' }, entry_point = 'main' }"
+	};
+	const std::string entry_point{
+		"local op = {}\n"
+		"assert(app.audio.play_fm({ operators = { op, op, op } }, 60) == 0)\n"
+		"assert(app.audio.play_fm({ algorithm = 33, operators = { op, op, op, op, op, op } }, 60) == 0)\n"
+		"assert(app.audio.play_fm({ operators = { { left_curve = 'wobbly' }, op, op, op, op, op } }, 60) == 0)\n"
+		"return 0"
+	};
+	ax::EmbeddedResourceLayout layout;
+	layout.emplace("manifest.luac", ax::EmbeddedResource{ reinterpret_cast<const std::uint8_t*>(manifest.data()), manifest.size() });
+	layout.emplace("main.lua", ax::EmbeddedResource{ reinterpret_cast<const std::uint8_t*>(entry_point.data()), entry_point.size() });
+	auto app{ ax::Application::from_embedded({}, std::move(layout)) };
+	app.set_audio_config(AudioSystem::Config{ .openDevice = false });
+	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
+}
+
 TEST(AudioSystem, ArrangementSchedulesSeeksPausesAndResumes)
 {
 	auto uninterrupted{ make_offline_audio() };

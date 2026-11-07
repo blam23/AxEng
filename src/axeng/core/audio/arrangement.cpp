@@ -28,12 +28,20 @@ namespace
 	bool valid_instrument(const ax::audio::ArrangementInstrument& instrument, std::uint32_t sampleRate,
 		std::set<const ax::audio::AudioSampleData*>& validatedSamples)
 	{
+		if (!std::isfinite(instrument.chorusSend) || instrument.chorusSend < 0.0f || instrument.chorusSend > 1.0f
+			|| !std::isfinite(instrument.reverbSend) || instrument.reverbSend < 0.0f || instrument.reverbSend > 1.0f)
+			return false;
 		return std::visit([&](const auto& definition)
 		{
 			using Definition = std::decay_t<decltype(definition)>;
 			if constexpr (std::is_same_v<Definition, ax::audio::SynthInstrumentDefinition>)
 			{
 				return ax::audio::SynthInstrumentVoice{ definition, 60, 1.0f, sampleRate }.valid()
+					&& instrument.sample == nullptr;
+			}
+			else if constexpr (std::is_same_v<Definition, ax::audio::FmInstrumentDefinition>)
+			{
+				return ax::audio::FmInstrumentVoice{ definition, 60, 1.0f, sampleRate }.valid()
 					&& instrument.sample == nullptr;
 			}
 			else

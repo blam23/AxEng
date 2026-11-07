@@ -19,6 +19,7 @@ Code lives in `src/axeng/core/audio/`:
 | `audio_system.h/.cpp` | `AudioSystem`: output device, mixer, sound bank, voices, buses and the music player. |
 | `music.h/.cpp` | `Music` asset and `MusicManager` (`AssetManager<Music, MusicManager>`). |
 | `instrument.h/.cpp` | Pitched synth/sampler voice state, envelopes, resampling, and sample decoding. |
+| `fm_voice.h/.cpp` | Six-operator FM voice and its algorithm table. |
 | `audio_sample.h/.cpp` | Decoded `AudioSample` assets and `AudioSampleManager`. |
 | `miniaudio_impl.c` | The miniaudio + stb_vorbis implementation translation unit (compiled with `-w`). |
 
@@ -133,6 +134,38 @@ table. Sampler tables accept `root_note`, `tuning_cents`, trim and loop frame se
 `envelope`. Playback options accept `velocity`, `volume`, `pan`, and `bus` (`sfx`, `ui`, or `music`).
 `update_voice()` can ramp volume and pan for instrument voices; pitch updates are only supported for generated SFX.
 
+## FM voices
+
+`FmInstrumentVoice` is a six-operator phase-modulation voice in the style of 1980s FM keyboards. Its parameters use
+the familiar 0..99 ranges. Each operator has a four-stage rate/level envelope, a ratio or fixed frequency, detune,
+velocity sensitivity, keyboard level and rate scaling, and LFO amplitude sensitivity. A voice has one of 32 algorithms,
+feedback, a pitch envelope, an LFO and a transpose. `fm_algorithm(n)` exposes the routing for editors.
+
+Velocity reaches the sound only through each operator's `velocity_sensitivity`, so it can change brightness as well as
+level. A carrier with no sensitivity plays at the same level at every velocity. Sounding carriers are averaged, so
+`gain` stays close to the voice's peak level whatever the algorithm. The outer `envelope` gates the whole
+voice: its `release` is the tail used for scheduling and polyphony, so set it to cover the slowest carrier's release.
+
+```lua
+local op = { output_level = 99, coarse = 1, rates = { 99, 40, 30, 50 }, levels = { 99, 70, 0, 0 } }
+local mod = { output_level = 75, coarse = 14, rates = { 99, 60, 40, 50 }, levels = { 99, 0, 0, 0 } }
+local silent = { output_level = 0 }
+local id = app.audio.play_fm({
+    algorithm = 1, feedback = 0, transpose = 0, gain = 0.3,
+    envelope = { attack = 0, decay = 0, sustain = 1, release = 1.5 },
+    pitch_envelope = { rates = { 99, 99, 99, 99 }, levels = { 50, 50, 50, 50 } },
+    lfo = { wave = "triangle", speed = 35, delay = 0, pitch_depth = 0, amp_depth = 0, pitch_sensitivity = 0 },
+    operators = { op, mod, silent, silent, silent, silent },
+}, 60, { velocity = 0.8, bus = "music" })
+```
+
+Operator tables also accept `fine`, `detune`, `fixed`, `velocity_sensitivity`, `amp_mod_sensitivity`, `rate_scaling`,
+`breakpoint`, `left_depth`, `right_depth`, `left_curve` and `right_curve` (`neg_lin`, `neg_exp`, `pos_exp`, `pos_lin`).
+LFO waves are `triangle`, `saw_down`, `saw_up`, `square`, `sine` and `sample_hold`. `render_fm_sample()` matches
+`render_synth_sample()`. Silent operators are skipped. `output_trim` (1..16, default 1) lifts a patch whose carriers
+peak below full scale, so `gain` can still mean its peak level. `app.audio.fm_algorithm(n)` returns `modulators` (for
+each operator, the list that modulates it), `carriers`, `feedback_target` and `feedback_source`, for editors to draw.
+
 ## Sequence arrangements
 
 `audio.sequence` accepts and prepares immutable note arrangements on the Lua/main thread. Notes use beat positions;
@@ -178,7 +211,7 @@ sequence.stop(0.5)
 
 Instruments are one-based indices into `instruments`; each note supplies `start_beat`, `duration_beats`,
 `instrument`, MIDI `note`, and optional `velocity` and `pan`. A synth instrument accepts the pitched synth fields
-described above with `type = "synth"`. A sampler uses `type = "sample"` and a loaded `sample` name plus the sampler
+described above with `type = "synth"`, and an FM instrument accepts the FM fields with `type = "fm"`. A sampler uses `type = "sample"` and a loaded `sample` name plus the sampler
 settings above. `sequence.define()` reports invalid tempo, duration, assets, note data, and polyphony as an error
 and does not replace a previously prepared arrangement on failure. `sequence.list()` returns defined arrangement
 names; `sequence.play()`, `stop()`, `pause()`, `resume()`, `seek(seconds)`, and `state()` control the active
@@ -186,12 +219,18 @@ arrangement. Seeking clamps to the arrangement duration and rebuilds active note
 voice and reverb state, then fades the reverb return in over 20 ms; it does not recreate historical reverb tails.
 Sequence pause state is independent of `audio.music.pause()` / `resume()`, which control encoded music playback.
 
+Any instrument can set `chorus_send` (0..1, default 0). At 1 it is an even blend of the dry sound and a stereo chorus
+on the arrangement mix, which widens the sound at about the same level. The chorus runs before the reverb, is
+allocated only when an instrument uses it, and is reset by seeking. `reverb_send` (0..1, default 1) sets how much of an
+instrument reaches the reverb. Keep it low for bass: the early reflections are close enough to low notes to partly
+cancel them, which makes each note sound as if it starts with a hit.
+
 `reverb` is optional and defaults to dry playback. Its additive wet-return level is 0..1, `decay_seconds` is 0.1..8,
 and `damping` is 0..0.95. The bounded four-line stereo effect runs on the arrangement mix; its delay buffers are
 prepared when playback starts and are not allocated in the audio callback. Seeking fades the wet return in without
 changing the dry signal level. Natural ends, stops, and crossfades drain the reverb for at most 10 seconds. Sequence
-playback shares the music bus with encoded tracks and fades the other music source when starting. Per-instrument effect
-sends, delay, and automation remain future work. AxFactory's loading screen prepares its saved procedural tracks
+playback shares the music bus with encoded tracks and fades the other music source when starting. Delay and automation
+remain future work. AxFactory's loading screen prepares its saved procedural tracks
 incrementally, one bounded track operation per frame, before entering the requested scene.
 
 ## Lua API

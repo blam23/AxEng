@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <span>
 #include <string>
@@ -54,6 +55,18 @@ namespace ax::audio
 	std::optional<AudioSampleData> render_synth_sample(const SynthInstrumentDefinition& definition,
 		std::uint8_t note, float velocity, float holdSeconds, std::uint32_t sampleRate, std::string& error);
 	constexpr float synth_sample_max_seconds{ 30.0f };
+
+	// Renders one held note of any mono voice through its release.
+	struct VoiceRenderRequest
+	{
+		float holdSeconds{};
+		float releaseSeconds{};
+		std::uint32_t sampleRate{};
+		bool voiceValid{};
+		std::function<bool(float&)> next{};
+		std::function<void()> noteOff{};
+	};
+	std::optional<AudioSampleData> render_voice_sample(const VoiceRenderRequest& request, std::string& error);
 
 	struct SamplerInstrumentDefinition
 	{

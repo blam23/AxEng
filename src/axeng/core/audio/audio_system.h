@@ -161,6 +161,8 @@ namespace ax::audio
 		// Pitched voices use the music bus by default. Sample PCM must outlive its active sampler voices.
 		VoiceId play_synth(const SynthInstrumentDefinition& definition, std::uint8_t note, float velocity = 1.0f,
 			const InstrumentPlayOptions& options = {});
+		VoiceId play_fm(const FmInstrumentDefinition& definition, std::uint8_t note, float velocity = 1.0f,
+			const InstrumentPlayOptions& options = {});
 		VoiceId play_sampler(const AudioSampleData& sample, const SamplerInstrumentDefinition& definition,
 			std::uint8_t note, float velocity = 1.0f, const InstrumentPlayOptions& options = {});
 		bool note_off(VoiceId id);

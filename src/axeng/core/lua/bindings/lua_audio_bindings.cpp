@@ -5,6 +5,7 @@
 #include "axeng/core/audio/music.h"
 #include "axeng/core/audio/sfx_synth.h"
 
+#include <array>
 #include <cmath>
 #include <functional>
 #include <map>
@@ -182,6 +183,144 @@ namespace
 		const sol::optional<sol::table> envelope{ table["envelope"] };
 		if (envelope)
 			definition.envelope = envelope_from_table(*envelope, definition.envelope);
+		return definition;
+	}
+
+	template <typename Value>
+	bool read_fm_integer(const sol::table& table, const char* key, int low, int high, Value& value)
+	{
+		const auto number{ table.get_or(key, static_cast<int>(value)) };
+		if (number < low || number > high)
+		{
+			spdlog::error("<Audio> FM field '{}' must be {}..{}", key, low, high);
+			return false;
+		}
+		value = static_cast<Value>(number);
+		return true;
+	}
+
+	bool read_fm_stages(const sol::table& table, const char* key, std::array<std::uint8_t, 4>& stages)
+	{
+		const sol::optional<sol::table> values{ table[key] };
+		if (!values)
+			return true;
+		for (std::size_t i{}; i < stages.size(); ++i)
+		{
+			const auto value{ values->get_or(static_cast<int>(i) + 1, -1) };
+			if (value < 0 || value > 99)
+			{
+				spdlog::error("<Audio> FM '{}' needs four values from 0 to 99", key);
+				return false;
+			}
+			stages[i] = static_cast<std::uint8_t>(value);
+		}
+		return true;
+	}
+
+	bool read_fm_envelope(const sol::table& table, ax::audio::FmEnvelope& envelope)
+	{
+		return read_fm_stages(table, "rates", envelope.rates) && read_fm_stages(table, "levels", envelope.levels);
+	}
+
+	bool read_fm_curve(const sol::table& table, const char* key, ax::audio::FmScalingCurve& curve)
+	{
+		using ax::audio::FmScalingCurve;
+		const sol::optional<std::string> name{ table[key] };
+		if (!name)
+			return true;
+		if (*name == "neg_lin") curve = FmScalingCurve::NegativeLinear;
+		else if (*name == "neg_exp") curve = FmScalingCurve::NegativeExponential;
+		else if (*name == "pos_exp") curve = FmScalingCurve::PositiveExponential;
+		else if (*name == "pos_lin") curve = FmScalingCurve::PositiveLinear;
+		else
+		{
+			spdlog::error("<Audio> Unknown FM scaling curve '{}'", *name);
+			return false;
+		}
+		return true;
+	}
+
+	bool read_fm_lfo_wave(const sol::table& table, ax::audio::FmLfoWave& wave)
+	{
+		using ax::audio::FmLfoWave;
+		const sol::optional<std::string> name{ table["wave"] };
+		if (!name)
+			return true;
+		if (*name == "triangle") wave = FmLfoWave::Triangle;
+		else if (*name == "saw_down") wave = FmLfoWave::SawDown;
+		else if (*name == "saw_up") wave = FmLfoWave::SawUp;
+		else if (*name == "square") wave = FmLfoWave::Square;
+		else if (*name == "sine") wave = FmLfoWave::Sine;
+		else if (*name == "sample_hold") wave = FmLfoWave::SampleHold;
+		else
+		{
+			spdlog::error("<Audio> Unknown FM LFO wave '{}'", *name);
+			return false;
+		}
+		return true;
+	}
+
+	bool read_fm_operator(const sol::table& table, ax::audio::FmOperator& op)
+	{
+		op.fixedFrequency = table.get_or("fixed", op.fixedFrequency);
+		return read_fm_envelope(table, op.envelope)
+			&& read_fm_curve(table, "left_curve", op.levelScalingLeftCurve)
+			&& read_fm_curve(table, "right_curve", op.levelScalingRightCurve)
+			&& read_fm_integer(table, "output_level", 0, 99, op.outputLevel)
+			&& read_fm_integer(table, "coarse", 0, 31, op.coarse)
+			&& read_fm_integer(table, "fine", 0, 99, op.fine)
+			&& read_fm_integer(table, "detune", -7, 7, op.detune)
+			&& read_fm_integer(table, "velocity_sensitivity", 0, 7, op.velocitySensitivity)
+			&& read_fm_integer(table, "amp_mod_sensitivity", 0, 3, op.ampModSensitivity)
+			&& read_fm_integer(table, "rate_scaling", 0, 7, op.rateScaling)
+			&& read_fm_integer(table, "breakpoint", 0, 99, op.levelScalingBreakpoint)
+			&& read_fm_integer(table, "left_depth", 0, 99, op.levelScalingLeftDepth)
+			&& read_fm_integer(table, "right_depth", 0, 99, op.levelScalingRightDepth);
+	}
+
+	std::optional<ax::audio::FmInstrumentDefinition> fm_definition_from_table(const sol::table& table)
+	{
+		ax::audio::FmInstrumentDefinition definition{};
+		definition.gain = table.get_or("gain", definition.gain);
+		definition.outputTrim = table.get_or("output_trim", definition.outputTrim);
+		const sol::optional<sol::table> envelope{ table["envelope"] };
+		if (envelope)
+			definition.envelope = envelope_from_table(*envelope, definition.envelope);
+		if (!read_fm_integer(table, "algorithm", 1, ax::audio::fm_algorithm_count, definition.algorithm)
+			|| !read_fm_integer(table, "feedback", 0, 7, definition.feedback)
+			|| !read_fm_integer(table, "transpose", -24, 24, definition.transpose))
+			return std::nullopt;
+
+		const sol::optional<sol::table> pitchEnvelope{ table["pitch_envelope"] };
+		if (pitchEnvelope && !read_fm_envelope(*pitchEnvelope, definition.pitchEnvelope))
+			return std::nullopt;
+
+		const sol::optional<sol::table> lfo{ table["lfo"] };
+		if (lfo && (!read_fm_lfo_wave(*lfo, definition.lfo.wave)
+			|| !read_fm_integer(*lfo, "speed", 0, 99, definition.lfo.speed)
+			|| !read_fm_integer(*lfo, "delay", 0, 99, definition.lfo.delay)
+			|| !read_fm_integer(*lfo, "pitch_depth", 0, 99, definition.lfo.pitchModDepth)
+			|| !read_fm_integer(*lfo, "amp_depth", 0, 99, definition.lfo.ampModDepth)
+			|| !read_fm_integer(*lfo, "pitch_sensitivity", 0, 7, definition.lfo.pitchModSensitivity)))
+			return std::nullopt;
+
+		const sol::optional<sol::table> operators{ table["operators"] };
+		if (!operators)
+		{
+			spdlog::error("<Audio> FM definition is missing its operators");
+			return std::nullopt;
+		}
+		for (std::size_t i{}; i < definition.operators.size(); ++i)
+		{
+			const sol::optional<sol::table> op{ (*operators)[static_cast<int>(i) + 1] };
+			if (!op)
+			{
+				spdlog::error("<Audio> FM definitions need all {} operators", definition.operators.size());
+				return std::nullopt;
+			}
+			if (!read_fm_operator(*op, definition.operators[i]))
+				return std::nullopt;
+		}
 		return definition;
 	}
 
@@ -397,6 +536,40 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 			return std::string{ reinterpret_cast<const char*>(wav->data()), wav->size() };
 		};
 
+	audio_table["render_fm_sample"] =
+		[default_sample_rate = std::min(system->sample_rate(), 48000u)](
+			const sol::table& table, int note, sol::optional<sol::table> options)
+			-> sol::optional<std::string>
+		{
+			if (note < 0 || note > 127)
+			{
+				spdlog::error("<Audio> Invalid MIDI note '{}' for FM sample rendering", note);
+				return sol::nullopt;
+			}
+			const auto definition{ fm_definition_from_table(table) };
+			if (!definition)
+				return sol::nullopt;
+
+			const auto holdSeconds{ options ? options->get_or("hold_seconds", 1.0f) : 1.0f };
+			const auto velocity{ options ? options->get_or("velocity", 1.0f) : 1.0f };
+			const auto sampleRate{ options ? options->get_or("sample_rate", default_sample_rate) : default_sample_rate };
+			std::string error{};
+			const auto pcm{ ax::audio::render_fm_sample(*definition, static_cast<std::uint8_t>(note),
+				velocity, holdSeconds, sampleRate, error) };
+			if (!pcm)
+			{
+				spdlog::error("<Audio> Failed to render FM sample: {}", error);
+				return sol::nullopt;
+			}
+			const auto wav{ ax::AudioSample::encode_wav(*pcm, error) };
+			if (!wav)
+			{
+				spdlog::error("<Audio> Failed to encode FM sample: {}", error);
+				return sol::nullopt;
+			}
+			return std::string{ reinterpret_cast<const char*>(wav->data()), wav->size() };
+		};
+
 	audio_table["load_sample"] =
 		[&app](const std::string& name, const std::string& encoded) -> bool
 		{
@@ -486,6 +659,54 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 			}, ax::audio::VoiceId{}) };
 			if (id == 0)
 				spdlog::warn("<Audio> Pitched synth voice was rejected");
+			return static_cast<double>(id);
+		};
+
+	audio_table["fm_algorithm"] =
+		[](sol::this_state state, int number) -> sol::object
+		{
+			if (number < 1 || number > ax::audio::fm_algorithm_count)
+				return sol::make_object(state, sol::nil);
+			const auto& algorithm{ *ax::audio::fm_algorithm(static_cast<std::uint8_t>(number)) };
+			sol::state_view lua{ state };
+			const auto operator_list{ [&lua](std::uint32_t mask)
+			{
+				auto list{ lua.create_table() };
+				for (int op{ 1 }; op <= static_cast<int>(ax::audio::fm_operator_count); ++op)
+					if ((mask >> (op - 1)) & 1u)
+						list.add(op);
+				return list;
+			} };
+			auto modulators{ lua.create_table() };
+			for (const std::uint32_t mask : algorithm.modulators)
+				modulators.add(operator_list(mask));
+			auto result{ lua.create_table() };
+			result["modulators"] = modulators;
+			result["carriers"] = operator_list(algorithm.carriers);
+			result["feedback_target"] = algorithm.feedbackTarget + 1;
+			result["feedback_source"] = algorithm.feedbackSource + 1;
+			return result;
+		};
+
+	audio_table["play_fm"] =
+		[with_audio](const sol::table& table, int note, sol::optional<sol::table> options) -> double
+		{
+			if (note < 0 || note > 127)
+			{
+				spdlog::error("<Audio> Invalid MIDI note '{}'", note);
+				return 0.0;
+			}
+			const auto definition{ fm_definition_from_table(table) };
+			const auto playback{ instrument_options_from_table(options) };
+			if (!definition || !playback)
+				return 0.0;
+			const auto velocity{ options ? options->get_or("velocity", 1.0f) : 1.0f };
+			const auto id{ with_audio([&](ax::audio::AudioSystem& audio)
+			{
+				return audio.play_fm(*definition, static_cast<std::uint8_t>(note), velocity, *playback);
+			}, ax::audio::VoiceId{}) };
+			if (id == 0)
+				spdlog::warn("<Audio> FM voice was rejected");
 			return static_cast<double>(id);
 		};
 
@@ -795,6 +1016,13 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 						return false;
 					arrangement.instruments.push_back({ .definition = *definition });
 				}
+				else if (*kind == "fm")
+				{
+					const auto definition{ fm_definition_from_table(it->second) };
+					if (!definition)
+						return false;
+					arrangement.instruments.push_back({ .definition = *definition });
+				}
 				else if (*kind == "sample")
 				{
 					const sol::optional<std::string> sampleName{ it->second["sample"] };
@@ -818,6 +1046,8 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 					spdlog::error("<Audio> Arrangement '{}' instrument {} has unknown type '{}'", name, index, *kind);
 					return false;
 				}
+				arrangement.instruments.back().chorusSend = it->second.get_or("chorus_send", 0.0f);
+				arrangement.instruments.back().reverbSend = it->second.get_or("reverb_send", 1.0f);
 			}
 
 			const sol::optional<sol::table> noteTable{ table["notes"] };

@@ -89,6 +89,12 @@ namespace
 	};
 
 	using SampleBuffer = std::shared_ptr<const std::vector<float>>;
+	using InstrumentVoice = std::variant<ax::audio::SynthInstrumentVoice, ax::audio::SamplerInstrumentVoice,
+		ax::audio::FmInstrumentVoice>;
+
+	template <typename Instrument>
+	constexpr bool s_mono_instrument{ std::is_same_v<Instrument, ax::audio::SynthInstrumentVoice>
+		|| std::is_same_v<Instrument, ax::audio::FmInstrumentVoice> };
 
 	struct Voice
 	{
@@ -114,7 +120,7 @@ namespace
 		double fadePosition{ 0.0 };
 		std::uint32_t fadeRemaining{ 0 };
 		std::uint32_t fadeLength{ 0 };
-		std::optional<std::variant<ax::audio::SynthInstrumentVoice, ax::audio::SamplerInstrumentVoice>> instrument{};
+		std::optional<InstrumentVoice> instrument{};
 	};
 
 	struct StereoReverb
@@ -225,12 +231,73 @@ namespace
 		float m_wetStep{};
 	};
 
+	// Two delay lines swept in quadrature, so a centred sound spreads across the stereo field.
+	struct StereoChorus
+	{
+		static constexpr float s_base_delay_seconds{ 0.009f };
+		static constexpr float s_sweep_seconds{ 0.003f };
+		static constexpr float s_rate_hz{ 0.7f };
+
+		void configure(std::uint32_t rate)
+		{
+			m_sampleRate = static_cast<float>(rate);
+			const auto frames{ static_cast<std::size_t>(
+				std::ceil((s_base_delay_seconds + s_sweep_seconds) * m_sampleRate)) + 2 };
+			m_left.assign(frames, 0.0f);
+			m_right.assign(frames, 0.0f);
+			reset();
+		}
+
+		bool enabled() const noexcept { return !m_left.empty(); }
+
+		void reset() noexcept
+		{
+			std::ranges::fill(m_left, 0.0f);
+			std::ranges::fill(m_right, 0.0f);
+			m_position = 0;
+			m_phase = 0.0f;
+		}
+
+		void process(float inputLeft, float inputRight, float& outputLeft, float& outputRight) noexcept
+		{
+			m_left[m_position] = inputLeft;
+			m_right[m_position] = inputRight;
+			const auto angle{ m_phase * 2.0f * std::numbers::pi_v<float> };
+			outputLeft = read(m_left, s_base_delay_seconds + s_sweep_seconds * std::sin(angle));
+			outputRight = read(m_right, s_base_delay_seconds + s_sweep_seconds * std::cos(angle));
+			m_position = (m_position + 1) % m_left.size();
+			m_phase += s_rate_hz / m_sampleRate;
+			if (m_phase >= 1.0f)
+				m_phase -= 1.0f;
+		}
+
+	private:
+		float read(const std::vector<float>& line, float delaySeconds) const noexcept
+		{
+			const auto size{ line.size() };
+			const auto delay{ delaySeconds * m_sampleRate };
+			const auto whole{ static_cast<std::size_t>(delay) };
+			const auto fraction{ delay - static_cast<float>(whole) };
+			const auto newer{ line[(m_position + size - whole) % size] };
+			const auto older{ line[(m_position + size - whole - 1) % size] };
+			return newer + (older - newer) * fraction;
+		}
+
+		std::vector<float> m_left{};
+		std::vector<float> m_right{};
+		std::size_t m_position{};
+		float m_sampleRate{};
+		float m_phase{};
+	};
+
 	struct ArrangementVoice
 	{
-		std::optional<std::variant<ax::audio::SynthInstrumentVoice, ax::audio::SamplerInstrumentVoice>> instrument{};
+		std::optional<InstrumentVoice> instrument{};
 		std::uint64_t noteOffFrame{};
 		float leftPan{};
 		float rightPan{};
+		float chorusBlend{};
+		float reverbSend{ 1.0f };
 		bool noteOffSent{};
 	};
 
@@ -245,6 +312,7 @@ namespace
 		Ramp gain{};
 		Ramp tailGain{ .value = 1.0f, .target = 1.0f };
 		StereoReverb reverb{};
+		StereoChorus chorus{};
 		bool active{};
 		bool paused{};
 		bool stopping{};
@@ -606,7 +674,7 @@ struct ax::audio::AudioSystem::Impl
 					const auto playing{ std::visit([&](auto& instrument)
 					{
 						using Instrument = std::decay_t<decltype(instrument)>;
-						if constexpr (std::is_same_v<Instrument, ax::audio::SynthInstrumentVoice>)
+						if constexpr (s_mono_instrument<Instrument>)
 						{
 							float sample{};
 							if (!instrument.next(sample))
@@ -747,11 +815,16 @@ struct ax::audio::AudioSystem::Impl
 			if constexpr (std::is_same_v<Definition, SynthInstrumentDefinition>)
 				slot->instrument.emplace(std::in_place_type<SynthInstrumentVoice>, definition,
 					note.note, note.velocity, sampleRate);
+			else if constexpr (std::is_same_v<Definition, FmInstrumentDefinition>)
+				slot->instrument.emplace(std::in_place_type<FmInstrumentVoice>, definition,
+					note.note, note.velocity, sampleRate);
 			else
 				slot->instrument.emplace(std::in_place_type<SamplerInstrumentVoice>, *source.sample,
 					definition, note.note, note.velocity, sampleRate);
 		}, source.definition);
 		slot->noteOffFrame = note.noteOffFrame;
+		slot->chorusBlend = source.chorusSend * 0.5f;
+		slot->reverbSend = source.reverbSend;
 		const auto angle{ (note.pan + 1.0f) * std::numbers::pi_v<float> * 0.25f };
 		slot->leftPan = std::cos(angle) * std::numbers::sqrt2_v<float>;
 		slot->rightPan = std::sin(angle) * std::numbers::sqrt2_v<float>;
@@ -764,6 +837,7 @@ struct ax::audio::AudioSystem::Impl
 		for (auto& voice : player.voices)
 			voice.instrument.reset();
 		player.reverb.reset();
+		player.chorus.reset();
 		player.tailRemaining = 0;
 		player.draining = false;
 		player.framePosition = std::min(frame, player.arrangement->durationFrames);
@@ -839,6 +913,10 @@ struct ax::audio::AudioSystem::Impl
 				const auto frameGain{ player.gain.tick() * musicGain };
 				float inputLeft{};
 				float inputRight{};
+				float chorusLeft{};
+				float chorusRight{};
+				float bypassLeft{};
+				float bypassRight{};
 				for (auto& voice : player.voices)
 				{
 					if (!voice.instrument)
@@ -849,7 +927,7 @@ struct ax::audio::AudioSystem::Impl
 					const auto playing{ std::visit([&](auto& instrument)
 					{
 						using Instrument = std::decay_t<decltype(instrument)>;
-						if constexpr (std::is_same_v<Instrument, SynthInstrumentVoice>)
+						if constexpr (s_mono_instrument<Instrument>)
 						{
 							float sample{};
 							if (!instrument.next(sample))
@@ -867,13 +945,34 @@ struct ax::audio::AudioSystem::Impl
 						continue;
 					}
 
-					inputLeft += leftSample * frameGain * voice.leftPan;
-					inputRight += rightSample * frameGain * voice.rightPan;
+					const auto left{ leftSample * frameGain * voice.leftPan };
+					const auto right{ rightSample * frameGain * voice.rightPan };
+					const auto dryLeft{ left * (1.0f - voice.chorusBlend) };
+					const auto dryRight{ right * (1.0f - voice.chorusBlend) };
+					inputLeft += dryLeft * voice.reverbSend;
+					inputRight += dryRight * voice.reverbSend;
+					bypassLeft += dryLeft * (1.0f - voice.reverbSend);
+					bypassRight += dryRight * (1.0f - voice.reverbSend);
+					chorusLeft += left * voice.chorusBlend * voice.reverbSend;
+					chorusRight += right * voice.chorusBlend * voice.reverbSend;
+					bypassLeft += left * voice.chorusBlend * (1.0f - voice.reverbSend);
+					bypassRight += right * voice.chorusBlend * (1.0f - voice.reverbSend);
+				}
+
+				if (player.chorus.enabled())
+				{
+					float wetLeft{};
+					float wetRight{};
+					player.chorus.process(chorusLeft, chorusRight, wetLeft, wetRight);
+					inputLeft += wetLeft;
+					inputRight += wetRight;
 				}
 
 				float outputLeft{};
 				float outputRight{};
 				player.reverb.process(inputLeft, inputRight, outputLeft, outputRight);
+				outputLeft += bypassLeft;
+				outputRight += bypassRight;
 				if (player.draining)
 				{
 					const auto tailGain{ player.tailGain.tick() };
@@ -1237,6 +1336,29 @@ ax::audio::VoiceId ax::audio::AudioSystem::play_synth(const SynthInstrumentDefin
 	return m_impl->voices.back().id;
 }
 
+ax::audio::VoiceId ax::audio::AudioSystem::play_fm(const FmInstrumentDefinition& definition,
+	std::uint8_t note, float velocity, const InstrumentPlayOptions& options)
+{
+	m_impl->pump();
+	if (options.bus == Bus::Master || static_cast<std::size_t>(options.bus) >= static_cast<std::size_t>(Bus::Count))
+		return 0;
+
+	Voice voice{};
+	voice.instrument.emplace(std::in_place_type<FmInstrumentVoice>, definition, note, velocity, m_impl->sampleRate);
+	if (!std::get<FmInstrumentVoice>(*voice.instrument).valid())
+		return 0;
+
+	voice.bus = options.bus;
+	voice.pan.set(sanitise(options.pan, -1.0f, 1.0f, 0.0f), 0);
+	voice.gain.set(sanitise(options.volume, 0.0f, 4.0f, 1.0f), 0);
+
+	std::lock_guard lock{ m_impl->mutex };
+	m_impl->make_voice_room();
+	voice.id = m_impl->nextVoiceId++;
+	m_impl->voices.push_back(std::move(voice));
+	return m_impl->voices.back().id;
+}
+
 ax::audio::VoiceId ax::audio::AudioSystem::play_sampler(const AudioSampleData& sample,
 	const SamplerInstrumentDefinition& definition, std::uint8_t note, float velocity,
 	const InstrumentPlayOptions& options)
@@ -1514,6 +1636,10 @@ bool ax::audio::AudioSystem::play_arrangement(const std::string& name, float fad
 	}
 	StereoReverb reverb{};
 	reverb.configure(it->second->reverb, m_impl->sampleRate);
+	StereoChorus chorus{};
+	if (std::ranges::any_of(it->second->instruments, [](const ArrangementInstrument& instrument)
+		{ return instrument.chorusSend > 0.0f; }))
+		chorus.configure(m_impl->sampleRate);
 
 	std::lock_guard lock{ m_impl->mutex };
 	for (auto& stream : m_impl->music)
@@ -1539,6 +1665,7 @@ bool ax::audio::AudioSystem::play_arrangement(const std::string& name, float fad
 	target.arrangement = it->second;
 	target.name = name;
 	target.reverb = std::move(reverb);
+	target.chorus = std::move(chorus);
 	target.active = true;
 	target.gain.value = fade > 0.0f ? 0.0f : 1.0f;
 	target.gain.set(1.0f, m_impl->frames_for(fade));
