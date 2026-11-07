@@ -1,5 +1,7 @@
 #include "axeng/core/lua/bindings/lua_audio_bindings.h"
 
+#include "axeng/core/lua/bindings/lua_audio_definitions.h"
+
 #include "axeng/core/application.h"
 #include "axeng/core/audio/audio_system.h"
 #include "axeng/core/audio/music.h"
@@ -15,92 +17,16 @@
 
 namespace
 {
+	using ax::lua::bindings::fm_definition_from_table;
+	using ax::lua::bindings::instrument_envelope_from_table;
+	using ax::lua::bindings::sfx_params_from_table;
+	using ax::lua::bindings::sfx_params_to_table;
+
 	std::uint64_t to_seed(double value) noexcept
 	{
 		if (!std::isfinite(value))
 			return 0;
 		return static_cast<std::uint64_t>(static_cast<std::int64_t>(value));
-	}
-
-	void apply_params(const sol::table& table, ax::audio::SfxParams& params)
-	{
-		const sol::object wave{ table["wave"] };
-		if (wave.get_type() == sol::type::string)
-		{
-			const auto name{ wave.as<std::string>() };
-			if (const auto type{ ax::audio::wave_type_from_name(name) })
-				params.waveType = *type;
-			else
-				spdlog::warn("<Audio> Unknown wave type '{}'", name);
-		}
-		else if (wave.get_type() == sol::type::number)
-		{
-			const auto index{ wave.as<int>() };
-			if (index >= 0 && index < static_cast<int>(ax::audio::WaveType::Count))
-				params.waveType = static_cast<ax::audio::WaveType>(index);
-		}
-
-		for (const auto& info : ax::audio::sfx_param_infos())
-		{
-			const sol::optional<float> value{ table[info.name] };
-			if (value)
-				params.*info.member = *value;
-		}
-		ax::audio::clamp_params(params);
-	}
-
-	sol::table params_to_table(sol::state_view lua, const ax::audio::SfxParams& params)
-	{
-		auto table{ lua.create_table() };
-		table["wave"] = std::string{ ax::audio::wave_type_name(params.waveType) };
-		for (const auto& info : ax::audio::sfx_param_infos())
-			table[info.name] = params.*info.member;
-		return table;
-	}
-
-	std::optional<ax::audio::SoundDefinition> definition_from_table(const std::string& name, const sol::table& table)
-	{
-		ax::audio::SoundDefinition def{};
-		const sol::optional<double> seed{ table["seed"] };
-		def.seed = seed ? to_seed(*seed) : std::hash<std::string>{}(name);
-
-		const sol::optional<std::string> preset{ table["preset"] };
-		if (preset)
-		{
-			const auto generated{ ax::audio::generate_preset(*preset, def.seed) };
-			if (!generated)
-			{
-				spdlog::error("<Audio> Sound '{}' uses unknown preset '{}'", name, *preset);
-				return std::nullopt;
-			}
-			def.params = *generated;
-		}
-
-		const sol::optional<sol::table> params{ table["params"] };
-		if (params)
-			apply_params(*params, def.params);
-
-		def.mutation = table.get_or("mutation", def.mutation);
-		def.variants = table.get_or("variants", def.mutation > 0.0f ? 6u : 1u);
-		def.pitchVariation = table.get_or("pitch_variation", def.pitchVariation);
-		def.volume = table.get_or("volume", def.volume);
-		def.volumeVariation = table.get_or("volume_variation", def.volumeVariation);
-		def.maxInstances = table.get_or("max_instances", def.maxInstances);
-		def.cooldown = table.get_or("cooldown", def.cooldown);
-		def.loop = table.get_or("loop", def.loop);
-
-		const sol::optional<std::string> bus{ table["bus"] };
-		if (bus)
-		{
-			const auto parsed{ ax::audio::bus_from_name(*bus) };
-			if (!parsed || *parsed == ax::audio::Bus::Master || *parsed == ax::audio::Bus::Music)
-			{
-				spdlog::error("<Audio> Sound '{}' uses invalid bus '{}' (use 'sfx' or 'ui')", name, *bus);
-				return std::nullopt;
-			}
-			def.bus = *parsed;
-		}
-		return def;
 	}
 
 	sol::table string_list(sol::state_view lua, const std::vector<std::string>& values)
@@ -124,16 +50,6 @@ namespace
 		if (name == "noise")
 			return ax::audio::InstrumentWave::Noise;
 		return std::nullopt;
-	}
-
-	ax::audio::InstrumentEnvelope envelope_from_table(const sol::table& table,
-		ax::audio::InstrumentEnvelope envelope)
-	{
-		envelope.attack = table.get_or("attack", envelope.attack);
-		envelope.decay = table.get_or("decay", envelope.decay);
-		envelope.sustain = table.get_or("sustain", envelope.sustain);
-		envelope.release = table.get_or("release", envelope.release);
-		return envelope;
 	}
 
 	std::optional<ax::audio::InstrumentPlayOptions> instrument_options_from_table(
@@ -182,145 +98,7 @@ namespace
 		definition.pitchDropSeconds = table.get_or("pitch_drop_seconds", definition.pitchDropSeconds);
 		const sol::optional<sol::table> envelope{ table["envelope"] };
 		if (envelope)
-			definition.envelope = envelope_from_table(*envelope, definition.envelope);
-		return definition;
-	}
-
-	template <typename Value>
-	bool read_fm_integer(const sol::table& table, const char* key, int low, int high, Value& value)
-	{
-		const auto number{ table.get_or(key, static_cast<int>(value)) };
-		if (number < low || number > high)
-		{
-			spdlog::error("<Audio> FM field '{}' must be {}..{}", key, low, high);
-			return false;
-		}
-		value = static_cast<Value>(number);
-		return true;
-	}
-
-	bool read_fm_stages(const sol::table& table, const char* key, std::array<std::uint8_t, 4>& stages)
-	{
-		const sol::optional<sol::table> values{ table[key] };
-		if (!values)
-			return true;
-		for (std::size_t i{}; i < stages.size(); ++i)
-		{
-			const auto value{ values->get_or(static_cast<int>(i) + 1, -1) };
-			if (value < 0 || value > 99)
-			{
-				spdlog::error("<Audio> FM '{}' needs four values from 0 to 99", key);
-				return false;
-			}
-			stages[i] = static_cast<std::uint8_t>(value);
-		}
-		return true;
-	}
-
-	bool read_fm_envelope(const sol::table& table, ax::audio::FmEnvelope& envelope)
-	{
-		return read_fm_stages(table, "rates", envelope.rates) && read_fm_stages(table, "levels", envelope.levels);
-	}
-
-	bool read_fm_curve(const sol::table& table, const char* key, ax::audio::FmScalingCurve& curve)
-	{
-		using ax::audio::FmScalingCurve;
-		const sol::optional<std::string> name{ table[key] };
-		if (!name)
-			return true;
-		if (*name == "neg_lin") curve = FmScalingCurve::NegativeLinear;
-		else if (*name == "neg_exp") curve = FmScalingCurve::NegativeExponential;
-		else if (*name == "pos_exp") curve = FmScalingCurve::PositiveExponential;
-		else if (*name == "pos_lin") curve = FmScalingCurve::PositiveLinear;
-		else
-		{
-			spdlog::error("<Audio> Unknown FM scaling curve '{}'", *name);
-			return false;
-		}
-		return true;
-	}
-
-	bool read_fm_lfo_wave(const sol::table& table, ax::audio::FmLfoWave& wave)
-	{
-		using ax::audio::FmLfoWave;
-		const sol::optional<std::string> name{ table["wave"] };
-		if (!name)
-			return true;
-		if (*name == "triangle") wave = FmLfoWave::Triangle;
-		else if (*name == "saw_down") wave = FmLfoWave::SawDown;
-		else if (*name == "saw_up") wave = FmLfoWave::SawUp;
-		else if (*name == "square") wave = FmLfoWave::Square;
-		else if (*name == "sine") wave = FmLfoWave::Sine;
-		else if (*name == "sample_hold") wave = FmLfoWave::SampleHold;
-		else
-		{
-			spdlog::error("<Audio> Unknown FM LFO wave '{}'", *name);
-			return false;
-		}
-		return true;
-	}
-
-	bool read_fm_operator(const sol::table& table, ax::audio::FmOperator& op)
-	{
-		op.fixedFrequency = table.get_or("fixed", op.fixedFrequency);
-		return read_fm_envelope(table, op.envelope)
-			&& read_fm_curve(table, "left_curve", op.levelScalingLeftCurve)
-			&& read_fm_curve(table, "right_curve", op.levelScalingRightCurve)
-			&& read_fm_integer(table, "output_level", 0, 99, op.outputLevel)
-			&& read_fm_integer(table, "coarse", 0, 31, op.coarse)
-			&& read_fm_integer(table, "fine", 0, 99, op.fine)
-			&& read_fm_integer(table, "detune", -7, 7, op.detune)
-			&& read_fm_integer(table, "velocity_sensitivity", 0, 7, op.velocitySensitivity)
-			&& read_fm_integer(table, "amp_mod_sensitivity", 0, 3, op.ampModSensitivity)
-			&& read_fm_integer(table, "rate_scaling", 0, 7, op.rateScaling)
-			&& read_fm_integer(table, "breakpoint", 0, 99, op.levelScalingBreakpoint)
-			&& read_fm_integer(table, "left_depth", 0, 99, op.levelScalingLeftDepth)
-			&& read_fm_integer(table, "right_depth", 0, 99, op.levelScalingRightDepth);
-	}
-
-	std::optional<ax::audio::FmInstrumentDefinition> fm_definition_from_table(const sol::table& table)
-	{
-		ax::audio::FmInstrumentDefinition definition{};
-		definition.gain = table.get_or("gain", definition.gain);
-		definition.outputTrim = table.get_or("output_trim", definition.outputTrim);
-		const sol::optional<sol::table> envelope{ table["envelope"] };
-		if (envelope)
-			definition.envelope = envelope_from_table(*envelope, definition.envelope);
-		if (!read_fm_integer(table, "algorithm", 1, ax::audio::fm_algorithm_count, definition.algorithm)
-			|| !read_fm_integer(table, "feedback", 0, 7, definition.feedback)
-			|| !read_fm_integer(table, "transpose", -24, 24, definition.transpose))
-			return std::nullopt;
-
-		const sol::optional<sol::table> pitchEnvelope{ table["pitch_envelope"] };
-		if (pitchEnvelope && !read_fm_envelope(*pitchEnvelope, definition.pitchEnvelope))
-			return std::nullopt;
-
-		const sol::optional<sol::table> lfo{ table["lfo"] };
-		if (lfo && (!read_fm_lfo_wave(*lfo, definition.lfo.wave)
-			|| !read_fm_integer(*lfo, "speed", 0, 99, definition.lfo.speed)
-			|| !read_fm_integer(*lfo, "delay", 0, 99, definition.lfo.delay)
-			|| !read_fm_integer(*lfo, "pitch_depth", 0, 99, definition.lfo.pitchModDepth)
-			|| !read_fm_integer(*lfo, "amp_depth", 0, 99, definition.lfo.ampModDepth)
-			|| !read_fm_integer(*lfo, "pitch_sensitivity", 0, 7, definition.lfo.pitchModSensitivity)))
-			return std::nullopt;
-
-		const sol::optional<sol::table> operators{ table["operators"] };
-		if (!operators)
-		{
-			spdlog::error("<Audio> FM definition is missing its operators");
-			return std::nullopt;
-		}
-		for (std::size_t i{}; i < definition.operators.size(); ++i)
-		{
-			const sol::optional<sol::table> op{ (*operators)[static_cast<int>(i) + 1] };
-			if (!op)
-			{
-				spdlog::error("<Audio> FM definitions need all {} operators", definition.operators.size());
-				return std::nullopt;
-			}
-			if (!read_fm_operator(*op, definition.operators[i]))
-				return std::nullopt;
-		}
+			definition.envelope = instrument_envelope_from_table(*envelope, definition.envelope);
 		return definition;
 	}
 
@@ -337,7 +115,7 @@ namespace
 		definition.loop = table.get_or("loop", definition.loop);
 		const sol::optional<sol::table> envelope{ table["envelope"] };
 		if (envelope)
-			definition.envelope = envelope_from_table(*envelope, definition.envelope);
+			definition.envelope = instrument_envelope_from_table(*envelope, definition.envelope);
 		return definition;
 	}
 
@@ -428,21 +206,56 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 			const auto params{ ax::audio::generate_preset(preset, seed ? to_seed(*seed) : 0) };
 			if (!params)
 				return sol::nil;
-			return params_to_table(lua, *params);
+			return sfx_params_to_table(lua, *params);
 		};
 
 	audio_table["mutate"] =
 		[](sol::this_state lua, const sol::table& params, sol::optional<float> amount, sol::optional<double> seed) -> sol::table
 		{
 			ax::audio::SfxParams base{};
-			apply_params(params, base);
-			return params_to_table(lua, ax::audio::mutate(base, amount.value_or(0.05f), seed ? to_seed(*seed) : 0));
+			sfx_params_from_table(params, base);
+			return sfx_params_to_table(lua, ax::audio::mutate(base, amount.value_or(0.05f), seed ? to_seed(*seed) : 0));
+		};
+
+	audio_table["fm_presets"] =
+		[](sol::this_state lua) -> sol::table
+		{
+			std::vector<std::string> names{};
+			for (const auto name : ax::audio::fm_preset_names())
+				names.emplace_back(name);
+			return string_list(lua, names);
+		};
+
+	// The fields of an FM sound effect from a preset: { fm = patch, note, velocity, hold, loop_length }.
+	audio_table["generate_fm"] =
+		[](sol::this_state state, const std::string& preset, sol::optional<double> seed) -> sol::object
+		{
+			const auto params{ ax::audio::generate_fm_preset(preset, seed ? to_seed(*seed) : 0) };
+			if (!params)
+				return sol::make_object(state, sol::nil);
+			sol::state_view lua{ state };
+			return lua.create_table_with("fm", ax::lua::bindings::fm_definition_to_table(lua, params->patch),
+				"note", static_cast<int>(params->note), "velocity", params->velocity, "hold", params->hold,
+				"loop_length", params->loopLength);
+		};
+
+	// Returns a nudged copy of an FM patch, as sound variants are made (see audio::mutate_fm).
+	audio_table["mutate_fm"] =
+		[](sol::this_state state, const sol::table& patch, sol::optional<float> amount, sol::optional<double> seed)
+			-> sol::object
+		{
+			const auto definition{ fm_definition_from_table(patch) };
+			if (!definition)
+				return sol::make_object(state, sol::nil);
+			const auto mutated{ ax::audio::mutate_fm(ax::audio::FmSfxParams{ .patch = *definition },
+				amount.value_or(0.05f), seed ? to_seed(*seed) : 0) };
+			return ax::lua::bindings::fm_definition_to_table(state, mutated.patch);
 		};
 
 	audio_table["define"] =
 		[with_audio](const std::string& name, const sol::table& table, sol::optional<sol::table> options) -> bool
 		{
-			const auto def{ definition_from_table(name, table) };
+			const auto def{ ax::lua::bindings::sound_definition_from_table(name, table) };
 			if (!def)
 				return false;
 			const bool live{ options ? options->get_or("live", false) : false };
@@ -480,6 +293,8 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 				"length", info->length,
 				"peak", info->peak,
 				"rms", info->rms,
+				"seam", info->seam,
+				"fm", info->fm,
 				"loop", info->loop,
 				"bus", std::string{ ax::audio::bus_name(info->bus) });
 		};

@@ -1,5 +1,7 @@
 #include "axeng/core/audio/sfx_synth.h"
 
+#include "axeng/core/audio/sfx_rng.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -44,33 +46,7 @@ namespace
 		{ "volume", &P::volume, 0.0f, 1.0f },
 	} };
 
-	// Small deterministic RNG so generated sounds are identical across runs and standard library versions.
-	class Rng
-	{
-	public:
-		explicit Rng(std::uint64_t seed) noexcept
-			: m_state{ seed ^ 0x9E3779B97F4A7C15ull }
-		{
-			next();
-		}
-
-		std::uint64_t next() noexcept
-		{
-			// splitmix64
-			auto z{ (m_state += 0x9E3779B97F4A7C15ull) };
-			z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
-			z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
-			return z ^ (z >> 31);
-		}
-
-		float unit() noexcept { return static_cast<float>(next() >> 40) / static_cast<float>(1ull << 24); }
-		float range(float lo, float hi) noexcept { return lo + (hi - lo) * unit(); }
-		bool chance(float p) noexcept { return unit() < p; }
-		std::uint32_t pick(std::uint32_t count) noexcept { return static_cast<std::uint32_t>(next() % count); }
-
-	private:
-		std::uint64_t m_state;
-	};
+	using Rng = ax::audio::detail::SfxRng;
 
 	float cube(float v) noexcept { return v * v * v; }
 
@@ -810,6 +786,7 @@ std::vector<float> ax::audio::synthesize(const SfxParams& input, const SynthOpti
 	const auto minLoop{ static_cast<std::size_t>(sfx_sample_rate / 4) };
 	auto loopLength{ std::clamp<std::size_t>(static_cast<std::size_t>(synth.envelope_length(1)), minLoop, maxSamples) };
 	std::size_t crossfade{};
+	std::size_t search{};
 	if (const auto period{ static_cast<std::size_t>(synth.repeat_limit()) }; period > 0)
 	{
 		// Keep whole repeat cycles so the rhythm of the loop is even.
@@ -819,22 +796,90 @@ std::vector<float> ax::audio::synthesize(const SfxParams& input, const SynthOpti
 	else
 	{
 		crossfade = std::min<std::size_t>(loopLength / 4, sfx_sample_rate * 15 / 100);
+		search = std::min<std::size_t>(loopLength / 8, sfx_sample_rate / 200);
 	}
 
-	std::vector<float> rendered(loopLength + crossfade);
+	std::vector<float> rendered(loopLength + search + std::max<std::size_t>(crossfade, 256));
 	for (auto& sample : rendered)
 		synth.next(sample);
+	return make_seamless_loop(rendered, loopLength, crossfade, search);
+}
 
-	// Crossfade the overrun into the start so the end flows seamlessly back to the beginning. Noise is
-	// uncorrelated so it uses an equal power fade; everything else fades linearly.
-	const bool equalPower{ params.waveType == WaveType::Noise };
+namespace
+{
+	// Normalised cross-correlation of two equal-length windows (1 is identical shape).
+	float correlation(std::span<const float> a, std::span<const float> b) noexcept
+	{
+		double ab{};
+		double aa{};
+		double bb{};
+		for (std::size_t i{}; i < a.size(); ++i)
+		{
+			ab += static_cast<double>(a[i]) * b[i];
+			aa += static_cast<double>(a[i]) * a[i];
+			bb += static_cast<double>(b[i]) * b[i];
+		}
+		constexpr double silent{ 1e-12 };
+		if (aa < silent && bb < silent)
+			return 1.0f;
+		if (aa < silent || bb < silent)
+			return 0.0f;
+		return static_cast<float>(ab / std::sqrt(aa * bb));
+	}
+}
+
+std::vector<float> ax::audio::make_seamless_loop(std::span<const float> rendered, std::size_t loopLength,
+	std::size_t crossfade, std::size_t search)
+{
+	constexpr std::size_t max_window{ 256 };
+	if (loopLength == 0 || rendered.size() < loopLength)
+		return { rendered.begin(), rendered.end() };
+	crossfade = std::min(crossfade, loopLength);
+	const auto window{ std::clamp<std::size_t>(crossfade, 1, std::min(max_window, loopLength)) };
+	const auto overrun{ std::max(crossfade, window) };
+	if (rendered.size() < loopLength + overrun)
+		return { rendered.begin(), rendered.begin() + static_cast<std::ptrdiff_t>(loopLength) };
+	search = std::min({ search, rendered.size() - loopLength - overrun, loopLength - std::max<std::size_t>(crossfade, 1) });
+
+	const auto start{ rendered.first(window) };
+	auto end{ loopLength };
+	auto best{ correlation(start, rendered.subspan(end, window)) };
+	// Ties keep the nominal length, so a loop that already repeats exactly is left untouched.
+	constexpr float margin{ 1e-4f };
+	for (std::size_t offset{ 1 }; offset <= search; ++offset)
+	{
+		for (const auto candidate : { loopLength + offset, loopLength - offset })
+		{
+			const auto score{ correlation(start, rendered.subspan(candidate, window)) };
+			if (score > best + margin)
+			{
+				best = score;
+				end = candidate;
+			}
+		}
+	}
+
+	std::vector<float> loop(rendered.begin(), rendered.begin() + static_cast<std::ptrdiff_t>(end));
+	const bool equalPower{ best < 0.7f };
 	for (std::size_t i{}; i < crossfade; ++i)
 	{
 		const auto t{ static_cast<float>(i) / static_cast<float>(crossfade) };
 		const auto fadeIn{ equalPower ? std::sin(t * std::numbers::pi_v<float> * 0.5f) : t };
 		const auto fadeOut{ equalPower ? std::cos(t * std::numbers::pi_v<float> * 0.5f) : 1.0f - t };
-		rendered[i] = std::clamp(rendered[i] * fadeIn + rendered[loopLength + i] * fadeOut, -1.0f, 1.0f);
+		loop[i] = std::clamp(rendered[i] * fadeIn + rendered[end + i] * fadeOut, -1.0f, 1.0f);
 	}
-	rendered.resize(loopLength);
-	return rendered;
+	return loop;
+}
+
+float ax::audio::loop_seam(std::span<const float> samples) noexcept
+{
+	if (samples.size() < 2)
+		return 0.0f;
+	float largest{};
+	for (std::size_t i{ 1 }; i < samples.size(); ++i)
+		largest = std::max(largest, std::abs(samples[i] - samples[i - 1]));
+	const auto wrap{ std::abs(samples.front() - samples.back()) };
+	if (largest <= 0.0f)
+		return wrap > 0.0f ? 1000.0f : 0.0f;
+	return wrap / largest;
 }

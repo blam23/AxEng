@@ -576,9 +576,15 @@ struct ax::audio::AudioSystem::Impl
 			return slot;
 
 		const auto& def{ entry.definition };
+		const SynthOptions options{ .loop = def.loop, .seed = mix_seed(def.seed, index + 1000) };
+		if (def.fm)
+		{
+			const auto params{ index == 0 ? *def.fm : mutate_fm(*def.fm, def.mutation, mix_seed(def.seed, index)) };
+			slot = std::make_shared<const std::vector<float>>(render_fm_sfx(params, options));
+			return slot;
+		}
 		const auto params{ index == 0 ? def.params : mutate(def.params, def.mutation, mix_seed(def.seed, index)) };
-		slot = std::make_shared<const std::vector<float>>(
-			synthesize(params, SynthOptions{ .loop = def.loop, .seed = mix_seed(def.seed, index + 1000) }));
+		slot = std::make_shared<const std::vector<float>>(synthesize(params, options));
 		return slot;
 	}
 
@@ -1099,6 +1105,8 @@ bool ax::audio::AudioSystem::define_sound(const std::string& name, const SoundDe
 
 	auto def{ definition };
 	clamp_params(def.params);
+	if (def.fm)
+		clamp_fm_sfx(*def.fm);
 	def.variants = std::clamp<std::uint32_t>(def.variants, 1, s_max_variants);
 	def.mutation = sanitise(def.mutation, 0.0f, 1.0f, 0.0f);
 	def.pitchVariation = sanitise(def.pitchVariation, 0.0f, 24.0f, 0.0f);
@@ -1180,6 +1188,9 @@ std::optional<ax::audio::SoundInfo> ax::audio::AudioSystem::sound_info(const std
 	if (!first->empty())
 		info.rms = static_cast<float>(std::sqrt(sumSquares / static_cast<double>(first->size())));
 	info.loop = entry.definition.loop;
+	if (info.loop)
+		info.seam = loop_seam(*first);
+	info.fm = entry.definition.fm.has_value();
 	info.bus = entry.definition.bus;
 	return info;
 }

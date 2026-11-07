@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -106,4 +107,16 @@ namespace ax::audio
 
 	// Renders mono float samples at sfx_sample_rate in the range [-1, 1].
 	std::vector<float> synthesize(const SfxParams& params, const SynthOptions& options = {});
+
+	// Turns a rendered stretch of sound into a seamless loop of about loopLength samples. `rendered` must hold at
+	// least loopLength + search + max(crossfade, 256) samples. The end point is searched for within +/- search
+	// samples of loopLength, picking the one whose following samples best match the start (an exact repeat keeps
+	// loopLength), then the overrun is crossfaded into the start: linearly when the two match closely, otherwise with
+	// an equal-power fade so uncorrelated sound (noise) doesn't dip in level.
+	std::vector<float> make_seamless_loop(std::span<const float> rendered, std::size_t loopLength,
+		std::size_t crossfade, std::size_t search);
+
+	// How audible the wrap of a loop is: the step from the last sample to the first divided by the largest step
+	// inside the loop. 1 or less looks like any other step in the signal.
+	float loop_seam(std::span<const float> samples) noexcept;
 }

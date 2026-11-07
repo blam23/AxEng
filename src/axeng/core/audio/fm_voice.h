@@ -106,6 +106,13 @@ namespace ax::audio
 
 		bool valid() const noexcept { return m_valid; }
 		bool finished() const noexcept { return !m_valid || m_envelope.finished(); }
+		// True once every envelope holds its sustain level and the LFO has faded in, so the held sound no longer
+		// changes apart from periodic motion.
+		bool settled() const noexcept;
+		// Rounds every operator frequency and the LFO speed to whole cycles in loopFrames (a power of two of at least
+		// 1024), so a held note repeats exactly every loopFrames samples unless the LFO bends the pitch or feedback is
+		// strong. The sample-and-hold LFO repeats its random steps with the same period.
+		void snap_to_loop(std::uint32_t loopFrames) noexcept;
 		void note_off() noexcept;
 		void advance(std::uint64_t frames) noexcept;
 		bool next(float& sample) noexcept;
@@ -160,7 +167,9 @@ namespace ax::audio
 		double m_lfoDelaySeconds{};
 		double m_lfoFadeSeconds{};
 		std::uint32_t m_lfoCycle{};
+		std::uint32_t m_lfoCycleModulus{};
 		std::uint32_t m_lfoSeed{};
+		std::uint32_t m_snapShift{};
 		std::uint32_t m_sampleRate{};
 		std::uint32_t m_blockRemaining{};
 		float m_pitchSemitones{};

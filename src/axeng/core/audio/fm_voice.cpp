@@ -390,7 +390,7 @@ float ax::audio::FmInstrumentVoice::lfo_value() const noexcept
 	case FmLfoWave::Sine:
 		return std::sin(phase * 2.0f * std::numbers::pi_v<float>);
 	case FmLfoWave::SampleHold:
-		return hashed_unit(m_lfoCycle * 131u + m_lfoSeed);
+		return hashed_unit((m_lfoCycleModulus > 0 ? m_lfoCycle % m_lfoCycleModulus : m_lfoCycle) * 131u + m_lfoSeed);
 	}
 	return 0.0f;
 }
@@ -411,8 +411,38 @@ void ax::audio::FmInstrumentVoice::update_increments(float semitones) noexcept
 	for (auto& op : m_operators)
 	{
 		const auto frequency{ op.fixedFrequency ? op.frequency : op.frequency * ratio };
-		op.increment = static_cast<std::uint32_t>(static_cast<std::int64_t>(frequency * scale));
+		if (m_snapShift > 0)
+		{
+			// Whole cycles per loop: the increment is a multiple of 2^32 / loopFrames.
+			const auto step{ static_cast<double>(std::uint64_t{ 1 } << m_snapShift) };
+			const auto steps{ std::llround(static_cast<double>(frequency) * static_cast<double>(scale) / step) };
+			op.increment = static_cast<std::uint32_t>(static_cast<std::uint64_t>(steps) << m_snapShift);
+		}
+		else
+			op.increment = static_cast<std::uint32_t>(static_cast<std::int64_t>(frequency * scale));
 	}
+}
+
+bool ax::audio::FmInstrumentVoice::settled() const noexcept
+{
+	if (!m_valid || !m_envelope.sustaining())
+		return false;
+	const auto holding{ [](Stage stage) { return stage == Stage::Sustain || stage == Stage::Done; } };
+	return holding(m_pitchStage) && std::ranges::all_of(m_operators, [&](const OperatorState& op) { return holding(op.stage); })
+		&& m_elapsedSeconds >= m_lfoDelaySeconds + m_lfoFadeSeconds;
+}
+
+void ax::audio::FmInstrumentVoice::snap_to_loop(std::uint32_t loopFrames) noexcept
+{
+	if (!m_valid || loopFrames < 1024 || !std::has_single_bit(loopFrames))
+		return;
+	m_snapShift = 32u - static_cast<std::uint32_t>(std::countr_zero(loopFrames));
+	// Whole LFO cycles per loop. The step is an exact binary fraction, so the phase returns to where it started.
+	const auto loopSeconds{ static_cast<double>(loopFrames) / static_cast<double>(m_sampleRate) };
+	const auto cycles{ std::max<long long>(1, std::llround(m_lfoCycleStep / m_blockSeconds * loopSeconds)) };
+	m_lfoCycleStep = static_cast<double>(cycles) * static_cast<double>(s_block_frames) / static_cast<double>(loopFrames);
+	m_lfoCycleModulus = static_cast<std::uint32_t>(cycles);
+	update_increments(m_pitchSemitones);
 }
 
 void ax::audio::FmInstrumentVoice::update_control() noexcept

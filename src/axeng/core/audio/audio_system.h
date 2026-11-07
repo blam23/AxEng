@@ -10,6 +10,7 @@
 
 #include "axeng/core/audio/arrangement.h"
 #include "axeng/core/audio/instrument.h"
+#include "axeng/core/audio/fm_sfx.h"
 #include "axeng/core/audio/sfx_synth.h"
 #include "axeng/core/helpers.h"
 
@@ -38,6 +39,8 @@ namespace ax::audio
 	struct SoundDefinition
 	{
 		SfxParams params{};
+		// When set, the sound is played on the FM voice instead of the sfxr-style synth, and `params` is unused.
+		std::optional<FmSfxParams> fm{};
 		std::uint64_t seed{ 0 };
 		// How far each variant's parameters may drift from `params` (see audio::mutate).
 		float mutation{ 0.0f };
@@ -92,7 +95,10 @@ namespace ax::audio
 		// Peak and RMS level of variant 0.
 		float peak{};
 		float rms{};
+		// For loops, how audible the wrap is (see audio::loop_seam); 0 for one-shots.
+		float seam{};
 		bool loop{};
+		bool fm{};
 		Bus bus{};
 	};
 

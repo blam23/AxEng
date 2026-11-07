@@ -89,6 +89,7 @@ namespace ax::audio
 		void advance(std::uint64_t frames) noexcept;
 		float next() noexcept;
 		bool finished() const noexcept { return m_finished; }
+		bool sustaining() const noexcept { return m_stage == Stage::Sustain; }
 
 	private:
 		enum class Stage : std::uint8_t { Attack, Decay, Sustain, Release, Finished };

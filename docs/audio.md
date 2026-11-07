@@ -301,7 +301,8 @@ audio.voice_count()
 audio.has(name)
 audio.sounds()                     -- names of defined sounds
 audio.prepare(name)                -- render every variant now (otherwise rendered on first use)
-audio.info(name)                   -- { variants, rendered_variants, length, peak, rms, loop, bus } for variant 0
+audio.info(name)                   -- { variants, rendered_variants, length, peak, rms, seam, fm, loop, bus }
+                                   -- for variant 0
 audio.waveform(name, buckets)      -- { min = {...}, max = {...} } sample range per slice of variant 0 (default 128)
 ```
 
@@ -316,6 +317,54 @@ turned off. Editors use this to tweak a loop while it plays.
 
 Loops (`loop = true`) ignore attack, punch and decay: the envelope is flat for the sustain length (at least
 0.25 s), and the end is crossfaded into the start. With `repeat_speed`, the loop is a whole number of repeats.
+Otherwise the end point is searched for within 5 ms of the nominal length, picking the one whose following samples
+best match the start (`audio::make_seamless_loop`). The crossfade is linear when the two match closely and
+equal-power when they don't (noise), so the level doesn't dip.
+
+`info(name).seam` rates a loop's wrap: the step from its last sample to its first divided by the largest step
+inside the loop (`audio::loop_seam`). At 1 or below the wrap looks like any other step; above 1 it may click.
+
+### FM sound effects
+
+A sound with an `fm` table or an `fm_preset` plays on the FM voice (see [FM voices](#fm-voices)) instead of the
+sfxr-style synth: one note held for `hold` seconds and then released. It is pre-rendered into variants like any
+other sound, so pitch and volume variation, instance limits, cooldowns, live redefinition, `info` and `waveform`
+all work the same. Chorus and reverb sends belong to arrangements, so they are ignored.
+
+```lua
+audio.define("alarm", {
+    fm_preset = "alarm",           -- optional: start from an FM preset with this seed...
+    seed = 7,
+    fm = patch,                    -- ...or give the whole patch (same format as `type = "fm"` instruments)
+    note = 72,                     -- MIDI note (default 60, or the preset's)
+    velocity = 0.8,                -- 0..1 (default 1)
+    hold = 0.3,                    -- seconds before note off (default 0.2); length = hold + the gate's release
+    loop = true,
+    loop_length = 3,               -- loops only, seconds: rounded to 2^16, 2^17 or 2^18 samples (1.5, 3 or 6 s)
+    mutation = 0.03, variants = 4, volume = 0.5,
+})
+
+audio.fm_presets()                 -- { "chime", "clank", "alarm", "zap", "confirm", "deny", "hum", "drone",
+                                   --   "metal_hit", "power_up" }
+audio.generate_fm("chime", seed)   -- { fm = patch, note, velocity, hold, loop_length } (same seed = same sound)
+audio.mutate_fm(patch, 0.05, seed) -- a nudged copy of a patch, as variants are made
+```
+
+Variants nudge output levels, modulator ratios, detune, envelopes, feedback and hold (`audio::mutate_fm`). The
+algorithm, coarse ratios and fixed/ratio mode never change, and silent operators stay silent. Presets peak at about
+0.45, like the sfxr presets.
+
+FM loops are made to repeat exactly rather than relying on the crossfade. The note is held until every envelope has
+reached its sustain level and the LFO has faded in, plus 0.5 s for the DC blocker. Then every operator frequency and
+the LFO speed are rounded to whole cycles per loop (`FmInstrumentVoice::snap_to_loop`), which is why loop lengths
+are powers of two: phase increments are 32-bit, so a multiple of 2^32 / loop length wraps exactly. At 3 s the
+frequency steps are 0.34 Hz, about 6 cents at 100 Hz. The sample-and-hold LFO repeats its random steps with the same
+period. Such a loop repeats sample for sample, and the splice search keeps the nominal length. Two things still
+break the repeat: an LFO that bends the pitch, and feedback above 5. Those loops use a crossfade of up to 150 ms
+and the splice search instead.
+
+C++ code parses these tables with `ax::lua::bindings::sound_definition_from_table`
+(`lua_audio_definitions.h`), which needs no audio device. The same header converts FM patches to and from tables.
 
 Use `info(name).peak` and `rms` when tuning levels. A peak of exactly 1 means the synth clipped; lower the
 params `volume` and raise the playback `volume` instead.
@@ -358,6 +407,9 @@ elapsed time is mixed into a discarded buffer at the start of each voice/music A
 out of this with `Config::manualMix` and drive `AudioSystem::mix()` themselves).
 
 ## Tests
+
+`test_fm_sfx.cpp` covers FM sound effects and loop seams: presets are bounded and deterministic, snapped loops
+repeat sample for sample, every FM and sfxr loop preset has a seam of at most 1, and Lua can define FM sounds.
 
 `src/tests/core/test_audio.cpp` covers the synth (presets, determinism, envelope length, loop seams, mutation),
 the mixer driven offline through `AudioSystem::mix()` (panning, buses, loops, instance limits, cooldowns,
