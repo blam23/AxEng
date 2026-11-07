@@ -41,8 +41,11 @@ Particle emitters add lights of their own, which are included automatically: see
 `LightOccluder2D` is a convex quad (four world-pixel corners) that resets the light map to ambient beneath it, hiding
 every light before `firstLight`; lights from `firstLight` on are drawn after it. Pass them, in `firstLight` order, with
 `window.submit_lights(lights, glows, occluders)`. Use them for things standing over the world, such as moving decks.
-Particle lights, and the `extraLights` drawn by `LightRenderer::encode`, go beneath every occluder. Glows are not
-occluded: drop glows beneath an occluder on the CPU.
+An occluder with a non-zero `layer` names a light layer. A particle emitter's lights go in its
+`ParticleConfig::lightLayer`: layer 0 (the default), or a layer with no occluder this frame, goes beneath every occluder;
+any other layer is drawn just after the occluder of that layer, so a deck's own effects light the deck.
+`LightRenderer::encode` calls `extraLights(pass, layer)` once with layer 0 and once after each layered occluder. Glows are
+not occluded: drop glows beneath an occluder on the CPU.
 
 `lighting_active(settings, lights, glows)` says whether a frame needs the passes. `Window::lighting_ran()` and
 `lighting_stats()` (`app.window.lighting_stats()` in Lua) report what the last frame drew.

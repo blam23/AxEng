@@ -460,6 +460,7 @@ namespace ax
 		std::vector<Light2D> m_queuedLights, m_frameLights;
 		std::vector<Glow2D> m_queuedGlows, m_frameGlows;
 		std::vector<LightOccluder2D> m_queuedOccluders, m_frameOccluders;
+		std::vector<Light2D> m_mergedLights;
 		std::optional<NoiseShadow2D> m_queuedNoiseShadow{};
 		bool m_lightingRan{};
 		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };

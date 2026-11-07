@@ -124,7 +124,7 @@ protected:
 	static Image render(glm::vec4 clear, const ax::LightingSettings& lighting, std::span<const ax::Light2D> lights,
 		std::span<const ax::Glow2D> glows = {}, std::uint32_t samples = 1, const ax::LightView& view = centred_view(),
 		const std::function<void(wgpu::CommandEncoder&)>& before = {},
-		const std::function<void(wgpu::RenderPassEncoder&)>& extra = {}, const ax::NoiseShadow2D* noiseShadow = nullptr,
+		const std::function<void(wgpu::RenderPassEncoder&, std::uint32_t)>& extra = {}, const ax::NoiseShadow2D* noiseShadow = nullptr,
 		std::span<const ax::LightOccluder2D> occluders = {})
 	{
 		constexpr auto format{ wgpu::TextureFormat::RGBA8Unorm };
@@ -409,7 +409,7 @@ TEST_F(LightRendererTest, ParticlesLightTheSceneAroundThem)
 			particles.encode_compute(s_device, queue, encoder, 0.1, { -64.0f, -64.0f, 64.0f, 64.0f },
 				{ static_cast<float>(s_size), static_cast<float>(s_size) }, 1.0f, wgpu::TextureFormat::RGBA8Unorm, 1);
 		},
-		[&](wgpu::RenderPassEncoder& pass) { particles.draw_lights(pass); }) };
+		[&](wgpu::RenderPassEncoder& pass, std::uint32_t) { particles.draw_lights(pass); }) };
 	EXPECT_EQ(particles.emission_light_emitters(), 2u);
 	EXPECT_GT(image.at(64, 64)[1], 240);
 	EXPECT_EQ(image.at(64, 64)[0], 0);
@@ -451,10 +451,61 @@ TEST_F(LightRendererTest, ParticleLightsGoBeneathOccluders)
 			particles.encode_compute(s_device, queue, encoder, 0.1, { -64.0f, -64.0f, 64.0f, 64.0f },
 				{ static_cast<float>(s_size), static_cast<float>(s_size) }, 1.0f, wgpu::TextureFormat::RGBA8Unorm, 1);
 		},
-		[&](wgpu::RenderPassEncoder& pass) { particles.draw_lights(pass); }, nullptr, occluders) };
+		[&](wgpu::RenderPassEncoder& pass, std::uint32_t layer)
+		{
+			particles.draw_lights(pass, [layer](std::uint32_t emitter) { return emitter == layer; });
+		}, nullptr, occluders) };
 	EXPECT_EQ(particles.emission_light_emitters(), 1u);
 	EXPECT_EQ(image.at(64, 64)[1], 0) << "the particle's light is hidden beneath the deck";
 	EXPECT_GT(image.at(64 + 30, 64 + 30)[0], 200) << "a light added after the deck shows on it";
+	particles.shutdown();
+}
+
+TEST_F(LightRendererTest, ParticleLightsInAnOccludersLayerShowOnIt)
+{
+	// A particle on the deck (in the deck's light layer) lights the deck; one in layer 0 beside it, under the deck, does not.
+	ax::ParticleSystem particles;
+	ax::ParticleConfig config{};
+	config.capacity = 4;
+	config.emissionRate = 1;
+	config.duration = 1.0f;
+	config.explosiveness = 1.0f;
+	config.lifetimeMin = 10.0f;
+	config.lifetimeMax = 10.0f;
+	config.speedMin = 0.0f;
+	config.speedMax = 0.0f;
+	config.spawnRadius = 0.0f;
+	config.colorStart = config.colorEnd = { 0.0f, 1.0f, 0.0f, 1.0f };
+	config.particleLight = { .enabled = true, .radiusScale = 4.0f, .intensity = 1.0f, .falloff = 1.0f };
+	config.position = { -20.0f, 0.0f };
+	config.lightLayer = 7;
+	const auto onDeck{ particles.create(config) };
+	onDeck->play();
+	auto beneath{ config };
+	beneath.position = { 20.0f, 0.0f };
+	beneath.lightLayer = 0;
+	const auto underDeck{ particles.create(beneath) };
+	underDeck->play();
+	const std::array occluders{ ax::LightOccluder2D{
+		.corners = { glm::vec2{ -40.0f, -40.0f }, glm::vec2{ 40.0f, -40.0f }, glm::vec2{ 40.0f, 40.0f },
+			glm::vec2{ -40.0f, 40.0f } },
+		.firstLight = 0, .layer = 7 } };
+	std::vector<std::uint32_t> calls{};
+	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, settings({ 0.0f, 0.0f, 0.0f }), {}, {}, 1, centred_view(),
+		[&](wgpu::CommandEncoder& encoder)
+		{
+			auto queue{ s_device.GetQueue() };
+			particles.encode_compute(s_device, queue, encoder, 0.1, { -64.0f, -64.0f, 64.0f, 64.0f },
+				{ static_cast<float>(s_size), static_cast<float>(s_size) }, 1.0f, wgpu::TextureFormat::RGBA8Unorm, 1);
+		},
+		[&](wgpu::RenderPassEncoder& pass, std::uint32_t layer)
+		{
+			calls.push_back(layer);
+			particles.draw_lights(pass, [layer](std::uint32_t emitter) { return emitter == layer; });
+		}, nullptr, occluders) };
+	EXPECT_EQ(calls, (std::vector<std::uint32_t>{ 0, 7 }));
+	EXPECT_GT(image.at(64 - 20, 64)[1], 200) << "the deck's own particle lights it";
+	EXPECT_EQ(image.at(64 + 20, 64)[1], 0) << "a particle beneath the deck does not";
 	particles.shutdown();
 }
 

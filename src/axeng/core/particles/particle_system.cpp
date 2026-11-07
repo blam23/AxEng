@@ -444,6 +444,7 @@ void ax::ParticleSystem::initialise(wgpu::Device& device, wgpu::TextureFormat co
 	}
 	m_frameEmitters.clear();
 	m_frameLights.clear();
+	m_frameLightLayers.clear();
 	m_emissionLightEmitters = 0;
 	m_renderPipeline = nullptr;
 	m_lightPipeline = nullptr;
@@ -601,6 +602,7 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 		return;
 	m_frameEmitters.clear();
 	m_frameLights.clear();
+	m_frameLightLayers.clear();
 	m_emissionLightEmitters = 0;
 
 	for (auto it{ m_emitters.begin() }; it != m_emitters.end();)
@@ -689,7 +691,10 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 		if (Light2D light; emitter->static_light(light)
 			&& intersects(expanded(cameraBounds, light.radius), { light.position.x, light.position.y,
 				light.position.x, light.position.y }))
+		{
 			m_frameLights.push_back(light);
+			m_frameLightLayers.push_back(config.lightLayer);
+		}
 
 		if (!config.visible)
 			continue;
@@ -770,7 +775,7 @@ void ax::ParticleSystem::draw(wgpu::RenderPassEncoder& pass)
 	}
 }
 
-void ax::ParticleSystem::draw_lights(wgpu::RenderPassEncoder& pass)
+void ax::ParticleSystem::draw_lights(wgpu::RenderPassEncoder& pass, const std::function<bool(std::uint32_t)>& layers)
 {
 	if (m_thread != std::this_thread::get_id())
 		throw std::runtime_error("Particle systems belong to the renderer thread");
@@ -779,7 +784,8 @@ void ax::ParticleSystem::draw_lights(wgpu::RenderPassEncoder& pass)
 	bool bound{};
 	for (const auto& emitter : m_frameEmitters)
 	{
-		if (!emitter->m_config.visible || !emitter->m_config.particleLight.enabled)
+		if (!emitter->m_config.visible || !emitter->m_config.particleLight.enabled
+			|| (layers && !layers(emitter->m_config.lightLayer)))
 			continue;
 		if (!bound)
 		{
@@ -809,6 +815,7 @@ void ax::ParticleSystem::shutdown()
 	}
 	m_frameEmitters.clear();
 	m_frameLights.clear();
+	m_frameLightLayers.clear();
 	m_emissionLightEmitters = 0;
 	m_emitters.clear();
 	m_renderPipeline = nullptr;

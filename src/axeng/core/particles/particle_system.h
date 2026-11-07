@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -93,6 +94,9 @@ namespace ax
 		glm::vec4 colorEnd{ 1.0f, 1.0f, 1.0f, 0.0f };
 		glm::vec2 gravity{};
 		float z{};
+		// The light layer the emitter's lights go in: 0 is beneath every LightOccluder2D, any other value is drawn just
+		// after the occluder of that layer (see Window::submit_lights).
+		std::uint32_t lightLayer{};
 		ParticleLightConfig light{};
 		ParticleEmissionLightConfig particleLight{};
 	};
@@ -166,10 +170,13 @@ namespace ax
 		void draw(wgpu::RenderPassEncoder& pass);
 		// Emitter lights as of the last compute pass; submit them with the frame's other lights.
 		std::span<const Light2D> lights() const noexcept { return m_frameLights; }
+		// The light layer of each of lights().
+		std::span<const std::uint32_t> light_layers() const noexcept { return m_frameLightLayers; }
 		// How many emitters will draw per-particle lights in draw_lights.
 		std::size_t emission_light_emitters() const noexcept { return m_emissionLightEmitters; }
-		// Adds every live particle's light to the light map, which is an RGBA16F single sample target.
-		void draw_lights(wgpu::RenderPassEncoder& pass);
+		// Adds every live particle's light to the light map, which is an RGBA16F single sample target: only the
+		// emitters whose light layer passes `layers`, if given.
+		void draw_lights(wgpu::RenderPassEncoder& pass, const std::function<bool(std::uint32_t)>& layers = {});
 		void shutdown();
 
 	private:
@@ -189,6 +196,7 @@ namespace ax
 		std::vector<std::weak_ptr<ParticleEmitter>> m_emitters;
 		std::vector<std::shared_ptr<ParticleEmitter>> m_frameEmitters;
 		std::vector<Light2D> m_frameLights;
+		std::vector<std::uint32_t> m_frameLightLayers;
 		std::size_t m_emissionLightEmitters{};
 		bool m_paused{};
 		bool m_render_enabled{ true };

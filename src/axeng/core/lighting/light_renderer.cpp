@@ -232,7 +232,7 @@ void ax::LightRenderer::ensure_buffer(const wgpu::Device& device, InstanceBuffer
 void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
 	const wgpu::TextureView& target, std::uint32_t width, std::uint32_t height, const LightView& view,
 	const LightingSettings& settings, std::span<const Light2D> lights, std::span<const Glow2D> glows,
-	const std::function<void(wgpu::RenderPassEncoder&)>& extraLights, const NoiseShadow2D* noiseShadow,
+	const std::function<void(wgpu::RenderPassEncoder&, std::uint32_t)>& extraLights, const NoiseShadow2D* noiseShadow,
 	std::span<const LightOccluder2D> occluders)
 {
 	ZoneScopedN("LightRenderer::encode");
@@ -307,14 +307,16 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		{
 			drawLights(occluders[index].firstLight);
 			if (index == 0 && extraLights)
-				extraLights(pass);
+				extraLights(pass, 0);
 			pass.SetPipeline(m_occluderPipeline);
 			pass.SetBindGroup(0, m_occluders.bindGroup);
 			pass.Draw(6, 1, 0, static_cast<std::uint32_t>(index));
+			if (extraLights && occluders[index].layer != 0)
+				extraLights(pass, occluders[index].layer);
 		}
 		drawLights(count);
 		if (occluders.empty() && extraLights)
-			extraLights(pass);
+			extraLights(pass, 0);
 		if (noiseShadow && noiseShadow->darkness > 0.0f)
 		{
 			if (m_lights.buffer == nullptr) ensure_buffer(device, m_lights, sizeof(Light2D), "Noise shadow binding");

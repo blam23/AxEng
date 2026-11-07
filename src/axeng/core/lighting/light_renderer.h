@@ -49,11 +49,13 @@ namespace ax
 
 	// A convex quad in world pixels that resets the light map to ambient, hiding every light drawn before it. Lights
 	// from firstLight on are drawn after it. Used for things standing over the world, such as moving decks, so the
-	// lights beneath them stay hidden. Corners go round the quad in order.
+	// lights beneath them stay hidden. Corners go round the quad in order. A non-zero layer names the occluder, so
+	// lights drawn elsewhere (particles) can be placed just after it.
 	struct LightOccluder2D
 	{
 		std::array<glm::vec2, 4> corners{};
 		std::uint32_t firstLight{};
+		std::uint32_t layer{};
 	};
 
 	static_assert(offsetof(Light2D, position) == 0);
@@ -118,12 +120,13 @@ namespace ax
 		bool initialised() const noexcept { return m_lightPipeline != nullptr; }
 
 		// Records the light map, apply and glow passes onto target, which is width x height. extraLights, if given,
-		// draws more additive lights into the light map pass, beneath every occluder (with the lights before the first).
-		// Occluders are in firstLight order.
+		// draws more additive lights into the light map pass: once with layer 0 beneath every occluder, and once just
+		// after each occluder with its layer. Occluders are in firstLight order.
 		void encode(const wgpu::Device&, const wgpu::Queue&, wgpu::CommandEncoder&, const wgpu::TextureView& target,
 			std::uint32_t width, std::uint32_t height, const LightView&, const LightingSettings&,
 			std::span<const Light2D>, std::span<const Glow2D>,
-		const std::function<void(wgpu::RenderPassEncoder&)>& extraLights = {}, const NoiseShadow2D* noiseShadow = nullptr,
+		const std::function<void(wgpu::RenderPassEncoder&, std::uint32_t layer)>& extraLights = {},
+			const NoiseShadow2D* noiseShadow = nullptr,
 			std::span<const LightOccluder2D> occluders = {});
 
 		struct Stats

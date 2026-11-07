@@ -2745,21 +2745,50 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		if (lightingActive)
 		{
 			ZoneScopedN("Window::lighting");
-			if (lightingSettings.particleLights)
+			// A particle layer with no occluder this frame is drawn with layer 0, beneath them all.
+			const auto occluded{ [this](std::uint32_t layer)
 			{
-				// Particles are in the world beneath any occluders, so their lights go first.
+				return layer != 0 && std::ranges::any_of(m_frameOccluders,
+					[layer](const LightOccluder2D& occluder) { return occluder.layer == layer; });
+			} };
+			if (lightingSettings.particleLights && !m_particleSystem.lights().empty())
+			{
+				// Each emitter light goes in with its layer: layer 0 before the first occluder, others just after theirs.
 				const auto particleLights{ m_particleSystem.lights() };
-				m_frameLights.insert(m_frameLights.begin(), particleLights.begin(), particleLights.end());
+				const auto layers{ m_particleSystem.light_layers() };
+				m_mergedLights.clear();
+				const auto addLayer{ [&](std::uint32_t layer, bool unoccluded)
+				{
+					for (std::size_t index{}; index < particleLights.size(); ++index)
+						if (layers[index] == layer || (unoccluded && !occluded(layers[index])))
+							m_mergedLights.push_back(particleLights[index]);
+				} };
+				addLayer(0, true);
+				std::size_t source{};
 				for (auto& occluder : m_frameOccluders)
-					occluder.firstLight += static_cast<std::uint32_t>(particleLights.size());
+				{
+					const auto end{ std::min<std::size_t>(occluder.firstLight, m_frameLights.size()) };
+					m_mergedLights.insert(m_mergedLights.end(), m_frameLights.begin() + static_cast<std::ptrdiff_t>(source),
+						m_frameLights.begin() + static_cast<std::ptrdiff_t>(end));
+					source = std::max(source, end);
+					occluder.firstLight = static_cast<std::uint32_t>(m_mergedLights.size());
+					if (occluder.layer != 0) addLayer(occluder.layer, false);
+				}
+				m_mergedLights.insert(m_mergedLights.end(), m_frameLights.begin() + static_cast<std::ptrdiff_t>(source),
+					m_frameLights.end());
+				m_frameLights.swap(m_mergedLights);
 			}
 			m_lightRenderer.encode(m_device, m_queue, encoder, targetView, m_width, m_height,
 				{ .viewport = { static_cast<float>(m_width), static_cast<float>(m_height) },
 					.cameraPosition = cameraPosition, .zoom = zoom },
 				lightingSettings, m_frameLights, m_frameGlows,
-				[this, &lightingSettings](wgpu::RenderPassEncoder& pass)
+				[this, &lightingSettings, &occluded](wgpu::RenderPassEncoder& pass, std::uint32_t layer)
 				{
-					if (lightingSettings.particleLights) m_particleSystem.draw_lights(pass);
+					if (!lightingSettings.particleLights) return;
+					if (layer == 0)
+						m_particleSystem.draw_lights(pass, [&](std::uint32_t emitter) { return !occluded(emitter); });
+					else
+						m_particleSystem.draw_lights(pass, [layer](std::uint32_t emitter) { return emitter == layer; });
 				}, frameNoiseShadow ? &*frameNoiseShadow : nullptr, m_frameOccluders);
 
 			{
