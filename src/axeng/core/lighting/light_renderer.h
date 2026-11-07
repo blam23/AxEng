@@ -4,11 +4,13 @@
 #include <webgpu/webgpu_cpp.h>
 #include <glm/glm.hpp>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <span>
+#include <vector>
 
 #include "axeng/core/texture.h"
 
@@ -43,6 +45,15 @@ namespace ax
 		glm::vec4 colour{ 1.0f };
 
 		static constexpr std::size_t gpuDataSize{ 32 };
+	};
+
+	// A convex quad in world pixels that resets the light map to ambient, hiding every light drawn before it. Lights
+	// from firstLight on are drawn after it. Used for things standing over the world, such as moving decks, so the
+	// lights beneath them stay hidden. Corners go round the quad in order.
+	struct LightOccluder2D
+	{
+		std::array<glm::vec2, 4> corners{};
+		std::uint32_t firstLight{};
 	};
 
 	static_assert(offsetof(Light2D, position) == 0);
@@ -96,8 +107,8 @@ namespace ax
 	// Whether a frame with these settings and lights needs the lighting passes at all.
 	bool lighting_active(const LightingSettings&, std::size_t lights, std::size_t glows, bool hasShadows = false) noexcept;
 
-	// Accumulates every light into a reduced resolution light map in one instanced draw, multiplies the target by
-	// it in one fullscreen pass and adds glows in one more instanced draw.
+	// Accumulates every light into a reduced resolution light map in one instanced draw (plus one per occluder),
+	// multiplies the target by it in one fullscreen pass and adds glows in one more instanced draw.
 	class LightRenderer
 	{
 	public:
@@ -107,15 +118,17 @@ namespace ax
 		bool initialised() const noexcept { return m_lightPipeline != nullptr; }
 
 		// Records the light map, apply and glow passes onto target, which is width x height. extraLights, if given,
-		// draws more additive lights into the light map pass.
+		// draws more additive lights into the light map pass, beneath every occluder (with the lights before the first).
+		// Occluders are in firstLight order.
 		void encode(const wgpu::Device&, const wgpu::Queue&, wgpu::CommandEncoder&, const wgpu::TextureView& target,
 			std::uint32_t width, std::uint32_t height, const LightView&, const LightingSettings&,
 			std::span<const Light2D>, std::span<const Glow2D>,
-		const std::function<void(wgpu::RenderPassEncoder&)>& extraLights = {}, const NoiseShadow2D* noiseShadow = nullptr);
+		const std::function<void(wgpu::RenderPassEncoder&)>& extraLights = {}, const NoiseShadow2D* noiseShadow = nullptr,
+			std::span<const LightOccluder2D> occluders = {});
 
 		struct Stats
 		{
-			std::uint32_t lights{}, glows{}, lightMapWidth{}, lightMapHeight{};
+			std::uint32_t lights{}, glows{}, lightMapWidth{}, lightMapHeight{}, occluders{};
 		};
 		Stats last_stats() const noexcept { return m_stats; }
 	private:
@@ -131,13 +144,14 @@ namespace ax
 		wgpu::Device m_device{};
 		wgpu::TextureFormat m_targetFormat{ wgpu::TextureFormat::Undefined };
 		std::uint32_t m_sampleCount{};
-		wgpu::RenderPipeline m_lightPipeline{}, m_shadowPipeline{}, m_applyPipeline{}, m_brightApplyPipeline{}, m_glowPipeline{};
+		wgpu::RenderPipeline m_lightPipeline{}, m_shadowPipeline{}, m_occluderPipeline{}, m_applyPipeline{}, m_brightApplyPipeline{}, m_glowPipeline{};
 		wgpu::BindGroupLayout m_instanceLayout{}, m_applyLayout{};
 		gpu::TrackedBuffer m_uniforms{};
-		InstanceBuffer m_lights{}, m_glows{};
+		InstanceBuffer m_lights{}, m_glows{}, m_occluders{};
 		std::unique_ptr<Texture> m_lightMap{};
 		wgpu::Sampler m_sampler{};
 		wgpu::BindGroup m_applyBindGroup{};
+		std::vector<glm::vec2> m_occluderScratch{};
 		Stats m_stats{};
 	};
 }

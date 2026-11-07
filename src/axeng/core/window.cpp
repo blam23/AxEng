@@ -2736,17 +2736,22 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			std::lock_guard lock{ m_lightingMutex };
 			m_frameLights.swap(m_queuedLights);
 			m_frameGlows.swap(m_queuedGlows);
+			m_frameOccluders.swap(m_queuedOccluders);
 			frameNoiseShadow = std::exchange(m_queuedNoiseShadow, std::nullopt);
 			m_queuedLights.clear();
 			m_queuedGlows.clear();
+			m_queuedOccluders.clear();
 		}
 		if (lightingActive)
 		{
 			ZoneScopedN("Window::lighting");
 			if (lightingSettings.particleLights)
 			{
+				// Particles are in the world beneath any occluders, so their lights go first.
 				const auto particleLights{ m_particleSystem.lights() };
-				m_frameLights.insert(m_frameLights.end(), particleLights.begin(), particleLights.end());
+				m_frameLights.insert(m_frameLights.begin(), particleLights.begin(), particleLights.end());
+				for (auto& occluder : m_frameOccluders)
+					occluder.firstLight += static_cast<std::uint32_t>(particleLights.size());
 			}
 			m_lightRenderer.encode(m_device, m_queue, encoder, targetView, m_width, m_height,
 				{ .viewport = { static_cast<float>(m_width), static_cast<float>(m_height) },
@@ -2755,7 +2760,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				[this, &lightingSettings](wgpu::RenderPassEncoder& pass)
 				{
 					if (lightingSettings.particleLights) m_particleSystem.draw_lights(pass);
-				}, frameNoiseShadow ? &*frameNoiseShadow : nullptr);
+				}, frameNoiseShadow ? &*frameNoiseShadow : nullptr, m_frameOccluders);
 
 			{
 			ZoneScopedN("Window::unlit-scene-pass");
@@ -3170,8 +3175,21 @@ void ax::Window::submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>
 	std::lock_guard lock{ m_lightingMutex };
 	m_queuedLights.swap(lights);
 	m_queuedGlows.swap(glows);
+	m_queuedOccluders.clear();
 	lights.clear();
 	glows.clear();
+}
+
+void ax::Window::submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>& glows,
+	std::vector<LightOccluder2D>& occluders)
+{
+	std::lock_guard lock{ m_lightingMutex };
+	m_queuedLights.swap(lights);
+	m_queuedGlows.swap(glows);
+	m_queuedOccluders.swap(occluders);
+	lights.clear();
+	glows.clear();
+	occluders.clear();
 }
 
 void ax::Window::submit_noise_shadow(std::optional<NoiseShadow2D> shadow)

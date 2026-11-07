@@ -68,6 +68,24 @@ fn fs_light(in_: InstanceOut) -> @location(0) vec4<f32> {
 	return vec4<f32>(in_.colour.rgb * attenuation, 0.0);
 }
 
+// Occluders are two vec4s of corners, drawn as two triangles: 0 1 2 and 0 2 3.
+@vertex
+fn vs_occluder(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> FullscreenOut {
+	var order = array<u32, 6>(0u, 1u, 2u, 0u, 2u, 3u);
+	let k = order[vertex];
+	let pair = items[instance * 2u + k / 2u];
+	let corner = select(pair.xy, pair.zw, (k % 2u) == 1u);
+	var out: FullscreenOut;
+	out.pos = to_clip(corner);
+	return out;
+}
+
+// Back to ambient, hiding the lights already drawn beneath.
+@fragment
+fn fs_occluder(in_: FullscreenOut) -> @location(0) vec4<f32> {
+	return vec4<f32>(u.ambient.rgb, 1.0);
+}
+
 fn hash21(p : vec2<f32>) -> f32 {
 	let x = bitcast<u32>(i32(p.x));
 	let y = bitcast<u32>(i32(p.y));

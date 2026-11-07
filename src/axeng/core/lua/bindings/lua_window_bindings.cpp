@@ -575,7 +575,7 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 			const auto stats{ app.window()->lighting_stats() };
 			return sol::state_view{ lua }.create_table_with("ran", app.window()->lighting_ran(),
 				"lights", stats.lights, "glows", stats.glows, "map_width", stats.lightMapWidth,
-				"map_height", stats.lightMapHeight);
+				"map_height", stats.lightMapHeight, "occluders", stats.occluders);
 		};
 
 	window_table["compare_next_frame"] =

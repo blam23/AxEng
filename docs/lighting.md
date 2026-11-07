@@ -17,7 +17,7 @@ way. A frame then renders:
 1. the lit scene pass (render event shapes, opaque lit sprites), the lit OIT pass (with particles) and its composite;
 2. lit debug shapes;
 3. the light map: an RGBA16F target at 1/1, 1/2 or 1/4 of the window, cleared to the ambient colour, with every
-   `Light2D` added in one instanced draw;
+   `Light2D` added in one instanced draw (split around any occluders, below);
 4. the apply pass: one fullscreen triangle multiplying the target by the light map (no scene read-back, so it works
    on the MSAA target directly), clamped to `maxExposure` (at most 2);
 5. glows: every `Glow2D` added over the result in one instanced draw, for halos that stay bright in the dark;
@@ -37,6 +37,12 @@ cone limits it to `coneOuter` (cosine of the half angle) around `direction`, ful
 `coneOuter <= -1` lights every direction. `Glow2D` is a soft radial halo with a bright core.
 
 Particle emitters add lights of their own, which are included automatically: see [particles.md](particles.md#lights).
+
+`LightOccluder2D` is a convex quad (four world-pixel corners) that resets the light map to ambient beneath it, hiding
+every light before `firstLight`; lights from `firstLight` on are drawn after it. Pass them, in `firstLight` order, with
+`window.submit_lights(lights, glows, occluders)`. Use them for things standing over the world, such as moving decks.
+Particle lights, and the `extraLights` drawn by `LightRenderer::encode`, go beneath every occluder. Glows are not
+occluded: drop glows beneath an occluder on the CPU.
 
 `lighting_active(settings, lights, glows)` says whether a frame needs the passes. `Window::lighting_ran()` and
 `lighting_stats()` (`app.window.lighting_stats()` in Lua) report what the last frame drew.

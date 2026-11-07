@@ -220,6 +220,8 @@ namespace ax
 		// Hands over the lights and glows for the next frame (they are used for one frame only) by swapping them
 		// in, so the vectors come back empty with the capacity of a previous frame's.
 		void submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>& glows);
+		// As above, with occluders hiding the lights before them (see LightOccluder2D).
+		void submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>& glows, std::vector<LightOccluder2D>& occluders);
 		void submit_noise_shadow(std::optional<NoiseShadow2D> shadow);
 		// Queues a material draw for the next frame (see MaterialRenderer). World space draws land in the scene, or after
 		// lighting for an unlit material; screen space draws land with the overlays. Thread safe.
@@ -457,6 +459,7 @@ namespace ax
 		LightingSettings m_lightingSettings{};
 		std::vector<Light2D> m_queuedLights, m_frameLights;
 		std::vector<Glow2D> m_queuedGlows, m_frameGlows;
+		std::vector<LightOccluder2D> m_queuedOccluders, m_frameOccluders;
 		std::optional<NoiseShadow2D> m_queuedNoiseShadow{};
 		bool m_lightingRan{};
 		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };

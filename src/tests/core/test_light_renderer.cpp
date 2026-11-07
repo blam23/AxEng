@@ -124,7 +124,8 @@ protected:
 	static Image render(glm::vec4 clear, const ax::LightingSettings& lighting, std::span<const ax::Light2D> lights,
 		std::span<const ax::Glow2D> glows = {}, std::uint32_t samples = 1, const ax::LightView& view = centred_view(),
 		const std::function<void(wgpu::CommandEncoder&)>& before = {},
-		const std::function<void(wgpu::RenderPassEncoder&)>& extra = {}, const ax::NoiseShadow2D* noiseShadow = nullptr)
+		const std::function<void(wgpu::RenderPassEncoder&)>& extra = {}, const ax::NoiseShadow2D* noiseShadow = nullptr,
+		std::span<const ax::LightOccluder2D> occluders = {})
 	{
 		constexpr auto format{ wgpu::TextureFormat::RGBA8Unorm };
 		const auto makeTexture = [](std::uint32_t sampleCount, wgpu::TextureUsage usage)
@@ -159,7 +160,7 @@ protected:
 		if (before)
 			before(encoder);
 		renderer.encode(s_device, s_device.GetQueue(), encoder, targetView, s_size, s_size, view, lighting,
-			lights, glows, extra, noiseShadow);
+			lights, glows, extra, noiseShadow, occluders);
 		if (samples > 1)
 		{
 			wgpu::RenderPassColorAttachment colour{};
@@ -280,6 +281,26 @@ TEST_F(LightRendererTest, LightBrightensOnlyWithinItsRadius)
 	EXPECT_TRUE(close_to(image.at(64, 64 - 45), { 26, 26, 26, 255 }, 3));
 }
 
+TEST_F(LightRendererTest, OccluderHidesOnlyTheLightsBeforeIt)
+{
+	// A red light at the centre, then a deck over the left half (turned a little), then a green light on the deck.
+	const std::array lights{
+		ax::Light2D{ .position = { 0.0f, 0.0f }, .radius = 48.0f, .intensity = 2.0f, .colour = { 1.0f, 0.0f, 0.0f },
+			.falloff = 1.0f },
+		ax::Light2D{ .position = { -30.0f, 0.0f }, .radius = 16.0f, .intensity = 2.0f, .colour = { 0.0f, 1.0f, 0.0f },
+			.falloff = 1.0f } };
+	const std::array occluders{ ax::LightOccluder2D{
+		.corners = { glm::vec2{ -70.0f, -70.0f }, glm::vec2{ -4.0f, -66.0f }, glm::vec2{ -8.0f, 70.0f },
+			glm::vec2{ -70.0f, 70.0f } },
+		.firstLight = 1 } };
+	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, settings({ 0.1f, 0.1f, 0.1f }), lights, {}, 1, centred_view(),
+		{}, {}, nullptr, occluders) };
+	// Beside the deck the red light shines; on it there is only ambient and the green light.
+	EXPECT_GT(image.at(64 + 12, 64)[0], 200);
+	EXPECT_TRUE(close_to(image.at(64 - 20, 64 - 30), { 26, 26, 26, 255 }, 3));
+	EXPECT_TRUE(close_to(image.at(64 - 30, 64), { 26, 255, 26, 255 }, 3));
+}
+
 TEST_F(LightRendererTest, LightFollowsCamera)
 {
 	// The camera puts (100, 50) at the centre and doubles sizes, so the light covers 32 pixels each way.
@@ -396,6 +417,44 @@ TEST_F(LightRendererTest, ParticlesLightTheSceneAroundThem)
 	EXPECT_EQ(image.at(64 + 40, 64)[1], 0);
 	EXPECT_GT(image.at(127, 64)[0], 0) << "an off screen particle's light reaches into the view";
 	EXPECT_EQ(image.at(64, 64 + 40)[1], 0);
+	particles.shutdown();
+}
+
+TEST_F(LightRendererTest, ParticleLightsGoBeneathOccluders)
+{
+	// A deck over a glowing particle hides its light; a light added after the deck still shows.
+	ax::ParticleSystem particles;
+	ax::ParticleConfig config{};
+	config.capacity = 4;
+	config.emissionRate = 1;
+	config.duration = 1.0f;
+	config.explosiveness = 1.0f;
+	config.lifetimeMin = 10.0f;
+	config.lifetimeMax = 10.0f;
+	config.speedMin = 0.0f;
+	config.speedMax = 0.0f;
+	config.spawnRadius = 0.0f;
+	config.colorStart = config.colorEnd = { 0.0f, 1.0f, 0.0f, 1.0f };
+	config.particleLight = { .enabled = true, .radiusScale = 8.0f, .intensity = 1.0f, .falloff = 1.0f };
+	const auto emitter{ particles.create(config) };
+	emitter->play();
+	const std::array lights{ ax::Light2D{ .position = { 30.0f, 30.0f }, .radius = 16.0f, .intensity = 2.0f,
+		.colour = { 1.0f, 0.0f, 0.0f }, .falloff = 1.0f } };
+	const std::array occluders{ ax::LightOccluder2D{
+		.corners = { glm::vec2{ -40.0f, -40.0f }, glm::vec2{ 40.0f, -40.0f }, glm::vec2{ 40.0f, 40.0f },
+			glm::vec2{ -40.0f, 40.0f } },
+		.firstLight = 0 } };
+	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, settings({ 0.0f, 0.0f, 0.0f }), lights, {}, 1, centred_view(),
+		[&](wgpu::CommandEncoder& encoder)
+		{
+			auto queue{ s_device.GetQueue() };
+			particles.encode_compute(s_device, queue, encoder, 0.1, { -64.0f, -64.0f, 64.0f, 64.0f },
+				{ static_cast<float>(s_size), static_cast<float>(s_size) }, 1.0f, wgpu::TextureFormat::RGBA8Unorm, 1);
+		},
+		[&](wgpu::RenderPassEncoder& pass) { particles.draw_lights(pass); }, nullptr, occluders) };
+	EXPECT_EQ(particles.emission_light_emitters(), 1u);
+	EXPECT_EQ(image.at(64, 64)[1], 0) << "the particle's light is hidden beneath the deck";
+	EXPECT_GT(image.at(64 + 30, 64 + 30)[0], 200) << "a light added after the deck shows on it";
 	particles.shutdown();
 }
 

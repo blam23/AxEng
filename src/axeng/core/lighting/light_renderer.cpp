@@ -36,6 +36,15 @@ namespace
 		return blend;
 	}
 
+	// Replaces the light map with the occluder's output.
+	wgpu::BlendState replace_blend()
+	{
+		wgpu::BlendState blend{};
+		blend.color = { wgpu::BlendOperation::Add, wgpu::BlendFactor::One, wgpu::BlendFactor::Zero };
+		blend.alpha = { wgpu::BlendOperation::Add, wgpu::BlendFactor::Zero, wgpu::BlendFactor::One };
+		return blend;
+	}
+
 	wgpu::BlendState noise_shadow_blend()
 	{
 		wgpu::BlendState blend{};
@@ -66,6 +75,7 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	m_applyBindGroup = {};
 	m_lights = {};
 	m_glows = {};
+	m_occluders = {};
 
 	wgpu::ShaderSourceWGSL source{};
 	source.code = { reinterpret_cast<const char*>(s_lighting_shader), sizeof(s_lighting_shader) };
@@ -139,6 +149,7 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	doubled.color.dstFactor = wgpu::BlendFactor::Src;
 	m_lightPipeline = pipeline(m_instanceLayout, "vs_light", "fs_light", s_light_map_format, 1, additive);
 	m_shadowPipeline = pipeline(m_instanceLayout, "vs_shadow", "fs_shadow", s_light_map_format, 1, noise_shadow_blend());
+	m_occluderPipeline = pipeline(m_instanceLayout, "vs_occluder", "fs_occluder", s_light_map_format, 1, replace_blend());
 	m_glowPipeline = pipeline(m_instanceLayout, "vs_glow", "fs_glow", targetFormat, sampleCount, additive);
 	m_applyPipeline = pipeline(m_applyLayout, "vs_apply", "fs_apply", targetFormat, sampleCount, multiply);
 	m_brightApplyPipeline = pipeline(m_applyLayout, "vs_apply", "fs_apply_bright", targetFormat, sampleCount, doubled);
@@ -156,7 +167,7 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	samplerDesc.minFilter = wgpu::FilterMode::Linear;
 	m_sampler = device.CreateSampler(&samplerDesc);
 
-	if (!m_lightPipeline || !m_shadowPipeline || !m_glowPipeline || !m_applyPipeline || !m_brightApplyPipeline)
+	if (!m_lightPipeline || !m_shadowPipeline || !m_occluderPipeline || !m_glowPipeline || !m_applyPipeline || !m_brightApplyPipeline)
 	{
 		spdlog::error("Failed to create the lighting pipelines.");
 		m_lightPipeline = {};
@@ -221,7 +232,8 @@ void ax::LightRenderer::ensure_buffer(const wgpu::Device& device, InstanceBuffer
 void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
 	const wgpu::TextureView& target, std::uint32_t width, std::uint32_t height, const LightView& view,
 	const LightingSettings& settings, std::span<const Light2D> lights, std::span<const Glow2D> glows,
-	const std::function<void(wgpu::RenderPassEncoder&)>& extraLights, const NoiseShadow2D* noiseShadow)
+	const std::function<void(wgpu::RenderPassEncoder&)>& extraLights, const NoiseShadow2D* noiseShadow,
+	std::span<const LightOccluder2D> occluders)
 {
 	ZoneScopedN("LightRenderer::encode");
 	m_stats = {};
@@ -268,11 +280,40 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 			const auto bytes{ lights.size_bytes() };
 			ensure_buffer(device, m_lights, bytes, "Lights");
 			queue.WriteBuffer(m_lights.buffer, 0, lights.data(), bytes);
+		}
+		if (!occluders.empty())
+		{
+			// Two vec4s of corners each.
+			m_occluderScratch.clear();
+			for (const auto& occluder : occluders)
+				m_occluderScratch.insert(m_occluderScratch.end(), occluder.corners.begin(), occluder.corners.end());
+			const auto bytes{ m_occluderScratch.size() * sizeof(glm::vec2) };
+			ensure_buffer(device, m_occluders, bytes, "Light occluders");
+			queue.WriteBuffer(m_occluders.buffer, 0, m_occluderScratch.data(), bytes);
+		}
+		// The lights between occluders, in order, each occluder hiding all drawn before it.
+		const auto count{ static_cast<std::uint32_t>(lights.size()) };
+		std::uint32_t drawn{};
+		const auto drawLights{ [&](std::uint32_t end)
+		{
+			end = std::min(end, count);
+			if (end <= drawn) return;
 			pass.SetPipeline(m_lightPipeline);
 			pass.SetBindGroup(0, m_lights.bindGroup);
-			pass.Draw(s_instance_vertices, static_cast<std::uint32_t>(lights.size()));
+			pass.Draw(s_instance_vertices, end - drawn, 0, drawn);
+			drawn = end;
+		} };
+		for (std::size_t index{}; index < occluders.size(); ++index)
+		{
+			drawLights(occluders[index].firstLight);
+			if (index == 0 && extraLights)
+				extraLights(pass);
+			pass.SetPipeline(m_occluderPipeline);
+			pass.SetBindGroup(0, m_occluders.bindGroup);
+			pass.Draw(6, 1, 0, static_cast<std::uint32_t>(index));
 		}
-		if (extraLights)
+		drawLights(count);
+		if (occluders.empty() && extraLights)
 			extraLights(pass);
 		if (noiseShadow && noiseShadow->darkness > 0.0f)
 		{
@@ -310,5 +351,6 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		pass.End();
 	}
 
-	m_stats = { static_cast<std::uint32_t>(lights.size()), static_cast<std::uint32_t>(glows.size()), mapWidth, mapHeight };
+	m_stats = { static_cast<std::uint32_t>(lights.size()), static_cast<std::uint32_t>(glows.size()), mapWidth, mapHeight,
+		static_cast<std::uint32_t>(occluders.size()) };
 }
