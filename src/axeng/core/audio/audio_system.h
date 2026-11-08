@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -159,6 +160,14 @@ namespace ax::audio
 		std::vector<std::string> sound_names() const;
 		// Renders every variant now instead of on first use.
 		bool prepare_sound(const std::string& name);
+		// A key for caching the rendered variants of a sound: it changes whenever anything that affects the rendered
+		// samples does. Empty if the sound is unknown.
+		std::optional<std::uint64_t> sound_render_key(const std::string& name) const;
+		// Every variant of the sound, rendering any that are not rendered yet. Empty if the sound is unknown.
+		std::vector<std::shared_ptr<const std::vector<float>>> sound_variants(const std::string& name);
+		// Supplies previously rendered variants (from sound_variants with the same render key). Fails unless there is
+		// one buffer per variant.
+		bool set_sound_variants(const std::string& name, std::vector<std::vector<float>> variants);
 		// Min/max sample of variant 0 in `buckets` equal slices, for waveform previews. Empty if unknown.
 		std::vector<std::pair<float, float>> sound_waveform(const std::string& name, std::uint32_t buckets);
 
@@ -197,6 +206,17 @@ namespace ax::audio
 		// Main-thread API. Prepared arrangements are immutable and may refer to samples that must outlive playback.
 		bool define_arrangement(const std::string& name, Arrangement arrangement, std::string& error);
 		std::vector<std::string> arrangement_names() const;
+		std::shared_ptr<const PreparedArrangement> arrangement(const std::string& name) const;
+		// A key for caching a rendering of the arrangement: it changes whenever the instruments (sample audio included),
+		// notes, effects or output rate do.
+		std::uint64_t arrangement_render_key(const PreparedArrangement& arrangement) const;
+		// Synthesizes the whole arrangement as it plays from the start at full volume, reverb tail included. Touches no
+		// shared state, so it may run on any thread. Empty when cancelled.
+		std::optional<RenderedArrangement> render_arrangement(const PreparedArrangement& arrangement,
+			const std::atomic<bool>* cancelled = nullptr) const;
+		// Makes later plays of the arrangement stream the rendering instead of synthesizing it. Fails if the arrangement
+		// is unknown or the rendering is at another sample rate.
+		bool set_arrangement_rendering(const std::string& name, std::shared_ptr<const RenderedArrangement> rendered);
 		bool play_arrangement(const std::string& name, float fade = 0.1f);
 		void stop_arrangement(float fade = 0.1f);
 		bool seek_arrangement(float positionSeconds);

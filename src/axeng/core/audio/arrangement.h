@@ -56,6 +56,17 @@ namespace ax::audio
 		float pan{};
 	};
 
+	// An arrangement synthesized ahead of time: interleaved stereo frames at sampleRate, reverb tail included.
+	// Samples are stored divided by scale so that peaks above full scale survive the 16-bit conversion.
+	struct RenderedArrangement
+	{
+		std::vector<std::int16_t> samples{};
+		float scale{ 1.0f };
+		std::uint32_t sampleRate{};
+
+		std::uint64_t frame_count() const noexcept { return samples.size() / 2; }
+	};
+
 	struct PreparedArrangement
 	{
 		float tempo{};
@@ -64,6 +75,8 @@ namespace ax::audio
 		std::vector<ArrangementInstrument> instruments{};
 		std::vector<PreparedArrangementNote> notes{};
 		ReverbSettings reverb{};
+		// When set, playback streams this instead of synthesizing the notes live.
+		std::shared_ptr<const RenderedArrangement> rendered{};
 	};
 
 	constexpr std::size_t arrangement_max_instruments{ 64 };

@@ -1366,3 +1366,117 @@ TEST(AudioSystem, InvalidMusicFailsGracefully)
 	app.set_audio_config(AudioSystem::Config{ .openDevice = false });
 	ASSERT_TRUE(app.try_load({}, wgpu::BackendType::Undefined));
 }
+
+TEST(Arrangement, RenderedPlaybackMatchesLiveSynthesis)
+{
+	auto arrangement{ simple_arrangement() };
+	arrangement.reverb = { .wet = 0.4f, .decaySeconds = 0.5f, .damping = 0.3f };
+	auto live{ make_offline_audio() };
+	auto rendered{ make_offline_audio() };
+	std::string error{};
+	ASSERT_TRUE(live.define_arrangement("track", arrangement, error)) << error;
+	ASSERT_TRUE(rendered.define_arrangement("track", arrangement, error)) << error;
+
+	const auto prepared{ rendered.arrangement("track") };
+	ASSERT_NE(prepared, nullptr);
+	auto pcm{ rendered.render_arrangement(*prepared) };
+	ASSERT_TRUE(pcm.has_value());
+	EXPECT_GE(pcm->frame_count(), prepared->durationFrames);
+	ASSERT_TRUE(rendered.set_arrangement_rendering("track", std::make_shared<const RenderedArrangement>(std::move(*pcm))));
+	ASSERT_NE(rendered.arrangement("track")->rendered, nullptr);
+
+	ASSERT_TRUE(live.play_arrangement("track", 0.0f));
+	ASSERT_TRUE(rendered.play_arrangement("track", 0.0f));
+	const auto expected{ mix_for(live, 5.0f) };
+	const auto actual{ mix_for(rendered, 5.0f) };
+	ASSERT_EQ(expected.size(), actual.size());
+	EXPECT_GT(peak(expected), 0.1f);
+	float worst{};
+	for (std::size_t i{}; i < expected.size(); ++i)
+		worst = std::max(worst, std::abs(expected[i] - actual[i]));
+	EXPECT_LT(worst, 1e-3f);
+	// The rendering includes the reverb tail, so it ends with the live player.
+	mix_for(live, 10.0f);
+	mix_for(rendered, 10.0f);
+	EXPECT_FALSE(live.arrangement_playback().active);
+	EXPECT_FALSE(rendered.arrangement_playback().active);
+}
+
+TEST(Arrangement, RenderedPlaybackSeeksAndFadesOut)
+{
+	auto audio{ make_offline_audio() };
+	std::string error{};
+	ASSERT_TRUE(audio.define_arrangement("track", simple_arrangement(), error)) << error;
+	auto pcm{ audio.render_arrangement(*audio.arrangement("track")) };
+	ASSERT_TRUE(pcm.has_value());
+	ASSERT_TRUE(audio.set_arrangement_rendering("track", std::make_shared<const RenderedArrangement>(std::move(*pcm))));
+
+	ASSERT_TRUE(audio.play_arrangement("track", 0.0f));
+	EXPECT_LT(peak(mix_for(audio, 0.5f)), 1e-6f); // the note starts at beat 1
+	ASSERT_TRUE(audio.seek_arrangement(1.5f));
+	EXPECT_NEAR(audio.arrangement_playback().positionSeconds, 1.5f, 0.01f);
+	EXPECT_GT(peak(mix_for(audio, 0.1f)), 0.1f);
+	audio.stop_arrangement(0.05f);
+	mix_for(audio, 0.1f);
+	EXPECT_LT(peak(mix_for(audio, 0.1f)), 1e-6f);
+	EXPECT_FALSE(audio.arrangement_playback().active);
+}
+
+TEST(Arrangement, RenderKeyFollowsTheArrangement)
+{
+	auto audio{ make_offline_audio() };
+	std::string error{};
+	auto changed{ simple_arrangement() };
+	changed.notes[0].note = 70;
+	ASSERT_TRUE(audio.define_arrangement("a", simple_arrangement(), error)) << error;
+	ASSERT_TRUE(audio.define_arrangement("b", simple_arrangement(), error)) << error;
+	ASSERT_TRUE(audio.define_arrangement("c", std::move(changed), error)) << error;
+	const auto key{ audio.arrangement_render_key(*audio.arrangement("a")) };
+	EXPECT_EQ(key, audio.arrangement_render_key(*audio.arrangement("b")));
+	EXPECT_NE(key, audio.arrangement_render_key(*audio.arrangement("c")));
+
+	auto other{ AudioSystem{ AudioSystem::Config{ .openDevice = false, .manualMix = true, .sampleRate = 44100, .seed = 1 } } };
+	ASSERT_TRUE(other.define_arrangement("a", simple_arrangement(), error)) << error;
+	EXPECT_NE(key, other.arrangement_render_key(*other.arrangement("a")));
+	// A rendering made at another rate is refused.
+	auto pcm{ audio.render_arrangement(*audio.arrangement("a")) };
+	ASSERT_TRUE(pcm.has_value());
+	EXPECT_FALSE(other.set_arrangement_rendering("a", std::make_shared<const RenderedArrangement>(std::move(*pcm))));
+}
+
+TEST(AudioSystem, SoundVariantsCanBeSuppliedFromACache)
+{
+	auto source{ make_offline_audio() };
+	auto target{ make_offline_audio() };
+	auto def{ simple_sound() };
+	def.variants = 3;
+	def.mutation = 0.2f;
+	ASSERT_TRUE(source.define_sound("beep", def));
+	ASSERT_TRUE(target.define_sound("beep", def));
+	EXPECT_EQ(source.sound_render_key("beep"), target.sound_render_key("beep"));
+	EXPECT_FALSE(source.sound_render_key("missing").has_value());
+
+	const auto variants{ source.sound_variants("beep") };
+	ASSERT_EQ(variants.size(), 3u);
+	std::vector<std::vector<float>> copies{};
+	for (const auto& variant : variants)
+	{
+		ASSERT_NE(variant, nullptr);
+		EXPECT_FALSE(variant->empty());
+		copies.push_back(*variant);
+	}
+	EXPECT_FALSE(target.set_sound_variants("beep", { copies[0] }));
+	ASSERT_TRUE(target.set_sound_variants("beep", copies));
+	const auto supplied{ target.sound_variants("beep") };
+	for (std::size_t i{}; i < copies.size(); ++i)
+		EXPECT_EQ(*supplied[i], copies[i]);
+
+	auto changed{ def };
+	changed.params.baseFreq = 0.5f;
+	ASSERT_TRUE(target.define_sound("beep", changed));
+	EXPECT_NE(source.sound_render_key("beep"), target.sound_render_key("beep"));
+	auto fm{ def };
+	fm.fm = FmSfxParams{};
+	ASSERT_TRUE(target.define_sound("beep", fm));
+	EXPECT_NE(source.sound_render_key("beep"), target.sound_render_key("beep"));
+}

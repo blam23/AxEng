@@ -283,6 +283,105 @@ GLFWimage ax::Texture::create_glfw_image() const
 	};
 }
 
+std::expected<std::vector<uint8_t>, ax::Error> ax::Texture::read_rgba() const
+{
+	if (!m_loaded || m_width == 0 || m_height == 0 || m_format != wgpu::TextureFormat::RGBA8Unorm)
+	{
+		spdlog::error("Cannot read back texture '{}', only loaded RGBA8 textures can be read back.", m_name);
+		return std::unexpected{ Error::InvalidTexture };
+	}
+	if (m_device.Get() == nullptr || m_texture.Get() == nullptr)
+	{
+		spdlog::error("Cannot read back texture '{}', no GPU device is available.", m_name);
+		return std::unexpected{ Error::InvalidTexture };
+	}
+
+	const uint64_t rowBytes{ static_cast<uint64_t>(m_width) * 4 };
+	const uint64_t paddedRowBytes{ (rowBytes + 255) & ~uint64_t{ 255 } };
+	const uint64_t bufferSize{ paddedRowBytes * m_height };
+	if (paddedRowBytes > std::numeric_limits<uint32_t>::max())
+	{
+		spdlog::error("Cannot read back texture '{}', row size exceeds WebGPU limits.", m_name);
+		return std::unexpected{ Error::InvalidTexture };
+	}
+
+	wgpu::BufferDescriptor readbackDesc{};
+	readbackDesc.size = bufferSize;
+	readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+	readbackDesc.label = "Texture readback";
+	auto readback{ gpu::create_buffer(m_device, readbackDesc, "Readback") };
+
+	wgpu::CommandEncoderDescriptor encoderDesc{};
+	encoderDesc.label = "Texture readback encoder";
+	auto encoder{ m_device.CreateCommandEncoder(&encoderDesc) };
+	wgpu::TexelCopyTextureInfo source{};
+	source.texture = m_texture;
+	wgpu::TexelCopyBufferInfo destination{};
+	destination.buffer = readback;
+	destination.layout.bytesPerRow = static_cast<uint32_t>(paddedRowBytes);
+	destination.layout.rowsPerImage = m_height;
+	const wgpu::Extent3D extent{ m_width, m_height, 1 };
+	encoder.CopyTextureToBuffer(&source, &destination, &extent);
+	auto command{ encoder.Finish() };
+	m_device.GetQueue().Submit(1, &command);
+
+	struct MapResult
+	{
+		std::atomic<bool> complete{ false };
+		std::atomic<bool> succeeded{ false };
+	};
+	const auto result{ std::make_shared<MapResult>() };
+	readback.MapAsync(wgpu::MapMode::Read, 0, bufferSize, wgpu::CallbackMode::AllowSpontaneous,
+		[result](wgpu::MapAsyncStatus status, wgpu::StringView)
+		{
+			result->succeeded.store(status == wgpu::MapAsyncStatus::Success, std::memory_order_relaxed);
+			result->complete.store(true, std::memory_order_release);
+		});
+
+	const auto deadline{ std::chrono::steady_clock::now() + std::chrono::seconds{ 10 } };
+	while (!result->complete.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
+	{
+		ax::poll_device(m_device);
+	}
+	if (!result->complete.load(std::memory_order_acquire))
+	{
+		spdlog::error("Timed out reading back texture '{}' .", m_name);
+		return std::unexpected{ Error::GenericFailure };
+	}
+	if (!result->succeeded.load(std::memory_order_relaxed))
+	{
+		spdlog::error("Failed to map texture '{}' .", m_name);
+		return std::unexpected{ Error::GenericFailure };
+	}
+
+	const auto* mapped{ static_cast<const uint8_t*>(readback.GetConstMappedRange()) };
+	if (mapped == nullptr)
+	{
+		readback.Unmap();
+		spdlog::error("Failed to access texture '{}' readback data.", m_name);
+		return std::unexpected{ Error::GenericFailure };
+	}
+	std::vector<uint8_t> gpuPixels{};
+	gpuPixels.resize(static_cast<size_t>(rowBytes) * m_height);
+	for (uint32_t y{ 0 }; y < m_height; ++y)
+		std::memcpy(gpuPixels.data() + static_cast<size_t>(y) * rowBytes,
+			mapped + static_cast<size_t>(y) * paddedRowBytes, static_cast<size_t>(rowBytes));
+	readback.Unmap();
+	return gpuPixels;
+}
+
+bool ax::Texture::write_rgba(std::span<const uint8_t> pixels)
+{
+	if (!m_loaded || m_device.Get() == nullptr || m_texture.Get() == nullptr || m_format != wgpu::TextureFormat::RGBA8Unorm
+		|| pixels.size() != static_cast<size_t>(m_width) * m_height * 4)
+		return false;
+	wgpu::TexelCopyTextureInfo copyInfo{ .texture = m_texture, .mipLevel = 0, .origin = { 0, 0, 0 }, .aspect = wgpu::TextureAspect::All };
+	wgpu::TexelCopyBufferLayout layout{ .offset = 0, .bytesPerRow = 4 * m_width, .rowsPerImage = m_height };
+	wgpu::Extent3D writeSize{ m_width, m_height, 1 };
+	m_device.GetQueue().WriteTexture(&copyInfo, pixels.data(), pixels.size(), &layout, &writeSize);
+	return true;
+}
+
 ax::Error ax::Texture::save_png(const std::filesystem::path& path) const
 {
 	if (!m_loaded || m_width == 0 || m_height == 0)
@@ -303,82 +402,10 @@ ax::Error ax::Texture::save_png(const std::filesystem::path& path) const
 	if (m_gpuModified || !hasCpuPixels)
 	{
 		outputChannels = 4;
-		if (m_device.Get() == nullptr || m_texture.Get() == nullptr)
-		{
-			spdlog::error("Cannot read back texture '{}', no GPU device is available.", m_name);
-			return Error::InvalidTexture;
-		}
-
-		const uint64_t rowBytes{ static_cast<uint64_t>(m_width) * 4 };
-		const uint64_t paddedRowBytes{ (rowBytes + 255) & ~uint64_t{ 255 } };
-		const uint64_t bufferSize{ paddedRowBytes * m_height };
-		if (paddedRowBytes > std::numeric_limits<uint32_t>::max())
-		{
-			spdlog::error("Cannot read back texture '{}', row size exceeds WebGPU limits.", m_name);
-			return Error::InvalidTexture;
-		}
-
-		wgpu::BufferDescriptor readbackDesc{};
-		readbackDesc.size = bufferSize;
-		readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
-		readbackDesc.label = "Texture PNG readback";
-		auto readback{ gpu::create_buffer(m_device, readbackDesc, "Readback") };
-
-		wgpu::CommandEncoderDescriptor encoderDesc{};
-		encoderDesc.label = "Texture PNG readback encoder";
-		auto encoder{ m_device.CreateCommandEncoder(&encoderDesc) };
-		wgpu::TexelCopyTextureInfo source{};
-		source.texture = m_texture;
-		wgpu::TexelCopyBufferInfo destination{};
-		destination.buffer = readback;
-		destination.layout.bytesPerRow = static_cast<uint32_t>(paddedRowBytes);
-		destination.layout.rowsPerImage = m_height;
-		const wgpu::Extent3D extent{ m_width, m_height, 1 };
-		encoder.CopyTextureToBuffer(&source, &destination, &extent);
-		auto command{ encoder.Finish() };
-		m_device.GetQueue().Submit(1, &command);
-
-		struct MapResult
-		{
-			std::atomic<bool> complete{ false };
-			std::atomic<bool> succeeded{ false };
-		};
-		const auto result{ std::make_shared<MapResult>() };
-		readback.MapAsync(wgpu::MapMode::Read, 0, bufferSize, wgpu::CallbackMode::AllowSpontaneous,
-			[result](wgpu::MapAsyncStatus status, wgpu::StringView)
-			{
-				result->succeeded.store(status == wgpu::MapAsyncStatus::Success, std::memory_order_relaxed);
-				result->complete.store(true, std::memory_order_release);
-			});
-
-		const auto deadline{ std::chrono::steady_clock::now() + std::chrono::seconds{ 10 } };
-		while (!result->complete.load(std::memory_order_acquire) && std::chrono::steady_clock::now() < deadline)
-		{
-			ax::poll_device(m_device);
-		}
-		if (!result->complete.load(std::memory_order_acquire))
-		{
-			spdlog::error("Timed out reading back texture '{}' for PNG saving.", m_name);
-			return Error::GenericFailure;
-		}
-		if (!result->succeeded.load(std::memory_order_relaxed))
-		{
-			spdlog::error("Failed to map texture '{}' for PNG saving.", m_name);
-			return Error::GenericFailure;
-		}
-
-		const auto* mapped{ static_cast<const uint8_t*>(readback.GetConstMappedRange()) };
-		if (mapped == nullptr)
-		{
-			readback.Unmap();
-			spdlog::error("Failed to access texture '{}' readback data.", m_name);
-			return Error::GenericFailure;
-		}
-		gpuPixels.resize(static_cast<size_t>(rowBytes) * m_height);
-		for (uint32_t y{ 0 }; y < m_height; ++y)
-			std::memcpy(gpuPixels.data() + static_cast<size_t>(y) * rowBytes,
-				mapped + static_cast<size_t>(y) * paddedRowBytes, static_cast<size_t>(rowBytes));
-		readback.Unmap();
+		auto readback{ read_rgba() };
+		if (!readback)
+			return readback.error();
+		gpuPixels = std::move(*readback);
 		pixels = gpuPixels.data();
 	}
 

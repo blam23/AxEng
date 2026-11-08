@@ -5,12 +5,14 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -215,6 +217,10 @@ namespace ax
 		GLFWimage create_glfw_image() const;
 
 		Error save_png(const std::filesystem::path& path) const;
+		// Copies an RGBA8 texture back from the GPU as tightly packed rows. Blocks until the copy has finished.
+		std::expected<std::vector<uint8_t>, Error> read_rgba() const;
+		// Uploads tightly packed RGBA8 pixels over the whole texture without keeping a CPU copy.
+		bool write_rgba(std::span<const uint8_t> pixels);
 
 		std::optional<rectf> region(const std::string& subTexture) const;
 		const std::map<std::string, rectf>& regions() const { return m_regions; }

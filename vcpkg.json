@@ -45,6 +45,7 @@
                              "platform": "!emscripten"
                          },
                          "stb",
+                         "zstd",
                          {
                              "name": "dawn",
                              "platform": "!emscripten"
