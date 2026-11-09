@@ -78,6 +78,16 @@ namespace
 	{
 		return { reinterpret_cast<const char*>(data.data()), data.size() };
 	}
+
+	bool window_is_iconified([[maybe_unused]] GLFWwindow* window)
+	{
+#ifdef __EMSCRIPTEN__
+		// A canvas has no native minimized-window state; browser visibility is managed by the page.
+		return false;
+#else
+		return glfwGetWindowAttrib(window, GLFW_ICONIFIED) == GLFW_TRUE;
+#endif
+	}
 }
 
 std::map<GLFWwindow*, ax::Window*> s_windows{};
@@ -2076,7 +2086,9 @@ bool ax::Window::init_imgui()
 void ax::Window::register_window_events()
 {
 	glfwSetWindowSizeCallback(m_window, &resize_event_handler);
+#ifndef __EMSCRIPTEN__
 	glfwSetWindowCloseCallback(m_window, ax::Window::window_close_handler);
+#endif
 
 	ax::input::KeyEventHandler::register_events(m_window);
 	ax::input::MouseButtonEventHandler::register_events(m_window);
@@ -2208,7 +2220,7 @@ void ax::Window::run_loop()
 		const auto now{ Clock::now() };
 		const auto elapsed{ std::chrono::duration<double>(now - previous).count() };
 		previous = now;
-		if (m_fixedUpdateRate > 0.0 && glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))
+		if (m_fixedUpdateRate > 0.0 && window_is_iconified(m_window))
 		{
 			suspended = true;
 			m_suspended.store(true, std::memory_order_release);
@@ -2231,7 +2243,7 @@ void ax::Window::run_loop()
 		for (std::uint32_t step{}; step < steps; ++step)
 		{
 			if (step != 0) glfwPollEvents();
-			if (glfwWindowShouldClose(m_window) || (m_fixedUpdateRate > 0.0 && glfwGetWindowAttrib(m_window, GLFW_ICONIFIED))) break;
+			if (glfwWindowShouldClose(m_window) || (m_fixedUpdateRate > 0.0 && window_is_iconified(m_window))) break;
 			ZoneScopedN("Window::tick");
 			const auto updateStarted{ Clock::now() };
 			handle_tick(m_fixedUpdateRate > 0.0 ? scheduler.delta() : elapsed,
@@ -2242,7 +2254,7 @@ void ax::Window::run_loop()
 			m_loopStatistics.updateMilliseconds = std::chrono::duration<double, std::milli>(Clock::now() - updateStarted).count();
 		}
 		const bool rendering{ scheduler.render_due() && !glfwWindowShouldClose(m_window)
-			&& !(m_fixedUpdateRate > 0.0 && glfwGetWindowAttrib(m_window, GLFW_ICONIFIED)) };
+			&& !(m_fixedUpdateRate > 0.0 && window_is_iconified(m_window)) };
 		application.release(rendering);
 		if (rendering)
 		{
