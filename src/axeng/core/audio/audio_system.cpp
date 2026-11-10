@@ -419,6 +419,7 @@ struct ax::audio::AudioSystem::Impl
 				return;
 			}
 			contextOpen = true;
+			nullBackend = true;
 		}
 
 		auto deviceConfig{ ma_device_config_init(ma_device_type_playback) };
@@ -492,6 +493,7 @@ struct ax::audio::AudioSystem::Impl
 	ma_context context{};
 	ma_device device{};
 	bool contextOpen{ false };
+	bool nullBackend{ false };
 	bool deviceOpen{ false };
 	std::uint32_t sampleRate{ 48000 };
 
@@ -1177,6 +1179,11 @@ ax::audio::AudioSystem::~AudioSystem() = default;
 bool ax::audio::AudioSystem::device_open() const noexcept
 {
 	return m_impl->deviceOpen;
+}
+
+bool ax::audio::AudioSystem::null_backend() const noexcept
+{
+	return m_impl->nullBackend;
 }
 
 std::uint32_t ax::audio::AudioSystem::sample_rate() const noexcept

@@ -149,6 +149,8 @@ namespace ax::audio
 		~AudioSystem();
 
 		bool device_open() const noexcept;
+		// True when the output is miniaudio's null backend (Config::nullBackend): audio runs but is never heard.
+		bool null_backend() const noexcept;
 		std::uint32_t sample_rate() const noexcept;
 
 		// Sound bank. These functions must be called from a single thread (the Lua main thread).

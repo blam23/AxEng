@@ -36,7 +36,8 @@ only**.
 - `--audio-backend` selects the output behavior:
   - `none`: never open a device. Tests use this.
   - `null`: use miniaudio's null backend, which runs a real audio thread but discards the output. Useful for
-    automated runs of a game without making noise.
+    automated runs of a game without making noise. `AudioSystem::null_backend()` reports it, so native modules
+    that open their own miniaudio device can use the null backend too.
   - `auto` (the default): use the system's normal output device.
 
 ## Music assets
