@@ -41,6 +41,14 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 		"mode", ax::build::mode,
 		"debug", ax::build::is_debug
 	);
+	if (mainThread)
+	{
+		app_table["debug"] = state.create_table_with
+		(
+			"lua_execution_enabled", [&app]() { return app.lua_debug_execution_enabled(); },
+			"set_lua_execution_enabled", [&app](bool enabled) { app.set_lua_debug_execution_enabled(enabled); }
+		);
+	}
 
 	if (mainThread && app.has_permission(lua::Permission::IO) && !app.project_source_directory().empty())
 		app_table["project_source_directory"] = app.project_source_directory().string();

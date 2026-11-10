@@ -82,6 +82,8 @@ namespace ax
 		bool has_window() const noexcept { return m_window != nullptr; }
 		Window* window() noexcept { return m_window.get(); }
 		const Window* window() const noexcept { return m_window.get(); }
+		bool lua_debug_execution_enabled() const noexcept { return m_luaDebugExecutionEnabled; }
+		void set_lua_debug_execution_enabled(bool enabled) noexcept { m_luaDebugExecutionEnabled = enabled; }
 
 		const TextureManager& textures() const noexcept { return m_textures; }
 		TextureManager& textures() noexcept { return m_textures; }
@@ -157,6 +159,7 @@ namespace ax
 		std::unique_ptr<Window> m_window;
 		std::unique_ptr<NativeApplicationModule> m_nativeModule;
 		bool m_nativeModuleBound{ false };
+		bool m_luaDebugExecutionEnabled{ true };
 
 		ResourceLoader m_loader;
 		std::filesystem::path m_projectSourceDirectory{};

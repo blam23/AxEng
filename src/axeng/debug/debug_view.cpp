@@ -468,35 +468,42 @@ void ax::debug::ViewManager::debug_view_callback(Debugger& debugger, Application
 
 	ImGui::Begin(ICON_FA_CODE_BRANCH " Lua Debug");
 	{
+		if (app.lua_debug_execution_enabled())
+		{
+			auto& state{ debugger.get_state() };
+			const auto& env{ debugger.get_env() };
+			static char lua_exec[1024]{ 0 };
+			ImGui::InputText("##lua_exec_label", lua_exec, sizeof(lua_exec));
+			ImGui::SameLine();
+			if (ImGui::Button("Execute"))
+			{
+				sol::load_result res{ state.load(lua_exec) };
+				if (!res.valid())
+				{
+					const sol::error err = res;
+					spdlog::error("Failed to load Lua code: {}", err.what());
+				}
+
+				const auto func{ res.get<sol::protected_function>() };
+				sol::set_environment(env, func);
+				const auto func_res{ func() };
+
+				if (!func_res.valid())
+				{
+					const sol::error err = func_res;
+					spdlog::error("Failed to execute Lua code: {}", err.what());
+				}
+			}
+		}
+		else
+			ImGui::TextDisabled("Lua execution is disabled.");
+
 		auto& state{ debugger.get_state() };
 		const auto& env{ debugger.get_env() };
 		const sol::table& global_table{ state["_G"].get<sol::table>() };
 		static std::string picked_key{ "" };
 		static bool is_global{ false };
 		static std::string label{ "Pick a variable to inspect" };
-
-		static char lua_exec[1024]{ 0 };
-		ImGui::InputText("##lua_exec_label", lua_exec, sizeof(lua_exec));
-		ImGui::SameLine();
-		if (ImGui::Button("Execute"))
-		{
-			sol::load_result res{ state.load(lua_exec) };
-			if (!res.valid())
-			{
-				const sol::error err = res;
-				spdlog::error("Failed to load Lua code: {}", err.what());
-			}
-
-			const auto func{ res.get<sol::protected_function>() };
-			sol::set_environment(env, func);
-			const auto func_res{ func() };
-
-			if (!func_res.valid())
-			{
-				const sol::error err = func_res;
-				spdlog::error("Failed to execute Lua code: {}", err.what());
-			}
-		}
 
 		ImGui::PushItemWidth(-1);
 		if (ImGui::BeginListBox("##lua_vars"))
