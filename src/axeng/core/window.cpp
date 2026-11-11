@@ -2825,12 +2825,14 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 
 			{
 			ZoneScopedN("Window::unlit-scene-pass");
+			MaterialRenderer::set_light_map(m_lightRenderer.light_map_view());
 			auto unlitPass{ beginScenePass(false) };
 			for (const auto& call : m_unlitShapes.calls())
 				ShapeRenderer::draw(unlitPass, call);
 			draw_sprite_batches(unlitPass, m_pipeline, m_sdfPipeline, SpriteLayer::Unlit);
 			drawMaterials(unlitPass, MaterialPass::Unlit);
 			unlitPass.End();
+			MaterialRenderer::set_light_map({});
 			}
 			const bool unlitBatches{ std::ranges::any_of(m_staticSpriteBatches,
 				[](const auto& batch) { return batch->unlit() && batch->ready() && batch->visible(); }) };

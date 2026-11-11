@@ -53,6 +53,13 @@ namespace ax
 		// lighting (and after the world's overlay shapes), so it is lit like the rest; depth is tested, so whatever
 		// stands above it stays on top.
 		bool refraction{ false };
+		// Reads this frame's light map (an unlit material, drawn after lighting): it gets
+		//
+		//     fn light_at(world: vec2<f32>) -> vec3<f32>
+		//
+		// the light reaching a point in world pixels (ambient included). Drawn without a light map it is skipped.
+		// Not with `backdrop` or `refraction`.
+		bool lightMap{ false };
 	};
 
 	struct MaterialQuad
@@ -105,6 +112,8 @@ namespace ax
 		static bool is_unlit(const std::string& name);
 		static bool is_backdrop(const std::string& name);
 		static bool is_refraction(const std::string& name);
+		// The light map `light_at()` reads, for this frame's unlit draws. Pass an empty view to have them skipped.
+		static void set_light_map(const wgpu::TextureView& view);
 
 		// The mip chain `backdrop()` reads, for this frame's draws. Pass an empty view to have them skipped.
 		static void set_backdrop(const wgpu::TextureView& view);

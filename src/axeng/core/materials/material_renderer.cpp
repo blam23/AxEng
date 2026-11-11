@@ -93,6 +93,17 @@ fn scene_at(world : vec2<f32>, lod : f32) -> vec3<f32> {
 }
 )WGSL";
 
+	constexpr const char* s_lightMapPrelude = R"WGSL(
+@group(1) @binding(0) var light_texture : texture_2d<f32>;
+@group(1) @binding(1) var light_sampler : sampler;
+
+fn light_at(world : vec2<f32>) -> vec3<f32> {
+	let screen = (world - globals.camera.xy) * globals.camera.z + globals.viewport.xy * 0.5;
+	let uv = clamp(screen / globals.viewport.xy, vec2<f32>(0.0), vec2<f32>(1.0));
+	return textureSampleLevel(light_texture, light_sampler, uv, 0.0).rgb;
+}
+)WGSL";
+
 	constexpr const char* s_epilogue = R"WGSL(
 @fragment
 fn fs_main(in_ : VSOut) -> @location(0) vec4<f32> {
@@ -143,6 +154,7 @@ fn fs_main(in_ : VSOut) -> @location(0) vec4<f32> {
 		wgpu::PipelineLayout backdropPipelineLayout;
 		wgpu::Sampler backdropSampler;
 		wgpu::BindGroup backdropBindGroup;
+		wgpu::BindGroup lightMapBindGroup;
 		ax::gpu::TrackedBuffer uniforms;
 		wgpu::BindGroup bindGroup;
 		ax::gpu::TrackedBuffer quads;
@@ -167,8 +179,9 @@ fn fs_main(in_ : VSOut) -> @location(0) vec4<f32> {
 
 	wgpu::RenderPipeline build_pipeline(State& state, const ax::MaterialDefinition& definition)
 	{
-		const bool reads{ definition.backdrop || definition.refraction };
-		const auto source{ std::string{ s_prelude } + (reads ? s_backdropPrelude : "")
+		const bool lit{ definition.lightMap && !definition.backdrop && !definition.refraction };
+		const bool reads{ definition.backdrop || definition.refraction || lit };
+		const auto source{ std::string{ s_prelude } + (lit ? s_lightMapPrelude : reads ? s_backdropPrelude : "")
 			+ (definition.refraction ? s_scenePrelude : "") + "\n" + definition.fragment + "\n" + s_epilogue };
 		wgpu::ShaderSourceWGSL wgsl{};
 		wgsl.code = { source.data(), source.size() };
@@ -251,6 +264,28 @@ bool ax::MaterialRenderer::is_unlit(const std::string& name)
 {
 	const auto found{ definitions().find(name) };
 	return found != definitions().end() && found->second.definition.unlit;
+}
+
+void ax::MaterialRenderer::set_light_map(const wgpu::TextureView& view)
+{
+	if (!s_state)
+		return;
+	if (view == nullptr)
+	{
+		s_state->lightMapBindGroup = {};
+		return;
+	}
+	wgpu::BindGroupEntry bindings[2]{};
+	bindings[0].binding = 0;
+	bindings[0].textureView = view;
+	bindings[1].binding = 1;
+	bindings[1].sampler = s_state->backdropSampler;
+	wgpu::BindGroupDescriptor desc{};
+	desc.label = "MaterialLightMap";
+	desc.layout = s_state->backdropLayout;
+	desc.entryCount = 2;
+	desc.entries = bindings;
+	s_state->lightMapBindGroup = s_state->device.CreateBindGroup(&desc);
 }
 
 bool ax::MaterialRenderer::is_refraction(const std::string& name)
@@ -438,8 +473,9 @@ void ax::MaterialRenderer::draw(wgpu::RenderPassEncoder& pass, const MaterialDra
 		return;
 	}
 	auto& entry{ found->second };
+	const bool lit{ entry.definition.lightMap && !entry.definition.backdrop && !entry.definition.refraction };
 	const bool reads{ entry.definition.backdrop || entry.definition.refraction };
-	if (reads && state.backdropBindGroup == nullptr)
+	if ((reads && state.backdropBindGroup == nullptr) || (lit && state.lightMapBindGroup == nullptr))
 	{
 		++state.skipped;
 		return;
@@ -495,6 +531,8 @@ void ax::MaterialRenderer::draw(wgpu::RenderPassEncoder& pass, const MaterialDra
 	pass.SetBindGroup(0, state.bindGroup, 2, offsets);
 	if (reads)
 		pass.SetBindGroup(1, state.backdropBindGroup);
+	else if (lit)
+		pass.SetBindGroup(1, state.lightMapBindGroup);
 	pass.SetVertexBuffer(0, state.quads, quadOffset, quadBytes);
 	pass.Draw(6, static_cast<std::uint32_t>(draw.quads.size()));
 }
