@@ -50,7 +50,8 @@ namespace ax
 		//     fn scene_at(world: vec2<f32>, lod: f32) -> vec3<f32>
 		//
 		// which reads that copy at a point in world pixels. It is drawn in its own pass straight after the world, before
-		// lighting, so it is lit like the rest; depth is tested, so whatever stands above it stays on top.
+		// lighting (and after the world's overlay shapes), so it is lit like the rest; depth is tested, so whatever
+		// stands above it stays on top.
 		bool refraction{ false };
 	};
 

@@ -2688,23 +2688,6 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 
 		encodeTransparent(lightingActive ? SpriteLayer::Lit : SpriteLayer::All);
 
-		// Surfaces that look through themselves (water) go over a copy of the world drawn so far, before lighting.
-		if (std::ranges::any_of(m_frameMaterials, [](const MaterialDraw& call)
-				{ return !call.screenSpace && MaterialRenderer::is_refraction(call.material); })
-			&& (multisampled || m_surfaceSupportsCopySource) && m_sceneCopy.init(m_device, m_surfaceFormat, 2))
-		{
-			ZoneScopedN("Window::refraction-pass");
-			if (m_sceneCopy.encode(encoder, multisampled ? targetView : wgpu::TextureView{}, surfaceTexture.texture,
-				m_width, m_height))
-			{
-				MaterialRenderer::set_backdrop(m_sceneCopy.view());
-				auto refractionPass{ beginScenePass(false) };
-				drawMaterials(refractionPass, MaterialPass::Refraction);
-				refractionPass.End();
-				MaterialRenderer::set_backdrop({});
-			}
-		}
-
 		auto overlayShapes = DebugShapes::take_queued();
 		m_unlitOverlayShapes.clear();
 		m_interfaceOverlayShapes.clear();
@@ -2721,6 +2704,24 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			overlayShapes.resize(lit);
 		}
 		drawOverlay(overlayShapes);
+
+		// Surfaces that look through themselves (water) go over a copy of the world drawn so far, its shapes included,
+		// before lighting.
+		if (std::ranges::any_of(m_frameMaterials, [](const MaterialDraw& call)
+				{ return !call.screenSpace && MaterialRenderer::is_refraction(call.material); })
+			&& (multisampled || m_surfaceSupportsCopySource) && m_sceneCopy.init(m_device, m_surfaceFormat, 2))
+		{
+			ZoneScopedN("Window::refraction-pass");
+			if (m_sceneCopy.encode(encoder, multisampled ? targetView : wgpu::TextureView{}, surfaceTexture.texture,
+				m_width, m_height))
+			{
+				MaterialRenderer::set_backdrop(m_sceneCopy.view());
+				auto refractionPass{ beginScenePass(false) };
+				drawMaterials(refractionPass, MaterialPass::Refraction);
+				refractionPass.End();
+				MaterialRenderer::set_backdrop({});
+			}
+		}
 		if (!lightingActive && !interfaceActive && !m_screenSpaceSpriteGroupRanges.empty())
 		{
 			ZoneScopedN("Window::screen-space-sprites");
