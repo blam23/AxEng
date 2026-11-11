@@ -447,6 +447,8 @@ namespace ax
 		UnlitShapeCapture m_interfaceShapes;
 		ShapeList m_interfaceOverlayShapes;
 		BackdropBlur m_backdropBlur;
+		// The world as drawn before refracting materials (water) go over it, for them to look through.
+		BackdropBlur m_sceneCopy;
 		bool m_interfaceActive{};
 		std::vector<const SpriteDefinition*> m_litUploadScratch;
 		std::vector<const SpriteDefinition*> m_unlitUploadScratch;

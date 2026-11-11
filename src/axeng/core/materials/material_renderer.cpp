@@ -87,6 +87,12 @@ fn backdrop(screen : vec2<f32>, lod : f32) -> vec3<f32> {
 }
 )WGSL";
 
+	constexpr const char* s_scenePrelude = R"WGSL(
+fn scene_at(world : vec2<f32>, lod : f32) -> vec3<f32> {
+	return backdrop((world - globals.camera.xy) * globals.camera.z + globals.viewport.xy * 0.5, lod);
+}
+)WGSL";
+
 	constexpr const char* s_epilogue = R"WGSL(
 @fragment
 fn fs_main(in_ : VSOut) -> @location(0) vec4<f32> {
@@ -161,8 +167,9 @@ fn fs_main(in_ : VSOut) -> @location(0) vec4<f32> {
 
 	wgpu::RenderPipeline build_pipeline(State& state, const ax::MaterialDefinition& definition)
 	{
-		const auto source{ std::string{ s_prelude } + (definition.backdrop ? s_backdropPrelude : "") + "\n"
-			+ definition.fragment + "\n" + s_epilogue };
+		const bool reads{ definition.backdrop || definition.refraction };
+		const auto source{ std::string{ s_prelude } + (reads ? s_backdropPrelude : "")
+			+ (definition.refraction ? s_scenePrelude : "") + "\n" + definition.fragment + "\n" + s_epilogue };
 		wgpu::ShaderSourceWGSL wgsl{};
 		wgsl.code = { source.data(), source.size() };
 		wgpu::ShaderModuleDescriptor shaderDesc{};
@@ -207,7 +214,7 @@ fn fs_main(in_ : VSOut) -> @location(0) vec4<f32> {
 
 		wgpu::RenderPipelineDescriptor desc{};
 		desc.label = definition.name.c_str();
-		desc.layout = definition.backdrop ? state.backdropPipelineLayout : state.pipelineLayout;
+		desc.layout = reads ? state.backdropPipelineLayout : state.pipelineLayout;
 		desc.vertex.module = shader;
 		desc.vertex.entryPoint = "vs_main";
 		desc.vertex.bufferCount = 1;
@@ -244,6 +251,12 @@ bool ax::MaterialRenderer::is_unlit(const std::string& name)
 {
 	const auto found{ definitions().find(name) };
 	return found != definitions().end() && found->second.definition.unlit;
+}
+
+bool ax::MaterialRenderer::is_refraction(const std::string& name)
+{
+	const auto found{ definitions().find(name) };
+	return found != definitions().end() && found->second.definition.refraction;
 }
 
 bool ax::MaterialRenderer::is_backdrop(const std::string& name)
@@ -425,7 +438,8 @@ void ax::MaterialRenderer::draw(wgpu::RenderPassEncoder& pass, const MaterialDra
 		return;
 	}
 	auto& entry{ found->second };
-	if (entry.definition.backdrop && state.backdropBindGroup == nullptr)
+	const bool reads{ entry.definition.backdrop || entry.definition.refraction };
+	if (reads && state.backdropBindGroup == nullptr)
 	{
 		++state.skipped;
 		return;
@@ -479,7 +493,7 @@ void ax::MaterialRenderer::draw(wgpu::RenderPassEncoder& pass, const MaterialDra
 	const std::uint32_t offsets[2]{ static_cast<std::uint32_t>(globalsOffset), static_cast<std::uint32_t>(paramsOffset) };
 	pass.SetPipeline(entry.pipeline);
 	pass.SetBindGroup(0, state.bindGroup, 2, offsets);
-	if (entry.definition.backdrop)
+	if (reads)
 		pass.SetBindGroup(1, state.backdropBindGroup);
 	pass.SetVertexBuffer(0, state.quads, quadOffset, quadBytes);
 	pass.Draw(6, static_cast<std::uint32_t>(draw.quads.size()));

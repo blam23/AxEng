@@ -2649,14 +2649,16 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		}
 		// Which of this frame's material draws go in a pass: world space ones that light (or all of them when
 		// there is no lighting), the unlit ones after lighting, or the screen space ones.
-		enum class MaterialPass { Scene, Unlit, Screen, Backdrop };
+		enum class MaterialPass { Scene, Unlit, Screen, Backdrop, Refraction };
 		const auto drawMaterials{ [&](wgpu::RenderPassEncoder& target, MaterialPass which)
 		{
 			for (const auto& call : m_frameMaterials)
 			{
-				const bool wanted{ which == MaterialPass::Backdrop ? call.screenSpace && MaterialRenderer::is_backdrop(call.material)
+				const bool refracts{ !call.screenSpace && MaterialRenderer::is_refraction(call.material) };
+				const bool wanted{ which == MaterialPass::Refraction ? refracts
+					: which == MaterialPass::Backdrop ? call.screenSpace && MaterialRenderer::is_backdrop(call.material)
 					: which == MaterialPass::Screen ? call.screenSpace && !(m_interfaceActive && MaterialRenderer::is_backdrop(call.material))
-					: !call.screenSpace && (which == MaterialPass::Unlit
+					: !call.screenSpace && !refracts && (which == MaterialPass::Unlit
 						? lightingActive && MaterialRenderer::is_unlit(call.material)
 						: !(lightingActive && MaterialRenderer::is_unlit(call.material))) };
 				if (wanted)
@@ -2685,6 +2687,23 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		}
 
 		encodeTransparent(lightingActive ? SpriteLayer::Lit : SpriteLayer::All);
+
+		// Surfaces that look through themselves (water) go over a copy of the world drawn so far, before lighting.
+		if (std::ranges::any_of(m_frameMaterials, [](const MaterialDraw& call)
+				{ return !call.screenSpace && MaterialRenderer::is_refraction(call.material); })
+			&& (multisampled || m_surfaceSupportsCopySource) && m_sceneCopy.init(m_device, m_surfaceFormat, 2))
+		{
+			ZoneScopedN("Window::refraction-pass");
+			if (m_sceneCopy.encode(encoder, multisampled ? targetView : wgpu::TextureView{}, surfaceTexture.texture,
+				m_width, m_height))
+			{
+				MaterialRenderer::set_backdrop(m_sceneCopy.view());
+				auto refractionPass{ beginScenePass(false) };
+				drawMaterials(refractionPass, MaterialPass::Refraction);
+				refractionPass.End();
+				MaterialRenderer::set_backdrop({});
+			}
+		}
 
 		auto overlayShapes = DebugShapes::take_queued();
 		m_unlitOverlayShapes.clear();

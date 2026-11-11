@@ -44,6 +44,14 @@ namespace ax
 		// its interface pass, ahead of the interface's other shapes, and they write depth so what is covered stays
 		// covered. Drawn without a backdrop it is skipped.
 		bool backdrop{ false };
+		// A world space surface that looks through itself at the scene beneath it (water refracting what lies under
+		// it). It gets `backdrop()` too, reading a copy of the world drawn so far (before lighting), and
+		//
+		//     fn scene_at(world: vec2<f32>, lod: f32) -> vec3<f32>
+		//
+		// which reads that copy at a point in world pixels. It is drawn in its own pass straight after the world, before
+		// lighting, so it is lit like the rest; depth is tested, so whatever stands above it stays on top.
+		bool refraction{ false };
 	};
 
 	struct MaterialQuad
@@ -95,6 +103,7 @@ namespace ax
 		static bool is_defined(const std::string& name);
 		static bool is_unlit(const std::string& name);
 		static bool is_backdrop(const std::string& name);
+		static bool is_refraction(const std::string& name);
 
 		// The mip chain `backdrop()` reads, for this frame's draws. Pass an empty view to have them skipped.
 		static void set_backdrop(const wgpu::TextureView& view);
