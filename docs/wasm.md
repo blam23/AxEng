@@ -18,4 +18,5 @@ uses it supplies its own page and link options; AxEng stays project agnostic.
   five of the pre-created workers.
 - **Files**: user files live where the page mounts persistent storage (`/userfs`); `get_app_data_directory` knows it.
 - **Lua**: `lua_engine.h` includes PUC Lua there; the engine registers `unpack`, `loadstring` and the coroutine and utf8
-  libraries for scripts written for LuaJIT.
+  libraries for scripts written for LuaJIT. Scripts tell the browser build apart with `app.current_platform()`, which
+  returns "web" there ("windows", "linux" or "macos" elsewhere).
