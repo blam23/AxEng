@@ -7,16 +7,18 @@ struct Uniforms {
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
-// Lights are three vec4s each: (position, radius, intensity), (colour, falloff), (direction, cone inner, cone outer).
-// Glows are two: (position, radius, intensity), colour.
+// Lights are four vec4s each: (position, radius, intensity), (colour, falloff), (direction, cone inner, cone outer),
+// (length, reserved). Glows are two: (position, radius, intensity), colour.
 @group(0) @binding(1) var<storage, read> items: array<vec4<f32>>;
 
 struct InstanceOut {
 	@builtin(position) pos: vec4<f32>,
-	// -1..1 across the instance's radius.
+	// -1..1 across the instance's radius; for a beam, along and across it in radii, x scaled by (half length + radius).
 	@location(0) local: vec2<f32>,
 	@location(1) @interpolate(flat) colour: vec4<f32>,
 	@location(2) @interpolate(flat) cone: vec4<f32>,
+	// A beam's half length in radii, and 1 for a beam (0 otherwise).
+	@location(3) @interpolate(flat) beam: vec2<f32>,
 };
 
 struct FullscreenOut {
@@ -41,20 +43,39 @@ fn to_clip(world: vec2<f32>) -> vec4<f32> {
 
 @vertex
 fn vs_light(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance: u32) -> InstanceOut {
-	let a = items[instance * 3u];
-	let b = items[instance * 3u + 1u];
-	let c = items[instance * 3u + 2u];
-	let local = corner(vertex);
+	let a = items[instance * 4u];
+	let b = items[instance * 4u + 1u];
+	let c = items[instance * 4u + 2u];
+	let e = items[instance * 4u + 3u];
+	var local = corner(vertex);
 	var out: InstanceOut;
-	out.pos = to_clip(a.xy + local * a.z);
-	out.local = local;
 	out.colour = vec4<f32>(b.rgb * a.w, b.w);
 	out.cone = c;
+	if (e.x > 0.0) {
+		// A beam: the octagon stretched over the capsule round the line, half its length plus the radius each way
+		// along it and the radius across. Grown by sqrt(2), the stretched octagon covers the capsule's ends too.
+		local = local * 1.4142136;
+		let half = e.x * 0.5;
+		let across = vec2<f32>(-c.y, c.x);
+		out.pos = to_clip(a.xy + c.xy * half + c.xy * (local.x * (half + a.z)) + across * (local.y * a.z));
+		out.beam = vec2<f32>(half / max(a.z, 0.0001), 1.0);
+	} else {
+		out.pos = to_clip(a.xy + local * a.z);
+		out.beam = vec2<f32>(0.0);
+	}
+	out.local = local;
 	return out;
 }
 
 @fragment
 fn fs_light(in_: InstanceOut) -> @location(0) vec4<f32> {
+	if (in_.beam.y > 0.5) {
+		// The distance to the line, in radii.
+		let along = abs(in_.local.x * (in_.beam.x + 1.0));
+		let beyond = max(along - in_.beam.x, 0.0);
+		let d2 = beyond * beyond + in_.local.y * in_.local.y;
+		return vec4<f32>(in_.colour.rgb * pow(max(1.0 - d2, 0.0), in_.colour.w), 0.0);
+	}
 	let d2 = dot(in_.local, in_.local);
 	var attenuation = pow(max(1.0 - d2, 0.0), in_.colour.w);
 	if (in_.cone.w > -1.0) {
@@ -148,6 +169,7 @@ fn vs_glow(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instance
 	out.local = local;
 	out.colour = vec4<f32>(colour.rgb * colour.a * a.w, 0.0);
 	out.cone = vec4<f32>(0.0);
+	out.beam = vec2<f32>(0.0);
 	return out;
 }
 

@@ -330,6 +330,26 @@ TEST_F(LightRendererTest, ConeOnlyLightsFacingDirection)
 	EXPECT_EQ(image.at(64 + 20, 64 + 20)[0], 0);
 }
 
+TEST_F(LightRendererTest, BeamLightsAlongItsLineAndFadesAcrossIt)
+{
+	// A beam from (-40, 0) to (40, 0), lighting 12 pixels either side of the line.
+	const std::array lights{ ax::Light2D{ .position = { -40.0f, 0.0f }, .radius = 12.0f, .intensity = 1.0f,
+		.colour = { 1.0f, 1.0f, 1.0f }, .falloff = 1.0f, .direction = { 1.0f, 0.0f }, .length = 80.0f } };
+	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, settings({ 0.0f, 0.0f, 0.0f }), lights) };
+	// Fully lit all along the line, the same at its middle as near its ends.
+	EXPECT_GT(image.at(64, 64)[0], 240);
+	EXPECT_GT(image.at(64 - 34, 64)[0], 240);
+	EXPECT_GT(image.at(64 + 34, 64)[0], 240);
+	// Dimmer off to the side, dark past its radius, and dark well beyond its ends.
+	EXPECT_LT(image.at(64, 64 + 7)[0], 200);
+	EXPECT_GT(image.at(64, 64 + 7)[0], 20);
+	EXPECT_EQ(image.at(64, 64 + 16)[0], 0);
+	EXPECT_EQ(image.at(64 - 56, 64)[0], 0);
+	EXPECT_EQ(image.at(64 + 56, 64)[0], 0);
+	// Round at the ends: just past an end it is still lit.
+	EXPECT_GT(image.at(64 + 44, 64)[0], 20);
+}
+
 TEST_F(LightRendererTest, DimAmbientKeepsFullPrecision)
 {
 	// At an exposure of 1 the light is applied as is: 0.12 of white is 31, not the 30 a halved light would round to.

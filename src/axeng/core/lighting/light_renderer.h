@@ -22,6 +22,9 @@ namespace ax
 	// A light in world pixels. It adds colour * intensity (a negative intensity subtracts light), fading to nothing at radius with
 	// (1 - d^2)^falloff. A cone limits it to directions within coneOuter of direction, fully lit within
 	// coneInner (both cosines of half angles); coneOuter <= -1 lights every direction.
+	// A length above 0 makes it a beam instead: a line from position along direction (a unit vector) for length pixels,
+	// lit the same along its whole length and fading out to radius on every side of the line, d being the distance to
+	// it. A beam has no cone.
 	struct Light2D
 	{
 		glm::vec2 position{};
@@ -32,8 +35,10 @@ namespace ax
 		glm::vec2 direction{ 1.0f, 0.0f };
 		float coneInner{ -1.0f };
 		float coneOuter{ -1.0f };
+		float length{ 0.0f };
+		std::array<float, 3> reserved{};
 
-		static constexpr std::size_t gpuDataSize{ 48 };
+		static constexpr std::size_t gpuDataSize{ 64 };
 	};
 
 	// A soft additive halo in world pixels, drawn over the lit scene so it stays bright in the dark.
@@ -66,6 +71,7 @@ namespace ax
 	static_assert(offsetof(Light2D, direction) == 32);
 	static_assert(offsetof(Light2D, coneInner) == 40);
 	static_assert(offsetof(Light2D, coneOuter) == 44);
+	static_assert(offsetof(Light2D, length) == 48);
 	static_assert(sizeof(Light2D) == Light2D::gpuDataSize);
 	static_assert(offsetof(Glow2D, colour) == 16);
 	static_assert(sizeof(Glow2D) == Glow2D::gpuDataSize);
