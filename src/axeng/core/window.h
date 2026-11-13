@@ -396,7 +396,14 @@ namespace ax
 		wgpu::BindGroupLayout m_globalLayout;
 		gpu::TrackedBuffer m_viewportBuffer;
 		wgpu::BindGroup m_viewportBindGroup;
-		std::unordered_map<Texture*, wgpu::BindGroup> m_textureBindGroups;
+		// Keyed by address, with the texture's serial: a texture freed without invalidating its entry may have its
+		// address reused by a new one, which must not draw with the old texture's bind group.
+		struct TextureBindGroup
+		{
+			uint64_t serial{};
+			wgpu::BindGroup group{};
+		};
+		std::unordered_map<Texture*, TextureBindGroup> m_textureBindGroups;
 		std::mutex m_textureBindGroupsMutex{};
 		std::map<std::tuple<wgpu::TextureFormat, bool, bool>, wgpu::RenderPipeline> m_pendingPipelines;
 

@@ -1996,12 +1996,13 @@ wgpu::BindGroup ax::Window::get_texture_bind_group(Texture* texture)
 		return {};
 
 	std::lock_guard lock{ m_textureBindGroupsMutex };
-	if (const auto it{ m_textureBindGroups.find(texture) }; it != m_textureBindGroups.end())
-		return it->second;
+	auto& entry{ m_textureBindGroups[texture] };
+	if (entry.group && entry.serial == texture->serial())
+		return entry.group;
 
-	auto bindGroup{ setup_bind_groups(texture->view(), texture->distance_field() ? m_sdfUniforms : m_uniforms) };
-	m_textureBindGroups.emplace(texture, bindGroup);
-	return bindGroup;
+	entry.group = setup_bind_groups(texture->view(), texture->distance_field() ? m_sdfUniforms : m_uniforms);
+	entry.serial = texture->serial();
+	return entry.group;
 }
 
 void ax::Window::handle_tick(double delta, std::optional<double> frameDelta)
