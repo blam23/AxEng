@@ -2,6 +2,7 @@
 
 #include "axeng/debug/gpu_memory.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -212,6 +213,8 @@ namespace ax
 		const wgpu::TextureView& view() const { return m_view; }
 		const ImTextureID imgui_view() const { return (ImTextureID)(intptr_t)m_view.Get(); }
 		uint32_t width() const { return m_width; }
+		// Unique for the life of the process, unlike the address, which a later texture can reuse.
+		uint64_t serial() const { return m_serial; }
 		uint32_t height() const { return m_height; }
 
 		GLFWimage create_glfw_image() const;
@@ -252,6 +255,8 @@ namespace ax
 
 		inline static std::mutex s_liveMutex{};
 		inline static std::vector<Texture*> s_live{};
+		inline static std::atomic<uint64_t> s_nextSerial{ 0 };
+		uint64_t m_serial{ ++s_nextSerial };
 
 		wgpu::TextureFormat m_format{ wgpu::TextureFormat::RGBA8Unorm };
 		gpu::TrackedTexture m_texture;

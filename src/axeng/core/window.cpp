@@ -1996,12 +1996,13 @@ wgpu::BindGroup ax::Window::get_texture_bind_group(Texture* texture)
 		return {};
 
 	std::lock_guard lock{ m_textureBindGroupsMutex };
-	if (const auto it{ m_textureBindGroups.find(texture) }; it != m_textureBindGroups.end())
-		return it->second;
+	auto& entry{ m_textureBindGroups[texture] };
+	if (entry.group && entry.serial == texture->serial())
+		return entry.group;
 
-	auto bindGroup{ setup_bind_groups(texture->view(), texture->distance_field() ? m_sdfUniforms : m_uniforms) };
-	m_textureBindGroups.emplace(texture, bindGroup);
-	return bindGroup;
+	entry.group = setup_bind_groups(texture->view(), texture->distance_field() ? m_sdfUniforms : m_uniforms);
+	entry.serial = texture->serial();
+	return entry.group;
 }
 
 void ax::Window::handle_tick(double delta, std::optional<double> frameDelta)
@@ -2649,14 +2650,16 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		}
 		// Which of this frame's material draws go in a pass: world space ones that light (or all of them when
 		// there is no lighting), the unlit ones after lighting, or the screen space ones.
-		enum class MaterialPass { Scene, Unlit, Screen, Backdrop };
+		enum class MaterialPass { Scene, Unlit, Screen, Backdrop, Refraction };
 		const auto drawMaterials{ [&](wgpu::RenderPassEncoder& target, MaterialPass which)
 		{
 			for (const auto& call : m_frameMaterials)
 			{
-				const bool wanted{ which == MaterialPass::Backdrop ? call.screenSpace && MaterialRenderer::is_backdrop(call.material)
+				const bool refracts{ !call.screenSpace && MaterialRenderer::is_refraction(call.material) };
+				const bool wanted{ which == MaterialPass::Refraction ? refracts
+					: which == MaterialPass::Backdrop ? call.screenSpace && MaterialRenderer::is_backdrop(call.material)
 					: which == MaterialPass::Screen ? call.screenSpace && !(m_interfaceActive && MaterialRenderer::is_backdrop(call.material))
-					: !call.screenSpace && (which == MaterialPass::Unlit
+					: !call.screenSpace && !refracts && (which == MaterialPass::Unlit
 						? lightingActive && MaterialRenderer::is_unlit(call.material)
 						: !(lightingActive && MaterialRenderer::is_unlit(call.material))) };
 				if (wanted)
@@ -2702,6 +2705,24 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			overlayShapes.resize(lit);
 		}
 		drawOverlay(overlayShapes);
+
+		// Surfaces that look through themselves (water) go over a copy of the world drawn so far, its shapes included,
+		// before lighting.
+		if (std::ranges::any_of(m_frameMaterials, [](const MaterialDraw& call)
+				{ return !call.screenSpace && MaterialRenderer::is_refraction(call.material); })
+			&& (multisampled || m_surfaceSupportsCopySource) && m_sceneCopy.init(m_device, m_surfaceFormat, 2))
+		{
+			ZoneScopedN("Window::refraction-pass");
+			if (m_sceneCopy.encode(encoder, multisampled ? targetView : wgpu::TextureView{}, surfaceTexture.texture,
+				m_width, m_height))
+			{
+				MaterialRenderer::set_backdrop(m_sceneCopy.view());
+				auto refractionPass{ beginScenePass(false) };
+				drawMaterials(refractionPass, MaterialPass::Refraction);
+				refractionPass.End();
+				MaterialRenderer::set_backdrop({});
+			}
+		}
 		if (!lightingActive && !interfaceActive && !m_screenSpaceSpriteGroupRanges.empty())
 		{
 			ZoneScopedN("Window::screen-space-sprites");
@@ -2805,12 +2826,14 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 
 			{
 			ZoneScopedN("Window::unlit-scene-pass");
+			MaterialRenderer::set_light_map(m_lightRenderer.light_map_view());
 			auto unlitPass{ beginScenePass(false) };
 			for (const auto& call : m_unlitShapes.calls())
 				ShapeRenderer::draw(unlitPass, call);
 			draw_sprite_batches(unlitPass, m_pipeline, m_sdfPipeline, SpriteLayer::Unlit);
 			drawMaterials(unlitPass, MaterialPass::Unlit);
 			unlitPass.End();
+			MaterialRenderer::set_light_map({});
 			}
 			const bool unlitBatches{ std::ranges::any_of(m_staticSpriteBatches,
 				[](const auto& batch) { return batch->unlit() && batch->ready() && batch->visible(); }) };

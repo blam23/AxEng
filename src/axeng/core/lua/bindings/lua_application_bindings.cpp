@@ -35,6 +35,9 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 		return ax::gpu::format_report(heading.value_or(""));
 	};
 
+	// The platform the engine was built for: "web", "windows", "linux" or "macos" (see ax::build::platform).
+	app_table["current_platform"] = []() { return std::string{ ax::build::platform }; };
+
 	// Describes how the engine executable was built (not the project's build.json config).
 	app_table["engine_build"] = state.create_table_with
 	(

@@ -134,6 +134,8 @@ namespace ax
 			std::uint32_t lights{}, glows{}, lightMapWidth{}, lightMapHeight{}, occluders{};
 		};
 		Stats last_stats() const noexcept { return m_stats; }
+		// The light map the last encode drew (empty before the first), for materials that read it.
+		wgpu::TextureView light_map_view() const { return m_lightMap ? m_lightMap->view() : wgpu::TextureView{}; }
 	private:
 		struct InstanceBuffer
 		{
