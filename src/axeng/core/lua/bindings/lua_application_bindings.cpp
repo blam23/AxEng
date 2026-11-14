@@ -11,6 +11,7 @@
 #include "axeng/core/lua/bindings/lua_sprite_bindings.h"
 #include "axeng/core/lua/bindings/lua_user_io_bindings.h"
 #include "axeng/core/lua/bindings/lua_window_bindings.h"
+#include "axeng/debug/gpu_errors.h"
 #include "axeng/debug/gpu_memory.h"
 #include "axeng/core/window.h"
 #include "spdlog/spdlog.h"
@@ -33,6 +34,13 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 	app_table["gpu_memory_report"] = [](sol::optional<std::string> heading)
 	{
 		return ax::gpu::format_report(heading.value_or(""));
+	};
+
+	// The WebGPU validation errors since the last call (count, first message), for self-tests to fail on.
+	app_table["take_gpu_errors"] = []()
+	{
+		auto errors{ ax::gpu::take_errors() };
+		return std::make_tuple(errors.count, std::move(errors.first));
 	};
 
 	// The platform the engine was built for: "web", "windows", "linux" or "macos" (see ax::build::platform).

@@ -1,6 +1,7 @@
 #include "axeng/core/imgui_helper.h"
 #include "axeng/core/imgui_style.h"
 #include "axeng/core/log_timer.h"
+#include "axeng/debug/gpu_errors.h"
 #include <tracy/Tracy.hpp>
 #include "axeng/core/window.h"
 #include "axeng/core/fixed_update_scheduler.h"
@@ -807,6 +808,7 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 		[](const wgpu::Device&, wgpu::ErrorType error_type, wgpu::StringView message)
 		{
 			spdlog::error("Error: {} - message: {}", (uint32_t)error_type, message.data);
+			ax::gpu::record_error(std::string_view{ message.data, message.length });
 		}
 	);
 	deviceDescriptor.SetDeviceLostCallback
@@ -815,6 +817,9 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 		[](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
 		{
 			spdlog::error("Device Lost: {} - message: {}", (uint32_t)reason, message.data);
+			// Destroying the device at shutdown reports a loss too; that one is expected.
+			if (reason != wgpu::DeviceLostReason::Destroyed)
+				ax::gpu::record_error("device lost: " + std::string{ message.data, message.length });
 		}
 	);
 
