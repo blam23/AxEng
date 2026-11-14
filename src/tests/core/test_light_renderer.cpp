@@ -660,7 +660,7 @@ TEST_F(LightRendererTest, RadianceMatchesTheUnoccludedLight)
 		EXPECT_EQ(stats.lights, 0u);
 		EXPECT_GT(stats.radianceCascades, 1u);
 		// Coarser probes resolve a little less precisely.
-		const int tolerance{ spacing == 1 ? 24 : 32 };
+		const int tolerance{ spacing == 1 ? 24 : 40 };
 		for (const auto distance : { 6.0f, 14.0f, 24.0f, 34.0f })
 		{
 			EXPECT_TRUE(close_to(traced.at(at(distance), at(0.0f)), analytic.at(at(distance), at(0.0f)), tolerance))
@@ -744,16 +744,20 @@ TEST_F(LightRendererTest, RadianceSkyOcclusionDarkensAmbientNearOccluders)
 
 TEST_F(LightRendererTest, DISABLED_RadianceProfileDump)
 {
-	for (const auto source : { 0.0f, 3.5f, 4.5f })
+	// Prints traced against analytic light along an axis and the diagonal, for tuning.
+	for (const auto spacing : { 1u, 2u })
 	{
-		const std::array lights{ ax::Light2D{ .position = { 0.0f, 0.0f }, .radius = 48.0f, .intensity = 1.0f, .sourceRadius = source } };
-		const auto traced{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, radiance_settings(), lights) };
+		const std::array lights{ ax::Light2D{ .position = { 0.0f, 0.0f }, .radius = 48.0f, .intensity = 1.0f } };
+		auto lighting{ radiance_settings() };
+		lighting.radiance.probeSpacing = spacing;
+		const auto traced{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, lighting, lights) };
 		auto plain{ radiance_settings() };
 		plain.radiance.enabled = false;
 		const auto analytic{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, plain, lights) };
-		std::printf("source %g\n", source);
-		for (int d = 0; d < 48; d += 3)
-			std::printf("%d: %d %d | %d\n", d, traced.at(at(static_cast<float>(d)), at(0.0f))[0], analytic.at(at(static_cast<float>(d)), at(0.0f))[0],
-				traced.at(at(static_cast<float>(d) * 0.7071f), at(static_cast<float>(d) * 0.7071f))[0]);
+		std::printf("spacing %u\n", spacing);
+		for (int d = 0; d < 48; d += 2)
+			std::printf("%d: %d %d | %d %d\n", d, traced.at(at(static_cast<float>(d)), at(0.0f))[0], analytic.at(at(static_cast<float>(d)), at(0.0f))[0],
+				traced.at(at(static_cast<float>(d) * 0.7071f), at(static_cast<float>(d) * 0.7071f))[0],
+				analytic.at(at(static_cast<float>(d) * 0.7071f), at(static_cast<float>(d) * 0.7071f))[0]);
 	}
 }

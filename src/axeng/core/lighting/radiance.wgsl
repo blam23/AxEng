@@ -31,7 +31,7 @@ const TAU: f32 = 6.28318531;
 const NO_SEED: u32 = 0xFFFFu;
 const MAX_STEPS: u32 = 40u;
 const HIT_DISTANCE: f32 = 0.75;
-const SEEN_MARGIN: f32 = 1.0;
+const SEEN_MARGIN: f32 = 0.75;
 
 // Sources smaller than a few probe spacings fall between the rays, so none is smaller than this (texels).
 fn source_radius(worldRadius: f32) -> f32 {
@@ -238,10 +238,13 @@ fn trace(probe: vec2<f32>, begin: vec2<f32>, dir: vec2<f32>, reach: f32) -> vec4
 		if (distance < 0.0) {
 			return vec4<f32>(hit_radiance(p, at, probe, dir), 0.0);
 		}
-		// Grazing rays would step past a surface's edge texels; one passing this close hits the nearest of them.
+		// Grazing rays would step past a surface's edge texels; one passing this close, heading towards it, hits the
+		// nearest of them.
 		if (distance < HIT_DISTANCE) {
-			let surface = p + vec2<i32>(i32((packed >> 16u) & 0xFFu), i32(packed >> 24u)) - vec2<i32>(128);
-			return vec4<f32>(hit_radiance(surface, at, probe, dir), 0.0);
+			let offset = vec2<i32>(i32((packed >> 16u) & 0xFFu), i32(packed >> 24u)) - vec2<i32>(128);
+			if (dot(normalize(vec2<f32>(offset) + vec2<f32>(0.0001)), dir) > -0.35) {
+				return vec4<f32>(hit_radiance(p + offset, at, probe, dir), 0.0);
+			}
 		}
 		t += distance;
 		if (t >= reach) {
@@ -366,9 +369,11 @@ fn gather(g: vec2<f32>, anySolid: bool) -> vec4<f32> {
 }
 
 // An occluder texel takes the light just outside it: the mean of samples on a ring a little beyond its depth that
-// land outside every solid. The side of a building facing a light is lit, the far side dark.
+// land outside every solid, leaning towards the brighter ones: seen from above, a building's top catches the light
+// falling on its lit side, while the edge on its far side stays dark.
 fn interior(g: vec2<f32>, depth: f32) -> vec4<f32> {
-	var radius = depth + 1.5;
+	// Far enough out that the probes sampled there are clear of the surface.
+	var radius = depth + 1.0 + rc.probes.z;
 	for (var attempt = 0; attempt < 3; attempt++) {
 		var sum = vec4<f32>(0.0);
 		var count = 0.0;
@@ -378,8 +383,10 @@ fn interior(g: vec2<f32>, depth: f32) -> vec4<f32> {
 			if (any(at < vec2<f32>(0.0)) || any(at >= rc.grid.xy) || scene_at(at).a > 0.5) {
 				continue;
 			}
-			sum += gather(at, false);
-			count += 1.0;
+			let light = gather(at, false);
+			let weight = dot(light.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) + 0.02;
+			sum += light * weight;
+			count += weight;
 		}
 		if (count > 0.0) {
 			return sum / count;
