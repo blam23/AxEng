@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <numbers>
@@ -126,7 +127,8 @@ protected:
 		const std::function<void(wgpu::CommandEncoder&)>& before = {},
 		const std::function<void(wgpu::RenderPassEncoder&, std::uint32_t)>& extra = {}, const ax::NoiseShadow2D* noiseShadow = nullptr,
 		std::span<const ax::LightOccluder2D> occluders = {}, std::span<const ax::RadianceCircle> circles = {},
-		ax::LightRenderer::Stats* stats = nullptr, const ax::RadianceCascades::OccluderDraw& radianceOccluders = {})
+		ax::LightRenderer::Stats* stats = nullptr, const ax::RadianceCascades::OccluderDraw& radianceOccluders = {},
+		int frames = 1)
 	{
 		constexpr auto format{ wgpu::TextureFormat::RGBA8Unorm };
 		const auto makeTexture = [](std::uint32_t sampleCount, wgpu::TextureUsage usage)
@@ -160,6 +162,13 @@ protected:
 		}
 		if (before)
 			before(encoder);
+		// Earlier frames only leave their light map behind (for bounce light).
+		for (int frame{ 1 }; frame < frames; ++frame)
+		{
+			ax::LightingSettings earlier{ lighting };
+			renderer.encode(s_device, s_device.GetQueue(), encoder, targetView, s_size, s_size, view, earlier,
+				lights, glows, extra, noiseShadow, occluders, circles, radianceOccluders);
+		}
 		renderer.encode(s_device, s_device.GetQueue(), encoder, targetView, s_size, s_size, view, lighting,
 			lights, glows, extra, noiseShadow, occluders, circles, radianceOccluders);
 		if (stats)
@@ -657,7 +666,7 @@ TEST_F(LightRendererTest, RadianceMatchesTheUnoccludedLight)
 		const auto traced{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, lighting, lights, {}, 1, centred_view(), {}, {},
 			nullptr, {}, {}, &stats) };
 		EXPECT_EQ(stats.radianceLights, 1u);
-		EXPECT_EQ(stats.lights, 0u);
+		EXPECT_EQ(stats.lights, 1u);
 		EXPECT_GT(stats.radianceCascades, 1u);
 		// Coarser probes resolve a little less precisely.
 		const int tolerance{ spacing == 1 ? 24 : 40 };
@@ -747,9 +756,21 @@ TEST_F(LightRendererTest, DISABLED_RadianceProfileDump)
 	// Prints traced against analytic light along an axis and the diagonal, for tuning.
 	for (const auto spacing : { 1u, 2u })
 	{
-		const std::array lights{ ax::Light2D{ .position = { 0.0f, 0.0f }, .radius = 48.0f, .intensity = 1.0f } };
+		// AXENG_RADIANCE_DUMP_SOURCE sets the source radius; AXENG_RADIANCE_DUMP_NO_FIX turns the bilinear fix off.
+		const auto environment{ [](const char* name)
+		{
+			char* value{};
+			std::size_t length{};
+			const std::string text{ _dupenv_s(&value, &length, name) == 0 && value != nullptr ? value : "" };
+			std::free(value);
+			return text;
+		} };
+		const auto sourceText{ environment("AXENG_RADIANCE_DUMP_SOURCE") };
+		const std::array lights{ ax::Light2D{ .position = { 0.0f, 0.0f }, .radius = 48.0f, .intensity = 1.0f,
+			.sourceRadius = sourceText.empty() ? 0.0f : std::stof(sourceText) } };
 		auto lighting{ radiance_settings() };
 		lighting.radiance.probeSpacing = spacing;
+		lighting.radiance.bilinearFix = environment("AXENG_RADIANCE_DUMP_NO_FIX").empty();
 		const auto traced{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, lighting, lights) };
 		auto plain{ radiance_settings() };
 		plain.radiance.enabled = false;
@@ -760,4 +781,76 @@ TEST_F(LightRendererTest, DISABLED_RadianceProfileDump)
 				traced.at(at(static_cast<float>(d) * 0.7071f), at(static_cast<float>(d) * 0.7071f))[0],
 				analytic.at(at(static_cast<float>(d) * 0.7071f), at(static_cast<float>(d) * 0.7071f))[0]);
 	}
+}
+
+TEST_F(LightRendererTest, DISABLED_ReportsGpuTimeForRadianceCascades)
+{
+	constexpr std::uint32_t width{ 1920 }, height{ 1080 };
+	constexpr auto format{ wgpu::TextureFormat::RGBA8Unorm };
+	wgpu::TextureDescriptor desc{};
+	desc.size = { width, height };
+	desc.format = format;
+	desc.sampleCount = 4;
+	desc.usage = wgpu::TextureUsage::RenderAttachment;
+	const auto target{ s_device.CreateTexture(&desc) };
+	const auto view{ target.CreateView() };
+	ax::LightRenderer renderer{};
+	ASSERT_TRUE(renderer.init(s_device, format, 4));
+	// The game's default zoom, 32 pixel tiles.
+	const ax::LightView camera{ .viewport = { static_cast<float>(width), static_cast<float>(height) }, .zoom = 1.5f };
+	std::vector<ax::Light2D> lights{};
+	std::vector<ax::RadianceCircle> circles{};
+	for (std::uint32_t index{}; index < 60; ++index)
+		lights.push_back({ .position = { static_cast<float>((index * 7919u) % 1600u) - 800.0f,
+			static_cast<float>((index * 104729u) % 900u) - 450.0f }, .radius = 320.0f, .intensity = 0.5f,
+			.colour = { 1.0f, 0.9f, 0.7f }, .falloff = 1.6f, .sourceRadius = 16.0f });
+	for (std::uint32_t index{}; index < 800; ++index)
+		circles.push_back({ .centre = { static_cast<float>((index * 3571u) % 1900u) - 950.0f,
+			static_cast<float>((index * 6151u) % 1100u) - 550.0f }, .radius = 13.0f });
+	struct Case { const char* name; std::uint32_t divisor, spacing; bool fix; bool enabled; };
+	for (const auto& test : { Case{ "off", 2, 2, true, false }, Case{ "low", 4, 2, true, true },
+		Case{ "medium", 2, 2, true, true }, Case{ "medium, no bilinear fix", 2, 2, false, true },
+		Case{ "high", 2, 1, true, true }, Case{ "high, no bilinear fix", 2, 1, false, true } })
+	{
+		auto settings{ ax::LightingSettings{ .enabled = true, .ambient = glm::vec3{ 0.12f }, .resolutionDivisor = 2 } };
+		settings.radiance = { .enabled = test.enabled, .divisor = test.divisor, .probeSpacing = test.spacing,
+			.aoStrength = 0.4f, .aoRange = 40.0f, .bilinearFix = test.fix };
+		const auto frame{ [&]
+		{
+			auto encoder{ s_device.CreateCommandEncoder() };
+			renderer.encode(s_device, s_device.GetQueue(), encoder, view, width, height, camera, settings, lights, {}, {},
+				nullptr, {}, circles);
+			const auto commands{ encoder.Finish() };
+			s_device.GetQueue().Submit(1, &commands);
+			s_instance.WaitAny(s_device.GetQueue().OnSubmittedWorkDone(wgpu::CallbackMode::WaitAnyOnly,
+				[](wgpu::QueueWorkDoneStatus, wgpu::StringView) {}), UINT64_MAX);
+		} };
+		frame();
+		constexpr int frames{ 30 };
+		const auto started{ std::chrono::steady_clock::now() };
+		for (int index{}; index < frames; ++index) frame();
+		const auto elapsed{ std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() };
+		const auto stats{ renderer.last_stats() };
+		std::printf("%s: %.3f ms per frame (grid %ux%u, %u cascades, %u traced)\n", test.name, elapsed / frames,
+			stats.radianceWidth, stats.radianceHeight, stats.radianceCascades, stats.radianceLights);
+	}
+}
+
+TEST_F(LightRendererTest, RadianceBounceReflectsLightOffLitOccluders)
+{
+	const std::array lights{ ax::Light2D{ .position = { -44.0f, 0.0f }, .radius = 120.0f, .intensity = 0.3f,
+		.falloff = 1.0f, .sourceRadius = 4.0f } };
+	const std::array circles{ ax::RadianceCircle{ .centre = { 10.0f, 0.0f }, .radius = 16.0f,
+		.albedo = { 1.0f, 1.0f, 1.0f, 1.0f } } };
+	auto lighting{ radiance_settings() };
+	lighting.ambient = glm::vec3{ 0.0f };
+	const auto plain{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, lighting, lights, {}, 1, centred_view(), {}, {}, nullptr, {},
+		circles, nullptr, {}, 2) };
+	lighting.radiance.bounce = 1.0f;
+	const auto bounced{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, lighting, lights, {}, 1, centred_view(), {}, {}, nullptr, {},
+		circles, nullptr, {}, 2) };
+	// Just off the circle's lit face, the light it reflects adds to the lamp's; behind it, in its shadow, nothing does.
+	const auto litBefore{ plain.at(at(-12.0f), at(14.0f))[0] }, litAfter{ bounced.at(at(-12.0f), at(14.0f))[0] };
+	EXPECT_GT(litAfter, litBefore + 3) << litBefore << " -> " << litAfter;
+	EXPECT_NEAR(bounced.at(at(40.0f), at(0.0f))[0], plain.at(at(40.0f), at(0.0f))[0], 2);
 }

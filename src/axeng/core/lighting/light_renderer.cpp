@@ -406,6 +406,8 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		m_stats.radianceHeight = radianceStats.height;
 		m_stats.radianceCascades = radianceStats.cascades;
 		m_stats.radianceLights = radianceStats.lights;
+		// Every light lit the frame, traced or drawn.
+		m_stats.lights += radianceStats.lights;
 		m_stats.radianceCircles = radianceStats.circles;
 	}
 	m_previousView = view;

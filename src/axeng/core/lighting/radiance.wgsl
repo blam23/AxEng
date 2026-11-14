@@ -29,7 +29,7 @@ struct Rc {
 const PI: f32 = 3.14159265;
 const TAU: f32 = 6.28318531;
 const NO_SEED: u32 = 0xFFFFu;
-const MAX_STEPS: u32 = 40u;
+const MAX_STEPS: u32 = 32u;
 const HIT_DISTANCE: f32 = 0.75;
 const SEEN_MARGIN: f32 = 0.75;
 

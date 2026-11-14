@@ -140,7 +140,8 @@ namespace ax
 		struct Stats
 		{
 			std::uint32_t lights{}, glows{}, lightMapWidth{}, lightMapHeight{}, occluders{};
-			// The radiance cascades grid (0 when they did not run), its cascades and the lights traced through it.
+			// The radiance cascades grid (0 when they did not run), its cascades and the lights traced through it (also
+			// counted in lights).
 			std::uint32_t radianceWidth{}, radianceHeight{}, radianceCascades{}, radianceLights{}, radianceCircles{};
 		};
 		Stats last_stats() const noexcept { return m_stats; }
