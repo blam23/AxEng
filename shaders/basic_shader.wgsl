@@ -150,6 +150,16 @@ fn fs_radiance_occluder(in_: VSOut) -> @location(0) vec4<f32> {
 	return vec4<f32>(col.rgb, 1.0);
 }
 
+// The silhouette of an ambient occlusion caster: full coverage where it is at least half opaque (red, for a single
+// channel mask).
+@fragment
+fn fs_ao_silhouette(in_: VSOut) -> @location(0) vec4<f32> {
+	if (sprite_color(in_).a < 0.5) {
+		discard;
+	}
+	return vec4<f32>(1.0);
+}
+
 @fragment
 fn fs_opaque(in_: VSOut) -> @location(0) vec4<f32> {
 	if (in_.pos.x < in_.clip_rect.x || in_.pos.y < in_.clip_rect.y

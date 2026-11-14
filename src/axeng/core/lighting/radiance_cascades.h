@@ -1,9 +1,11 @@
 #pragma once
 
 #include "axeng/debug/gpu_memory.h"
+#include "axeng/debug/gpu_pass_timer.h"
 #include <webgpu/webgpu_cpp.h>
 #include <glm/glm.hpp>
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <span>
@@ -34,7 +36,7 @@ namespace ax
 	{
 		bool enabled{ false };
 		// A GI texel is this many screen pixels (1 to 8).
-		std::uint32_t divisor{ 2 };
+		float divisor{ 2.0f };
 		// Cascade 0's probes are this many GI texels apart (1 or 2).
 		std::uint32_t probeSpacing{ 1 };
 		// World pixels around the view that are traced too, so off-screen lights and occluders still count. Capped at
@@ -50,6 +52,9 @@ namespace ax
 		// Four rays per direction, one towards each of the next cascade's nearest probes, so light from small sources
 		// carries on without rings (the "bilinear fix"). About four times the tracing.
 		bool bilinearFix{ true };
+		// The cascades, from the lowest, that use it (the top one never needs it). Fewer is cheaper, the higher cascades'
+		// rays being the longest, but each one left out rings round lights at the distance it covers.
+		std::uint32_t fixCascades{ 8 };
 		// Lights smaller than this many GI texels in radius are drawn without shadows.
 		float minLightTexels{ 6.0f };
 		// 0 off, 1 scene (occluders and emitters), 2 distance field, 3 traced light only, 4 sky visibility.
@@ -89,11 +94,21 @@ namespace ax
 
 	// The grid for a view: the view plus the margin, snapped to the coarsest probe spacing so probes stay fixed in the
 	// world while the camera moves, sized so the cascades reach reach world pixels.
-	RadianceGrid radiance_grid(const LightView&, const RadianceSettings&, float reach) noexcept;
+	// texelsPerPixel above 0 uses that density instead of the one the view's zoom picks (still coarsened if too many).
+	RadianceGrid radiance_grid(const LightView&, const RadianceSettings&, float reach, float texelsPerPixel = 0.0f) noexcept;
 
 	// Whether the light goes through the cascades on this grid: one that casts shadows, is positive, omni or a cone (not
 	// a beam), large enough and inside the grid.
 	bool radiance_traces(const Light2D&, const RadianceGrid&, const RadianceSettings&) noexcept;
+
+	// The analytic near part of a traced light (Light2D::nearReach): close to its source the cascades' few rays cannot
+	// resolve it and would flicker as it moves, so it is drawn plainly there (without shadows) and the cascades fade in
+	// beyond. Matches near_span in radiance.wgsl.
+	Light2D radiance_near_part(const Light2D&, const RadianceGrid&) noexcept;
+	// How far a traced light's near part reaches (in texels): this many times its source plus this many probe spacings.
+	// As NEAR_SCALE and NEAR_SPACINGS in radiance.wgsl.
+	inline constexpr float radiance_near_scale{ 4.0f };
+	inline constexpr float radiance_near_spacings{ 4.0f };
 
 	class RadianceCascades
 	{
@@ -115,13 +130,35 @@ namespace ax
 
 		// Traces the lights through the grid: scene, distance field and cascades. Afterwards draw_resolve writes the
 		// result into a light map pass.
+		// When nothing the cascades read has changed since the last encode (the grid, the lights, the circles and
+		// occluderSignature, a hash of what occluders draws, 0 for unknown) it traces nothing and only points the last
+		// result's resolve at the view: most frames, with moving lights marched rather than traced.
 		void encode(const wgpu::Device&, const wgpu::Queue&, wgpu::CommandEncoder&, const RadianceGrid&,
 			const RadianceSettings&, const LightView& view, std::uint32_t lightMapDivisor, glm::vec3 ambient,
 			std::span<const Light2D> lights, std::span<const RadianceCircle> circles, const OccluderDraw& occluders,
-			const Previous& previous);
-		// Replaces the light map with ambient (scaled by sky visibility) plus the traced light. Only after encode.
-		void draw_resolve(wgpu::RenderPassEncoder&) const;
+			const Previous& previous, std::uint64_t occluderSignature = 0);
+		// Whether the last encode reused the one before's result (traced nothing).
+		bool reused() const noexcept { return m_reused; }
+		// Replaces the light map with ambient (scaled by sky visibility) plus the traced light; with a weight below 1,
+		// blends that far towards it instead (fading from another grid's result). Only after encode.
+		void draw_resolve(wgpu::RenderPassEncoder&, float weight = 1.0f) const;
+		// Points the last encode's resolve at another view without tracing again: its grid is fixed in the world, so its
+		// light still holds while the lights stay put (fading out over a few frames after the grid's density changed).
+		void refresh_resolve(const wgpu::Queue&, const LightView& view, std::uint32_t lightMapDivisor, glm::vec3 ambient,
+			const RadianceSettings* settings = nullptr);
 		bool ready() const noexcept { return m_ready; }
+		// Times each encode's passes on the GPU (null: not timed).
+		void set_timer(GpuPassTimer* timer) noexcept { m_timer = timer; }
+
+		// What lights with marched shadows march through: the distance field and scene of the last encode, and where
+		// the grid lies (origin xy, texels per world pixel, 1 when usable; width, height). Placeholders unless `current`
+		// (the cascades ran this frame) and ready.
+		struct MarchInputs
+		{
+			wgpu::TextureView distance{}, scene{};
+			glm::vec4 grid{}, size{};
+		};
+		MarchInputs march_inputs(bool current) const noexcept;
 
 		struct Stats
 		{
@@ -137,25 +174,33 @@ namespace ax
 		};
 		bool ensure_targets(const wgpu::Device&, std::uint32_t width, std::uint32_t height, std::uint32_t probeSpacing);
 		void ensure_storage(const wgpu::Device&, gpu::TrackedBuffer&, std::size_t& capacity, std::size_t bytes, const char* label);
+		enum class Bodies { none, write, read };
 		wgpu::BindGroup bind(const wgpu::Device&, const wgpu::TextureView& a, const wgpu::TextureView& b,
 			const wgpu::TextureView& uintTexture, const wgpu::TextureView& filtered, const wgpu::TextureView& e,
-			const wgpu::Buffer& storage) const;
+			const wgpu::Buffer& storage, Bodies bodies = Bodies::none) const;
 
 		wgpu::Device m_device{};
 		wgpu::TextureFormat m_lightMapFormat{ wgpu::TextureFormat::Undefined };
 		wgpu::BindGroupLayout m_layout{};
 		wgpu::RenderPipeline m_circlePipeline{}, m_emitterPipeline{}, m_seedPipeline{}, m_jumpPipeline{},
-			m_distancePipeline{}, m_cascadePipeline{}, m_resolvePipeline{};
-		gpu::TrackedBuffer m_uniforms{}, m_lights{}, m_circles{};
+			m_distancePipeline{}, m_cascadePipeline{}, m_resolvePipeline{}, m_resolveBlendPipeline{}, m_combinePipeline{}, m_stampPipeline{};
+		gpu::TrackedBuffer m_uniforms{}, m_lights{}, m_circles{}, m_bodies{}, m_bodiesWriteStandIn{}, m_bodiesReadStandIn{};
 		std::size_t m_lightCapacity{}, m_circleCapacity{};
 		wgpu::Sampler m_sampler{};
-		Target m_scene{}, m_jump[2]{}, m_distance{}, m_cascade[2]{};
+		// Occluders and lights' discs are drawn apart and combined into the scene.
+		Target m_occluders{}, m_discs{}, m_scene{}, m_jump[2]{}, m_distance{}, m_cascade[2]{};
 		Target m_dummyFloat{}, m_dummyUint{};
 		std::uint32_t m_width{}, m_height{}, m_probeSpacing{};
 		wgpu::BindGroup m_resolveGroup{};
 		std::uint32_t m_resolveOffset{};
+		std::array<glm::vec4, 8> m_resolveUniforms{};
 		std::vector<float> m_lightScratch{};
+		std::vector<std::uint32_t> m_bodyScratch{};
 		bool m_ready{};
+		GpuPassTimer* m_timer{};
+		std::uint64_t m_signature{};
+		bool m_reused{};
+		RadianceGrid m_grid{};
 		Stats m_stats{};
 	};
 }

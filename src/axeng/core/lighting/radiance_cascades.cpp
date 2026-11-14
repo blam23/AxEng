@@ -9,6 +9,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <string_view>
 
 namespace
 {
@@ -62,14 +63,19 @@ ax::LightView ax::RadianceGrid::view() const noexcept
 	return { .viewport = size, .cameraPosition = origin + size * 0.5f / texelsPerPixel, .zoom = texelsPerPixel };
 }
 
-ax::RadianceGrid ax::radiance_grid(const LightView& view, const RadianceSettings& settings, float reach) noexcept
+ax::RadianceGrid ax::radiance_grid(const LightView& view, const RadianceSettings& settings, float reach,
+	float texelsPerPixel) noexcept
 {
 	RadianceGrid grid{};
 	if (view.viewport.x <= 0.0f || view.viewport.y <= 0.0f || view.zoom <= 0.0f)
 		return grid;
-	const auto divisor{ static_cast<float>(std::clamp<std::uint32_t>(settings.divisor, 1, 8)) };
+	const auto divisor{ std::clamp(settings.divisor, 1.0f, 8.0f) };
 	grid.probeSpacing = std::clamp<std::uint32_t>(settings.probeSpacing, 1, 2);
-	grid.texelsPerPixel = view.zoom / divisor;
+	// Texels a power of the square root of two in world pixels, the nearest to divisor screen pixels: the probes then stay
+	// where they are in the world as the view zooms (within a half octave), instead of every zoom shifting them all, and
+	// the light sampled at them, which would flicker.
+	grid.texelsPerPixel = texelsPerPixel > 0.0f ? texelsPerPixel
+		: std::exp2(std::round(std::log2(view.zoom / divisor) * 2.0f) * 0.5f);
 	const auto halfView{ view.viewport * 0.5f / view.zoom };
 	const auto margin{ std::clamp(settings.margin, 0.0f,
 		std::max(halfView.x, halfView.y) * 2.0f * std::max(settings.maxMarginFraction, 0.0f)) };
@@ -79,7 +85,7 @@ ax::RadianceGrid ax::radiance_grid(const LightView& view, const RadianceSettings
 	const auto texels{ (high - low) * grid.texelsPerPixel };
 	const auto over{ std::max(texels.x, texels.y) / static_cast<float>(s_max_texels - 128) };
 	if (over > 1.0f)
-		grid.texelsPerPixel /= over;
+		grid.texelsPerPixel /= std::exp2(std::ceil(std::log2(over) * 2.0f) * 0.5f);
 
 	const auto interval0{ s_interval0 * static_cast<float>(grid.probeSpacing) };
 	grid.cascades = cascades_for(std::max(reach, 1.0f) * grid.texelsPerPixel, interval0);
@@ -99,13 +105,28 @@ ax::RadianceGrid ax::radiance_grid(const LightView& view, const RadianceSettings
 
 bool ax::radiance_traces(const Light2D& light, const RadianceGrid& grid, const RadianceSettings& settings) noexcept
 {
-	if (!settings.enabled || grid.width == 0 || light.shadows <= 0.0f || light.length > 0.0f || light.intensity <= 0.0f
+	// Marched lights are drawn, not traced.
+	if (!settings.enabled || grid.width == 0 || light.shadows <= 0.0f || light.shadows >= 1.5f || light.length > 0.0f || light.intensity <= 0.0f
 		|| light.radius * grid.texelsPerPixel < settings.minLightTexels)
 		return false;
 	const auto inset{ std::max(light.sourceRadius, 2.5f * static_cast<float>(grid.probeSpacing) / grid.texelsPerPixel) };
 	const auto low{ grid.world_min() + inset };
 	const auto high{ grid.world_max() - inset };
 	return light.position.x >= low.x && light.position.y >= low.y && light.position.x <= high.x && light.position.y <= high.y;
+}
+
+ax::Light2D ax::radiance_near_part(const Light2D& light, const RadianceGrid& grid) noexcept
+{
+	// In texels, as radiance.wgsl: the source as drawn, then twice it plus four probe spacings.
+	const auto spacing{ static_cast<float>(grid.probeSpacing) };
+	const auto source{ std::max(light.sourceRadius * grid.texelsPerPixel, 2.5f * spacing) };
+	const auto reach{ source * radiance_near_scale + radiance_near_spacings * spacing };
+	auto part{ light };
+	part.sourceRadius = source / grid.texelsPerPixel;
+	part.nearReach = std::min(reach / grid.texelsPerPixel, light.radius);
+	// Its shadows are marched: exact, and steady as it moves.
+	part.shadows = Light2D::marched_shadows;
+	return part;
 }
 
 bool ax::RadianceCascades::init(const wgpu::Device& device, wgpu::TextureFormat lightMapFormat)
@@ -124,8 +145,15 @@ bool ax::RadianceCascades::init(const wgpu::Device& device, wgpu::TextureFormat 
 	shaderDesc.label = "Radiance cascades shader";
 	const auto shader{ device.CreateShaderModule(&shaderDesc) };
 
-	std::array<wgpu::BindGroupLayoutEntry, 8> entries{};
+	std::array<wgpu::BindGroupLayoutEntry, 10> entries{};
 	const auto stages{ wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment };
+	// How far each light's own body reaches: written by the combine pass (8), read by the cascades (9).
+	entries[8].binding = 8;
+	entries[8].visibility = wgpu::ShaderStage::Fragment;
+	entries[8].buffer.type = wgpu::BufferBindingType::Storage;
+	entries[9].binding = 9;
+	entries[9].visibility = wgpu::ShaderStage::Fragment;
+	entries[9].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
 	entries[0].binding = 0;
 	entries[0].visibility = stages;
 	entries[0].buffer.type = wgpu::BufferBindingType::Uniform;
@@ -157,7 +185,8 @@ bool ax::RadianceCascades::init(const wgpu::Device& device, wgpu::TextureFormat 
 	pipelineLayoutDesc.bindGroupLayouts = &m_layout;
 	const auto pipelineLayout{ device.CreatePipelineLayout(&pipelineLayoutDesc) };
 
-	const auto pipeline{ [&](const char* vertex, const char* fragment, std::initializer_list<wgpu::TextureFormat> formats)
+	const auto pipeline{ [&](const char* vertex, const char* fragment, std::initializer_list<wgpu::TextureFormat> formats,
+		const wgpu::BlendState* blend = nullptr)
 	{
 		std::array<wgpu::ColorTargetState, 2> targets{};
 		std::uint32_t count{};
@@ -165,6 +194,7 @@ bool ax::RadianceCascades::init(const wgpu::Device& device, wgpu::TextureFormat 
 		{
 			targets[count].format = format;
 			targets[count].writeMask = wgpu::ColorWriteMask::All;
+			targets[count].blend = blend;
 			++count;
 		}
 		wgpu::FragmentState fragmentState{};
@@ -185,18 +215,36 @@ bool ax::RadianceCascades::init(const wgpu::Device& device, wgpu::TextureFormat 
 		return device.CreateRenderPipeline(&desc);
 	} };
 	m_circlePipeline = pipeline("vs_circle", "fs_instance", { radiance_scene_format });
-	m_emitterPipeline = pipeline("vs_emitter", "fs_instance", { radiance_scene_format });
+	m_emitterPipeline = pipeline("vs_emitter", "fs_emitter", { radiance_scene_format });
 	m_seedPipeline = pipeline("vs_full", "fs_seed", { s_jump_format });
 	m_jumpPipeline = pipeline("vs_full", "fs_jump", { s_jump_format });
 	m_distancePipeline = pipeline("vs_full", "fs_distance", { s_distance_format });
 	m_resolvePipeline = pipeline("vs_full", "fs_resolve", { lightMapFormat });
+	// constant * this + (1 - constant) * what is there.
+	wgpu::BlendState fade{};
+	fade.color = { wgpu::BlendOperation::Add, wgpu::BlendFactor::Constant, wgpu::BlendFactor::OneMinusConstant };
+	fade.alpha = fade.color;
+	m_resolveBlendPipeline = pipeline("vs_full", "fs_resolve", { lightMapFormat }, &fade);
 	m_cascadePipeline = pipeline("vs_full", "fs_cascade", { s_cascade_format });
+	m_combinePipeline = pipeline("vs_full", "fs_combine", { radiance_scene_format });
+	m_stampPipeline = pipeline("vs_full", "fs_stamp", { radiance_scene_format });
 
 	wgpu::BufferDescriptor uniformDesc{};
 	uniformDesc.size = s_slot_stride * s_slots;
 	uniformDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
 	uniformDesc.label = "Radiance cascades uniforms";
 	m_uniforms = gpu::create_buffer(device, uniformDesc, "Lighting");
+	wgpu::BufferDescriptor bodiesDesc{};
+	bodiesDesc.size = radiance_max_lights * sizeof(std::uint32_t);
+	bodiesDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
+	bodiesDesc.label = "Radiance light bodies";
+	m_bodies = gpu::create_buffer(device, bodiesDesc, "Lighting");
+	// Stand-ins for whichever of the two body bindings a pass does not use (a buffer cannot be both at once).
+	bodiesDesc.size = 16;
+	bodiesDesc.label = "Radiance light bodies stand-in (written)";
+	m_bodiesWriteStandIn = gpu::create_buffer(device, bodiesDesc, "Lighting");
+	bodiesDesc.label = "Radiance light bodies stand-in (read)";
+	m_bodiesReadStandIn = gpu::create_buffer(device, bodiesDesc, "Lighting");
 	m_lights = {};
 	m_circles = {};
 	m_lightCapacity = m_circleCapacity = 0;
@@ -225,7 +273,7 @@ bool ax::RadianceCascades::init(const wgpu::Device& device, wgpu::TextureFormat 
 	m_dummyUint = dummy(wgpu::TextureFormat::R32Uint, "Radiance dummy uint");
 
 	if (!m_circlePipeline || !m_emitterPipeline || !m_seedPipeline || !m_jumpPipeline || !m_distancePipeline
-		|| !m_resolvePipeline || !m_cascadePipeline)
+		|| !m_resolvePipeline || !m_resolveBlendPipeline || !m_cascadePipeline || !m_combinePipeline || !m_stampPipeline)
 	{
 		spdlog::error("Failed to create the radiance cascades pipelines.");
 		m_cascadePipeline = {};
@@ -264,13 +312,15 @@ bool ax::RadianceCascades::ensure_targets(const wgpu::Device& device, std::uint3
 			target.view = target.texture.CreateView();
 		return target;
 	} };
+	m_occluders = make(width, height, radiance_scene_format, "Radiance occluders");
+	m_discs = make(width, height, radiance_scene_format, "Radiance light discs");
 	m_scene = make(width, height, radiance_scene_format, "Radiance scene");
 	m_jump[0] = make(width, height, s_jump_format, "Radiance jump flood A");
 	m_jump[1] = make(width, height, s_jump_format, "Radiance jump flood B");
 	m_distance = make(width, height, s_distance_format, "Radiance distance");
 	m_cascade[0] = make(width / probeSpacing, height / probeSpacing, s_cascade_format, "Radiance cascade A");
 	m_cascade[1] = make(width / probeSpacing, height / probeSpacing, s_cascade_format, "Radiance cascade B");
-	const bool ok{ m_scene.view && m_jump[0].view && m_jump[1].view && m_distance.view
+	const bool ok{ m_occluders.view && m_discs.view && m_scene.view && m_jump[0].view && m_jump[1].view && m_distance.view
 		&& m_cascade[0].view && m_cascade[1].view };
 	m_width = ok ? width : 0;
 	m_height = ok ? height : 0;
@@ -280,10 +330,14 @@ bool ax::RadianceCascades::ensure_targets(const wgpu::Device& device, std::uint3
 
 wgpu::BindGroup ax::RadianceCascades::bind(const wgpu::Device& device, const wgpu::TextureView& a,
 	const wgpu::TextureView& b, const wgpu::TextureView& uintTexture, const wgpu::TextureView& filtered,
-	const wgpu::TextureView& e, const wgpu::Buffer& storage) const
+	const wgpu::TextureView& e, const wgpu::Buffer& storage, Bodies bodies) const
 {
 	const auto orFloat{ [this](const wgpu::TextureView& view) { return view ? view : m_dummyFloat.view; } };
-	std::array<wgpu::BindGroupEntry, 8> entries{};
+	std::array<wgpu::BindGroupEntry, 10> entries{};
+	entries[8].binding = 8;
+	entries[8].buffer = bodies == Bodies::write ? m_bodies : m_bodiesWriteStandIn;
+	entries[9].binding = 9;
+	entries[9].buffer = bodies == Bodies::read ? m_bodies : m_bodiesReadStandIn;
 	entries[0].binding = 0;
 	entries[0].buffer = m_uniforms;
 	entries[0].size = sizeof(Uniforms);
@@ -311,15 +365,10 @@ wgpu::BindGroup ax::RadianceCascades::bind(const wgpu::Device& device, const wgp
 void ax::RadianceCascades::encode(const wgpu::Device& device, const wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
 	const RadianceGrid& grid, const RadianceSettings& settings, const LightView& view, std::uint32_t lightMapDivisor,
 	glm::vec3 ambient, std::span<const Light2D> lights, std::span<const RadianceCircle> circles,
-	const OccluderDraw& occluders, const Previous& previous)
+	const OccluderDraw& occluders, const Previous& previous, std::uint64_t occluderSignature)
 {
 	ZoneScopedN("RadianceCascades::encode");
-	m_ready = false;
-	m_stats = {};
-	if (!m_cascadePipeline || grid.width == 0 || grid.height == 0
-		|| !ensure_targets(device, grid.width, grid.height, grid.probeSpacing))
-		return;
-
+	m_reused = false;
 	// Lights: three vec4s each.
 	m_lightScratch.clear();
 	for (const auto& light : lights)
@@ -329,11 +378,47 @@ void ax::RadianceCascades::encode(const wgpu::Device& device, const wgpu::Queue&
 			colour.r, colour.g, colour.b, light.falloff,
 			light.direction.x, light.direction.y, light.coneInner, light.coneOuter });
 	}
-	if (!m_lightScratch.empty())
+	// Everything the cascade passes read (not what only the resolve does: the view, ambient, sky occlusion's strength,
+	// the debug view; nor last frame's light map, so bounce light holds while nothing else changes).
+	std::uint64_t signature{ 14695981039346656037ull };
+	const auto mix{ [&signature](const void* data, std::size_t bytes)
 	{
-		ensure_storage(device, m_lights, m_lightCapacity, m_lightScratch.size() * sizeof(float), "Radiance lights");
-		queue.WriteBuffer(m_lights, 0, m_lightScratch.data(), m_lightScratch.size() * sizeof(float));
+		const auto* p{ static_cast<const unsigned char*>(data) };
+		for (std::size_t index{}; index < bytes; ++index) signature = (signature ^ p[index]) * 1099511628211ull;
+	} };
+	// (Whether there is a last frame's light map at all counts: the first frame with one traces bounce light.)
+	const float gridValues[]{ grid.origin.x, grid.origin.y, grid.texelsPerPixel, settings.aoRange, settings.bounce,
+		settings.bilinearFix ? static_cast<float>(settings.fixCascades) : 0.0f,
+		previous.lightMap && settings.bounce > 0.0f ? 1.0f : 0.0f };
+	const std::uint32_t gridSizes[]{ grid.width, grid.height, grid.cascades, grid.probeSpacing };
+	mix(gridValues, sizeof(gridValues));
+	mix(gridSizes, sizeof(gridSizes));
+	mix(m_lightScratch.data(), m_lightScratch.size() * sizeof(float));
+	mix(circles.data(), circles.size_bytes());
+	mix(&occluderSignature, sizeof(occluderSignature));
+	// Sprite occluders drawn without a signature could be anything: never reused.
+	const bool knowable{ !occluders || occluderSignature != 0 };
+	if (knowable && m_ready && signature == m_signature && m_width == grid.width && m_height == grid.height)
+	{
+		refresh_resolve(queue, view, lightMapDivisor, ambient, &settings);
+		m_reused = true;
+		return;
 	}
+	m_signature = knowable ? signature : 0;
+	m_ready = false;
+	m_stats = {};
+	if (!m_cascadePipeline || grid.width == 0 || grid.height == 0
+		|| !ensure_targets(device, grid.width, grid.height, grid.probeSpacing))
+		return;
+
+	// Bound even with no lights.
+	ensure_storage(device, m_lights, m_lightCapacity, std::max<std::size_t>(m_lightScratch.size(), 12) * sizeof(float),
+		"Radiance lights");
+	if (!m_lightScratch.empty())
+		queue.WriteBuffer(m_lights, 0, m_lightScratch.data(), m_lightScratch.size() * sizeof(float));
+	// The combine pass finds each light's body afresh.
+	m_bodyScratch.assign(std::max<std::size_t>(lights.size(), 1), 0u);
+	queue.WriteBuffer(m_bodies, 0, m_bodyScratch.data(), m_bodyScratch.size() * sizeof(std::uint32_t));
 	if (!circles.empty())
 	{
 		ensure_storage(device, m_circles, m_circleCapacity, circles.size_bytes(), "Radiance circles");
@@ -358,7 +443,7 @@ void ax::RadianceCascades::encode(const wgpu::Device& device, const wgpu::Queue&
 		.ambient = { ambient, hasPrevious ? 1.0f : 0.0f },
 		.view = { view.cameraPosition, std::max(view.zoom, 0.001f), static_cast<float>(std::max(lightMapDivisor, 1u)) },
 		.viewport = { view.viewport, previous.view.viewport },
-		.previous = { previous.view.cameraPosition, std::max(previous.view.zoom, 0.001f), settings.bilinearFix ? 1.0f : 0.0f },
+		.previous = { previous.view.cameraPosition, std::max(previous.view.zoom, 0.001f), settings.bilinearFix ? static_cast<float>(settings.fixCascades) : 0.0f },
 	};
 
 	// Slots: 0 scene and resolve, 1 seed and distance, then one per jump, then one per cascade.
@@ -410,6 +495,14 @@ void ax::RadianceCascades::encode(const wgpu::Device& device, const wgpu::Queue&
 		desc.label = label;
 		desc.colorAttachmentCount = count;
 		desc.colorAttachments = attachments.data();
+		// Timed by stage (GpuPassTimer): the scene, putting it together, the distance field, the cascades.
+		if (m_timer)
+		{
+			const std::string_view name{ label };
+			desc.timestampWrites = m_timer->pass(name.starts_with("Radiance cascade") ? "GPU ms: shadow cascades"
+				: name == "Radiance occluders" || name == "Radiance light discs" ? "GPU ms: shadow scene"
+				: name.starts_with("Radiance scene") ? "GPU ms: shadow combine" : "GPU ms: shadow distance field");
+		}
 		return encoder.BeginRenderPass(&desc);
 	} };
 	const auto fullscreen{ [&](const wgpu::RenderPipeline& pipeline, const wgpu::TextureView& target,
@@ -424,7 +517,7 @@ void ax::RadianceCascades::encode(const wgpu::Device& device, const wgpu::Queue&
 
 	{
 		ZoneScopedN("RadianceCascades::scene");
-		auto pass{ beginPass({ m_scene.view }, "Radiance scene") };
+		auto pass{ beginPass({ m_occluders.view }, "Radiance occluders") };
 		if (!circles.empty())
 		{
 			const auto group{ bind(device, {}, {}, {}, {}, {}, m_circles) };
@@ -434,15 +527,23 @@ void ax::RadianceCascades::encode(const wgpu::Device& device, const wgpu::Queue&
 		}
 		if (occluders)
 			occluders(pass, grid.view());
+		pass.End();
+		auto discs{ beginPass({ m_discs.view }, "Radiance light discs") };
 		if (!lights.empty())
 		{
 			const auto group{ bind(device, {}, {}, {}, {}, {}, m_lights) };
-			pass.SetPipeline(m_emitterPipeline);
-			pass.SetBindGroup(0, group, 1, &sceneOffset);
-			pass.Draw(6, static_cast<std::uint32_t>(lights.size()));
+			discs.SetPipeline(m_emitterPipeline);
+			discs.SetBindGroup(0, group, 1, &sceneOffset);
+			discs.Draw(6, static_cast<std::uint32_t>(lights.size()));
 		}
-		pass.End();
+		discs.End();
 	}
+	fullscreen(m_combinePipeline, m_scene.view, bind(device, m_occluders.view, m_discs.view, {}, {}, {}, m_lights,
+		Bodies::write), sceneOffset, "Radiance scene");
+	// Stamped into the occluders' target, done with, which then becomes the scene (and the scene's the next occluders').
+	fullscreen(m_stampPipeline, m_occluders.view, bind(device, m_scene.view, {}, {}, {}, {}, m_lights, Bodies::read),
+		sceneOffset, "Radiance scene bodies");
+	std::swap(m_occluders, m_scene);
 
 	{
 		ZoneScopedN("RadianceCascades::distance");
@@ -464,25 +565,62 @@ void ax::RadianceCascades::encode(const wgpu::Device& device, const wgpu::Queue&
 		const auto previousLight{ hasPrevious ? previous.lightMap : wgpu::TextureView{} };
 		// Writing cascade c into m_cascade[c % 2] reads cascade c + 1 from the other one.
 		const std::array groups{
-			bind(device, {}, m_scene.view, m_distance.view, m_cascade[1].view, previousLight, m_lights),
-			bind(device, {}, m_scene.view, m_distance.view, m_cascade[0].view, previousLight, m_lights) };
+			bind(device, {}, m_scene.view, m_distance.view, m_cascade[1].view, previousLight, m_lights, Bodies::read),
+			bind(device, {}, m_scene.view, m_distance.view, m_cascade[0].view, previousLight, m_lights, Bodies::read) };
 		for (auto c{ static_cast<int>(grid.cascades) - 1 }; c >= 0; --c)
 			fullscreen(m_cascadePipeline, m_cascade[c % 2].view, groups[c % 2], cascadeOffsets[static_cast<std::size_t>(c)],
 				"Radiance cascade");
 	}
 
 	m_resolveGroup = bind(device, {}, m_scene.view, m_distance.view, m_cascade[0].view, {}, {});
+	m_grid = grid;
 	m_resolveOffset = sceneOffset;
+	std::memcpy(m_resolveUniforms.data(), &base, sizeof(base));
 	m_ready = true;
 	m_stats = { grid.width, grid.height, grid.cascades, static_cast<std::uint32_t>(lights.size()),
 		static_cast<std::uint32_t>(circles.size()) };
 }
 
-void ax::RadianceCascades::draw_resolve(wgpu::RenderPassEncoder& pass) const
+ax::RadianceCascades::MarchInputs ax::RadianceCascades::march_inputs(bool current) const noexcept
+{
+	if (!current || !m_ready)
+		return { .distance = m_dummyUint.view, .scene = m_dummyFloat.view };
+	return { .distance = m_distance.view, .scene = m_scene.view,
+		.grid = { m_grid.origin, m_grid.texelsPerPixel, 1.0f },
+		.size = { static_cast<float>(m_grid.width), static_cast<float>(m_grid.height), 0.0f, 0.0f } };
+}
+
+void ax::RadianceCascades::refresh_resolve(const wgpu::Queue& queue, const LightView& view, std::uint32_t lightMapDivisor,
+	glm::vec3 ambient, const RadianceSettings* settings)
 {
 	if (!m_ready)
 		return;
-	pass.SetPipeline(m_resolvePipeline);
+	// As in encode: ambient (rgb), view and viewport (xy) of the scene and resolve slot, and with settings sky
+	// occlusion's strength and the debug view.
+	auto uniforms{ m_resolveUniforms };
+	if (settings)
+	{
+		uniforms[3].z = std::clamp(settings->aoStrength, 0.0f, 1.0f);
+		uniforms[3].w = static_cast<float>(settings->debugView);
+	}
+	uniforms[4] = { ambient, uniforms[4].w };
+	uniforms[5] = { view.cameraPosition, std::max(view.zoom, 0.001f), static_cast<float>(std::max(lightMapDivisor, 1u)) };
+	uniforms[6] = { view.viewport, uniforms[6].z, uniforms[6].w };
+	queue.WriteBuffer(m_uniforms, m_resolveOffset, uniforms.data(), sizeof(uniforms));
+}
+
+void ax::RadianceCascades::draw_resolve(wgpu::RenderPassEncoder& pass, float weight) const
+{
+	if (!m_ready || weight <= 0.0f)
+		return;
+	if (weight < 1.0f)
+	{
+		pass.SetPipeline(m_resolveBlendPipeline);
+		const wgpu::Color constant{ weight, weight, weight, weight };
+		pass.SetBlendConstant(&constant);
+	}
+	else
+		pass.SetPipeline(m_resolvePipeline);
 	pass.SetBindGroup(0, m_resolveGroup, 1, &m_resolveOffset);
 	pass.Draw(3);
 }

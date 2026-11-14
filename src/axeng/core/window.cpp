@@ -777,6 +777,13 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 
 	wgpu::DeviceDescriptor deviceDescriptor{};
 	deviceDescriptor.requiredLimits = &limits;
+	// Timestamp queries time render passes on the GPU for profiling (GpuPassTimer), where the adapter has them.
+	static const auto s_timestamp_query{ wgpu::FeatureName::TimestampQuery };
+	if (m_adapter.HasFeature(s_timestamp_query))
+	{
+		deviceDescriptor.requiredFeatureCount = 1;
+		deviceDescriptor.requiredFeatures = &s_timestamp_query;
+	}
 
 	// Keeps compiled shaders between runs, so only the first run pays for compiling them.
 #ifndef __EMSCRIPTEN__
@@ -801,6 +808,13 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 		);
 		deviceDescriptor.nextInChain = &cacheDescriptor;
 	}
+	// Dawn rounds timestamps (to blur timing attacks in browsers); profiling wants them exact.
+	static const char* s_disabled_toggles[]{ "timestamp_quantization" };
+	wgpu::DawnTogglesDescriptor togglesDescriptor{};
+	togglesDescriptor.disabledToggleCount = 1;
+	togglesDescriptor.disabledToggles = s_disabled_toggles;
+	togglesDescriptor.nextInChain = deviceDescriptor.nextInChain;
+	deviceDescriptor.nextInChain = &togglesDescriptor;
 #endif
 
 	deviceDescriptor.SetUncapturedErrorCallback
@@ -1033,6 +1047,11 @@ void ax::Window::reload_pipeline()
 		occluderDesc.multisample.count = 1;
 		occluderDesc.label = "Radiance occluder sprites";
 		m_radianceOccluderPipeline = m_device.CreateRenderPipeline(&occluderDesc);
+		// And for ambient occlusion: coverage only, into its single channel masks.
+		occluderTarget.format = ao_mask_format;
+		occluderFragment.entryPoint = "fs_ao_silhouette";
+		occluderDesc.label = "Ambient occlusion caster sprites";
+		m_aoCasterPipeline = m_device.CreateRenderPipeline(&occluderDesc);
 		vpDesc.label = "RadianceViewportUBO";
 		m_radianceViewportBuffer = gpu::create_buffer(m_device, vpDesc, "Window");
 		auto radianceEntries{ vpEntries };
@@ -1040,6 +1059,16 @@ void ax::Window::reload_pipeline()
 		auto radianceBindDesc{ vpBindDesc };
 		radianceBindDesc.entries = radianceEntries.data();
 		m_radianceViewportBindGroup = m_device.CreateBindGroup(&radianceBindDesc);
+		for (std::size_t slot{}; slot < m_aoViewportBuffers.size(); ++slot)
+		{
+			vpDesc.label = "AmbientOcclusionViewportUBO";
+			m_aoViewportBuffers[slot] = gpu::create_buffer(m_device, vpDesc, "Window");
+			auto aoEntries{ vpEntries };
+			aoEntries[0].buffer = m_aoViewportBuffers[slot];
+			auto aoBindDesc{ vpBindDesc };
+			aoBindDesc.entries = aoEntries.data();
+			m_aoViewportBindGroups[slot] = m_device.CreateBindGroup(&aoBindDesc);
+		}
 	}
 
 	wgpu::BlendState spriteBlend{};
@@ -2532,7 +2561,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			const auto hasNegativeLights{ std::any_of(m_queuedLights.begin(), m_queuedLights.end(),
 				[](const Light2D& light) { return light.intensity < 0.0f; }) };
 			lightingActive = lighting_active(lightingSettings, m_queuedLights.size() + particleLights,
-				m_queuedGlows.size(), hasNegativeLights || (m_queuedNoiseShadow && m_queuedNoiseShadow->darkness > 0.0f));
+				m_queuedGlows.size(), hasNegativeLights || (m_queuedNoiseShadow && m_queuedNoiseShadow->darkness > 0.0f)
+					|| (m_queuedAmbientOcclusion && m_queuedAmbientOcclusion->darkness > 0.0f));
 		}
 		if (lightingActive && !m_lightRenderer.init(m_device, m_surfaceFormat, m_sampleCount))
 			lightingActive = false;
@@ -2710,6 +2740,10 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_queuedTextures.clear();
 		}
 		m_collectOccluders = lightingActive && lightingSettings.radiance.enabled;
+		{
+			std::lock_guard lock{ m_lightingMutex };
+			m_collectAoCasters = lightingActive && m_queuedAmbientOcclusion && m_queuedAmbientOcclusion->darkness > 0.0f;
+		}
 		handle_render_pass(scenePass, delta, lightingActive);
 		drawMaterials(scenePass, MaterialPass::Scene);
 		m_postSceneRenderEventHandler.fire({ .delta = delta, .pass = scenePass });
@@ -2794,6 +2828,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		}
 
 		std::optional<NoiseShadow2D> frameNoiseShadow{};
+		std::optional<AmbientOcclusion2D> frameAmbientOcclusion{};
 		{
 			std::lock_guard lock{ m_lightingMutex };
 			m_frameLights.swap(m_queuedLights);
@@ -2801,6 +2836,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_frameOccluders.swap(m_queuedOccluders);
 			m_frameRadianceCircles.swap(m_queuedRadianceCircles);
 			frameNoiseShadow = std::exchange(m_queuedNoiseShadow, std::nullopt);
+			frameAmbientOcclusion = std::exchange(m_queuedAmbientOcclusion, std::nullopt);
 			m_queuedLights.clear();
 			m_queuedGlows.clear();
 			m_queuedOccluders.clear();
@@ -2863,6 +2899,22 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 					pass.SetPipeline(m_radianceOccluderPipeline);
 					pass.SetBindGroup(1, m_radianceViewportBindGroup);
 					for (const auto& range : m_occluderSpriteGroupRanges)
+					{
+						pass.SetBindGroup(0, get_texture_bind_group(range.tex));
+						pass.Draw(6, range.count, 0, range.start);
+					}
+				}, m_occluderSignature, frameAmbientOcclusion ? &*frameAmbientOcclusion : nullptr,
+				[this](wgpu::RenderPassEncoder& pass, const LightView& aoView, std::uint32_t slot)
+				{
+					// Sprites cast and mark where they stand; stand-ins cast (slot 2) apart from their silhouettes (3).
+					constexpr std::array<std::size_t, 4> lists{ 0, 0, 1, 2 };
+					if (slot >= m_aoViewportBuffers.size() || m_aoSpriteGroupRanges[lists[slot]].empty()) return;
+					const float vp[8]{ aoView.viewport.x, aoView.viewport.y, 0.0f, 0.0f,
+						aoView.cameraPosition.x, aoView.cameraPosition.y, aoView.zoom, 0.0f };
+					m_queue.WriteBuffer(m_aoViewportBuffers[slot], 0, vp, sizeof(vp));
+					pass.SetPipeline(m_aoCasterPipeline);
+					pass.SetBindGroup(1, m_aoViewportBindGroups[slot]);
+					for (const auto& range : m_aoSpriteGroupRanges[lists[slot]])
 					{
 						pass.SetBindGroup(0, get_texture_bind_group(range.tex));
 						pass.Draw(6, range.count, 0, range.start);
@@ -2990,6 +3042,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			{
 				ZoneScopedN("Window::queue-submit");
 				m_queue.Submit(1, &command);
+				// The lighting's GPU timings may now be read back.
+				m_lightRenderer.submitted();
 			}
 
 			std::vector<PendingDrawBatch> pendingBatches{};
@@ -3092,6 +3146,10 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 			m_unlitSpriteGroupRanges.clear();
 			m_screenSpaceSpriteGroupRanges.clear();
 			m_occluderSpriteGroupRanges.clear();
+			for (auto& ranges : m_aoSpriteGroupRanges) ranges.clear();
+			m_aoCasterSprites = 0;
+			m_occluderSignature = 14695981039346656037ull;
+			m_occluderSprites = 0;
 			for (auto* sprite : m_activeSprites)
 			{
 				if (sprite->tex == sprite->groupedTexture)
@@ -3129,6 +3187,10 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 					if (m_collectOccluders && !group.first->distance_field())
 						for (const auto* sprite : group.second)
 							spriteCount += (sprite->gpuData.useRegion & sprite_flag_occluder) != 0 ? 1 : 0;
+					// And ambient occlusion casters for its mask.
+					if (m_collectAoCasters && !group.first->distance_field())
+						for (const auto* sprite : group.second)
+							spriteCount += (sprite->gpuData.useRegion & sprite_flag_ao_caster) != 0 ? 1 : 0;
 				}
 		};
 		countGroups(m_spriteGroups);
@@ -3161,10 +3223,16 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 			m_unlitUploadScratch.clear();
 			m_screenSpaceUploadScratch.clear();
 			m_occluderUploadScratch.clear();
+			for (auto& scratch : m_aoUploadScratch) scratch.clear();
 			const bool distanceField{ tex->distance_field() };
 			for (const auto* sprite : m_spriteUploadSources)
 			{
-				if (sprite->gpuData.screenSpace != 0)
+				if ((sprite->gpuData.useRegion & sprite_flag_ao_only) != 0)
+				{
+					if (m_collectAoCasters && !distanceField && (sprite->gpuData.useRegion & sprite_flag_ao_caster) != 0)
+						m_aoUploadScratch[(sprite->gpuData.useRegion & sprite_flag_ao_silhouette) != 0 ? 2 : 1].push_back(sprite);
+				}
+				else if (sprite->gpuData.screenSpace != 0)
 					m_screenSpaceUploadScratch.push_back(sprite);
 				else if (splitUnlit && sprite_unlit(sprite->gpuData))
 					m_unlitUploadScratch.push_back(sprite);
@@ -3173,6 +3241,8 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 					m_litUploadScratch.push_back(sprite);
 					if (m_collectOccluders && !distanceField && (sprite->gpuData.useRegion & sprite_flag_occluder) != 0)
 						m_occluderUploadScratch.push_back(sprite);
+					if (m_collectAoCasters && !distanceField && (sprite->gpuData.useRegion & sprite_flag_ao_caster) != 0)
+						m_aoUploadScratch[0].push_back(sprite);
 				}
 			}
 
@@ -3198,6 +3268,20 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 			append(m_unlitUploadScratch, m_unlitSpriteGroupRanges);
 			append(m_screenSpaceUploadScratch, m_screenSpaceSpriteGroupRanges);
 			append(m_occluderUploadScratch, m_occluderSpriteGroupRanges);
+			for (std::size_t set{}; set < m_aoUploadScratch.size(); ++set)
+			{
+				append(m_aoUploadScratch[set], m_aoSpriteGroupRanges[set]);
+				m_aoCasterSprites += static_cast<std::uint32_t>(m_aoUploadScratch[set].size());
+			}
+			// What the shadows' occluders are this frame, so unchanged ones need not be traced again.
+			m_occluderSprites += static_cast<std::uint32_t>(m_occluderUploadScratch.size());
+			for (const auto* sprite : m_occluderUploadScratch)
+			{
+				const auto data{ tex->gpu_data_for(sprite->gpuData) };
+				const auto* bytes{ reinterpret_cast<const unsigned char*>(&data) };
+				for (std::size_t index{}; index < sizeof(data); ++index)
+					m_occluderSignature = (m_occluderSignature ^ bytes[index]) * 1099511628211ull;
+			}
 
 			if (distanceField)
 			{
@@ -3325,6 +3409,12 @@ void ax::Window::submit_noise_shadow(std::optional<NoiseShadow2D> shadow)
 {
 	std::lock_guard lock{ m_lightingMutex };
 	m_queuedNoiseShadow = std::move(shadow);
+}
+
+void ax::Window::submit_ambient_occlusion(std::optional<AmbientOcclusion2D> occlusion)
+{
+	std::lock_guard lock{ m_lightingMutex };
+	m_queuedAmbientOcclusion = std::move(occlusion);
 }
 
 void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)

@@ -830,3 +830,16 @@ TEST_F(SpriteShaderTest, RadianceOccluderWritesOpaqueSilhouetteWithAlbedo)
 	EXPECT_EQ(image[4 * s_size + 4], (Pixel{ 200, 100, 50, 255 }));
 	EXPECT_EQ(image[4 * s_size + 28], (Pixel{ 0, 0, 0, 0 }));
 }
+
+TEST_F(SpriteShaderTest, AmbientOcclusionSilhouetteIsFullCoverageWhereHalfOpaque)
+{
+	// Whatever its colour, a mostly opaque texel covers fully and a mostly transparent one not at all.
+	ax::SpriteData sprite{};
+	sprite.pos = { 0.0f, 0.0f };
+	sprite.scale = { 16.0f, 16.0f };
+	sprite.screenSpace = 1;
+	const auto image{ render({ { 200, 100, 50, 200 }, { 0, 255, 0, 100 } }, 2, 1, { sprite }, "fs_ao_silhouette") };
+	ASSERT_EQ(image.size(), s_size * s_size);
+	EXPECT_EQ(image[4 * s_size + 4], (Pixel{ 255, 255, 255, 255 }));
+	EXPECT_EQ(image[4 * s_size + 28], (Pixel{ 0, 0, 0, 0 }));
+}

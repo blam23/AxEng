@@ -578,7 +578,9 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 				"map_height", stats.lightMapHeight, "occluders", stats.occluders,
 				"radiance_width", stats.radianceWidth, "radiance_height", stats.radianceHeight,
 				"radiance_cascades", stats.radianceCascades, "radiance_lights", stats.radianceLights,
-				"radiance_circles", stats.radianceCircles);
+				"radiance_circles", stats.radianceCircles, "radiance_reused", stats.radianceReused,
+				"occluder_sprites", app.window()->occluder_sprites(),
+				"ambient_occlusion", stats.ambientOcclusion, "ao_casters", app.window()->ao_caster_sprites());
 		};
 
 	window_table["compare_next_frame"] =

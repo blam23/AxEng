@@ -65,6 +65,15 @@ namespace ax
 	inline constexpr std::uint32_t sprite_flag_unlit{ 8u };
 	// Blocks shadow-casting light where its alpha is at least a half, when radiance cascades run (LightingSettings).
 	inline constexpr std::uint32_t sprite_flag_occluder{ 16u };
+	// Casts an ambient occlusion shadow from its silhouette (alpha at least a half), when the frame has one
+	// (Window::submit_ambient_occlusion).
+	inline constexpr std::uint32_t sprite_flag_ao_caster{ 32u };
+	// With sprite_flag_ao_caster: only casts the shadow, and is not drawn itself (a stand-in for something drawn as
+	// shapes or baked into the ground).
+	inline constexpr std::uint32_t sprite_flag_ao_only{ 64u };
+	// With sprite_flag_ao_only: casts no shadow, but marks where a stand-in's thing is drawn, so the stand-ins' shadows
+	// are lighter over it (AmbientOcclusion2D::selfDarkness).
+	inline constexpr std::uint32_t sprite_flag_ao_silhouette{ 128u };
 
 	// A sprite as the engine and scripts author it. Sprites are packed into SpriteGpuData for the GPU.
 	struct SpriteData
