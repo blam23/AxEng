@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <dawn/native/DawnNative.h>
-#include <windows.h>
+#include "axeng/core/windows_include.h"
 
 #include "axeng/core/lua/bindings/lua_shape_bindings.h"
 #include "axeng/core/lua/bindings/lua_vector_bindings.h"

@@ -31,7 +31,7 @@ EM_ASYNC_JS(void, ax_wait_animation_frame, (), {
 #include <dawn/native/DawnNative.h>
 #endif
 #ifdef _WIN32
-#include <windows.h>
+#include "axeng/core/windows_include.h"
 #include <commctrl.h>
 #include <timeapi.h>
 #define GLFW_EXPOSE_NATIVE_WIN32

@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <dawn/native/DawnNative.h>
-#include <windows.h>
+#include "axeng/core/windows_include.h"
 
 #include "axeng/core/lighting/light_renderer.h"
 #include "axeng/core/particles/particle_system.h"
@@ -2026,9 +2026,9 @@ TEST(Mist, GridIsFixedInTheWorldAndCoversTheView)
 	EXPECT_EQ(after.width, grid.width);
 	EXPECT_EQ(std::fmod(after.origin.x - grid.origin.x, 8.0f), 0.0f);
 	// Zoomed far out the texel doubles until the grid fits.
-	const auto zoomedOut{ ax::mist_grid({ .viewport = { 1920.0f, 1080.0f }, .zoom = 0.1f }, 8.0f) };
-	EXPECT_GT(zoomedOut.texel, 8.0f);
-	EXPECT_LE(zoomedOut.width, 512u);
+	const auto far{ ax::mist_grid({ .viewport = { 1920.0f, 1080.0f }, .zoom = 0.1f }, 8.0f) };
+	EXPECT_GT(far.texel, 8.0f);
+	EXPECT_LE(far.width, 512u);
 }
 
 TEST_F(MistTest, NoFogRendersUnchanged)

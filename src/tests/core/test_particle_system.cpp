@@ -2,7 +2,7 @@
 
 #include <gtest/gtest.h>
 #include <dawn/native/DawnNative.h>
-#include <windows.h>
+#include "axeng/core/windows_include.h"
 
 #include <atomic>
 #include <limits>

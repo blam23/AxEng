@@ -9,7 +9,7 @@
 #include <fstream>
 #include <vector>
 #ifdef _WIN32
-#include <windows.h>
+#include "axeng/core/windows_include.h"
 #else
 #include <unistd.h>
 #endif

@@ -2,7 +2,7 @@
 
 #ifdef _WIN32
 #include "axeng/debug/gpu_memory.h"
-#include <windows.h>
+#include "axeng/core/windows_include.h"
 #endif
 
 // STD

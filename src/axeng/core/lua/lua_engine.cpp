@@ -4,7 +4,7 @@
 #include <tracy/TracyLua.hpp>
 
 #ifdef _WIN32
-#include <Windows.h>
+#include "axeng/core/windows_include.h"
 #include <TlHelp32.h>
 #include <cerrno>
 #include <fcntl.h>
