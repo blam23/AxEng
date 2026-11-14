@@ -580,7 +580,8 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 				"radiance_cascades", stats.radianceCascades, "radiance_lights", stats.radianceLights,
 				"radiance_circles", stats.radianceCircles, "radiance_reused", stats.radianceReused,
 				"occluder_sprites", app.window()->occluder_sprites(),
-				"ambient_occlusion", stats.ambientOcclusion, "ao_casters", app.window()->ao_caster_sprites());
+				"ambient_occlusion", stats.ambientOcclusion, "ao_casters", app.window()->ao_caster_sprites(),
+				"mist", stats.mist, "mist_grid_width", stats.mistGridWidth, "mist_grid_height", stats.mistGridHeight);
 		};
 
 	window_table["compare_next_frame"] =
