@@ -50,6 +50,10 @@ namespace ax
 			const CasterDraw&, GpuPassTimer* timer = nullptr);
 		// The light's factor encode drew (red: 1 lit, 0 black), at the light map's size.
 		const wgpu::TextureView& factor_view() const noexcept { return m_factor.view; }
+		// The sprites' silhouettes where they stand (red), covering the screen plus margin() screen pixels each side, as
+		// encode last drew them.
+		const wgpu::TextureView& silhouettes_view() const noexcept { return m_silhouettes[0].view; }
+		float margin() const noexcept { return m_margin; }
 
 	private:
 		struct Target
@@ -70,5 +74,6 @@ namespace ax
 		Target m_mask[2]{}, m_silhouettes[2]{}, m_blur[2]{}, m_factor{};
 		wgpu::BindGroup m_applyGroup{};
 		std::uint32_t m_width{}, m_height{}, m_factorWidth{}, m_factorHeight{};
+		float m_margin{};
 	};
 }

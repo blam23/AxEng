@@ -209,11 +209,12 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	m_marchLayout = device.CreateBindGroupLayout(&marchLayoutDesc);
 
 	const auto pipeline{ [&](const wgpu::BindGroupLayout& groupLayout, const char* vertex, const char* fragment,
-		wgpu::TextureFormat format, std::uint32_t samples, const wgpu::BlendState& blend, bool marched = false)
+		wgpu::TextureFormat format, std::uint32_t samples, const wgpu::BlendState& blend, bool marched = false,
+		const wgpu::BindGroupLayout& second = {})
 	{
-		const std::array layouts{ groupLayout, m_marchLayout };
+		const std::array layouts{ groupLayout, second ? second : m_marchLayout };
 		wgpu::PipelineLayoutDescriptor layoutDesc{};
-		layoutDesc.bindGroupLayoutCount = marched ? 2 : 1;
+		layoutDesc.bindGroupLayoutCount = (marched || second) ? 2 : 1;
 		layoutDesc.bindGroupLayouts = layouts.data();
 		wgpu::ColorTargetState target{};
 		target.format = format;
@@ -256,6 +257,15 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	lightOnly.color = { wgpu::BlendOperation::Add, wgpu::BlendFactor::One, wgpu::BlendFactor::Zero };
 	lightOnly.alpha = { wgpu::BlendOperation::Add, wgpu::BlendFactor::Zero, wgpu::BlendFactor::One };
 	m_lightOnlyPipeline = pipeline(m_applyLayout, "vs_apply", "fs_apply", targetFormat, sampleCount, lightOnly);
+	// Mist over the lit scene: blended by its density, keeping the target's alpha.
+	if (m_mist.init(device))
+	{
+		wgpu::BlendState over{};
+		over.color = { wgpu::BlendOperation::Add, wgpu::BlendFactor::SrcAlpha, wgpu::BlendFactor::OneMinusSrcAlpha };
+		over.alpha = { wgpu::BlendOperation::Add, wgpu::BlendFactor::Zero, wgpu::BlendFactor::One };
+		m_mistPipeline = pipeline(m_applyLayout, "vs_apply", "fs_mist", targetFormat, sampleCount, over, false,
+			m_mist.composite_layout());
+	}
 
 	wgpu::BufferDescriptor uniformDesc{};
 	uniformDesc.size = sizeof(Uniforms);
@@ -374,7 +384,7 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 	const std::function<void(wgpu::RenderPassEncoder&, std::uint32_t)>& extraLights, const NoiseShadow2D* noiseShadow,
 	std::span<const LightOccluder2D> occluders, std::span<const RadianceCircle> radianceCircles,
 	const RadianceCascades::OccluderDraw& radianceOccluders, std::uint64_t radianceOccluderSignature,
-	const AmbientOcclusion2D* ambientOcclusion, const AmbientOcclusion::CasterDraw& aoCasters)
+	const AmbientOcclusion2D* ambientOcclusion, const AmbientOcclusion::CasterDraw& aoCasters, const MistFrame* mist)
 {
 	ZoneScopedN("LightRenderer::encode");
 	m_stats = {};
@@ -597,6 +607,20 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		pass.End();
 	}
 
+	// Mist: stirred, its density and halos drawn, to be blended over the lit scene below.
+	bool misted{};
+	if (mist && m_mistPipeline && !settings.lightOnly && mist_visible(mist->mist))
+	{
+		MistRenderer::TallMask tall{};
+		if (occluded)
+			tall = { m_ambientOcclusion.silhouettes_view(), m_ambientOcclusion.margin() };
+		MistRenderer::TallDraw tallDraw{};
+		if (aoCasters)
+			tallDraw = [&aoCasters](wgpu::RenderPassEncoder& pass, const LightView& tallView) { aoCasters(pass, tallView, 1); };
+		misted = m_mist.encode(device, queue, encoder, view, *mist, m_lightMap->view(), mapWidth, mapHeight, divisor, tall,
+			tallDraw, &m_timer);
+	}
+
 	{
 		ZoneScopedN("LightRenderer::apply");
 		wgpu::RenderPassColorAttachment attachment{};
@@ -613,6 +637,13 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 			: settings.maxExposure > 1.0f ? m_brightApplyPipeline : m_applyPipeline);
 		pass.SetBindGroup(0, m_applyBindGroup);
 		pass.Draw(3);
+		if (misted)
+		{
+			pass.SetPipeline(m_mistPipeline);
+			pass.SetBindGroup(0, m_applyBindGroup);
+			pass.SetBindGroup(1, m_mist.composite_group());
+			pass.Draw(3);
+		}
 		if (!glows.empty())
 		{
 			const auto bytes{ glows.size_bytes() };
@@ -641,6 +672,12 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		m_stats.radianceReused = active_cascades().reused();
 	}
 	m_stats.ambientOcclusion = occluded;
+	m_stats.mist = misted;
+	if (misted)
+	{
+		m_stats.mistGridWidth = m_mist.last_stats().gridWidth;
+		m_stats.mistGridHeight = m_mist.last_stats().gridHeight;
+	}
 	m_previousView = view;
 	m_previousDivisor = divisor;
 	m_lightMapDrawn = true;

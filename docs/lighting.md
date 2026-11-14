@@ -71,6 +71,32 @@ which the apply pass multiplies the light by after clamping it, so lights bright
 The masks are `resolution` screen pixels per texel. Each of the four silhouette draws has a camera buffer of its own,
 since all are written before the frame's commands run.
 
+## Mist
+
+`Window::submit_mist(Mist2D, movers)` draws a layer of mist over the lit scene for the next frame (fog, steam, dust: the
+game decides what it is and when). `mist.h`, `mist.wgsl`, and `fs_mist` in `lighting.wgsl`.
+
+- **Density**: drifting, domain-warped noise, thresholded by `amount` (0 none, 1 all the noise gives) and `coverage`.
+  `Window::submit_mist_mask(MistMask)` (a world-aligned R8 grid, uploaded when its `version` changes) lowers the
+  threshold by `maskBias`, so mist shows there first. Drawn at `resolution` screen pixels a texel.
+- **Stirring**: `MistMover`s (position, velocity, radius, push, outward, clear) splat forces into a small fluid grid
+  fixed in the world (`mist_grid`: `gridTexel` world pixels a texel, doubled until it fits in 512², sized in 64 texel
+  blocks, scrolled in whole texels as the view moves). Each frame: splat, semi-Lagrangian advection, 10 Jacobi
+  pressure iterations and projection (so stirred air flows round), calming (`damping`) and refilling of what movers
+  cleared (`refillSeconds`). The density is reduced by what was cleared and its pattern dragged by the flow
+  (`displace`). Cosmetic: the state lives on the GPU and is lost when the grid resets (size, texel).
+- **Lighting**: the composite reads the light map and tonemaps it like the apply pass, so mist takes the ambient's
+  colour, lamps, shadows and cloud shadows. Halos: the light map downsampled 4× and blurred by `haloRadius`, its excess
+  over the ambient added by `haloStrength`. The density's slope serves as a normal: sides facing `toSun` brighten by
+  `sunStrength`. `colour` is the mist's colour in white light (albedo times any sky tint), `opacity` its densest.
+- **Tall things**: thinner by `tallThinning` over `sprite_flag_ao_caster` sprites: the ambient occlusion's silhouettes
+  when it runs, otherwise drawn by the mist into its own mask (AO caster slot 1).
+- Drawn in the apply pass after the light, before glows and unlit content; skipped with `lightOnly`. A visible mist keeps
+  the lighting passes running by day. `debugView`: 1 density, 2 velocity, 3 cleared, 4 mask, 5 tall mask.
+- Every pass is a fragment pass on RGBA16Float (R8 for masks); one bind group each, so the same WebGPU constraints as
+  the radiance cascades. Each pass's uniforms have their own buffer (queue writes land before the frame's commands).
+  GPU timer category `GPU ms: mist`.
+
 ## Shadows (radiance cascades)
 
 With `LightingSettings::radiance.enabled`, lights are blocked by occluders with soft, correct penumbrae, using 2D

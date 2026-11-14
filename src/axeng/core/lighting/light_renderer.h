@@ -15,6 +15,7 @@
 #include "axeng/core/texture.h"
 #include "axeng/core/lighting/radiance_cascades.h"
 #include "axeng/core/lighting/ambient_occlusion.h"
+#include "axeng/core/lighting/mist.h"
 
 namespace ax
 {
@@ -179,7 +180,8 @@ namespace ax
 			const NoiseShadow2D* noiseShadow = nullptr,
 			std::span<const LightOccluder2D> occluders = {}, std::span<const RadianceCircle> radianceCircles = {},
 			const RadianceCascades::OccluderDraw& radianceOccluders = {}, std::uint64_t radianceOccluderSignature = 0,
-			const AmbientOcclusion2D* ambientOcclusion = nullptr, const AmbientOcclusion::CasterDraw& aoCasters = {});
+			const AmbientOcclusion2D* ambientOcclusion = nullptr, const AmbientOcclusion::CasterDraw& aoCasters = {},
+			const MistFrame* mist = nullptr);
 
 		struct Stats
 		{
@@ -191,6 +193,9 @@ namespace ax
 			bool radianceReused{};
 			// Ambient occlusion (AmbientOcclusion2D) darkened the light map.
 			bool ambientOcclusion{};
+			// Mist was drawn over the scene, and its stirring grid (0 without stirring).
+			bool mist{};
+			std::uint32_t mistGridWidth{}, mistGridHeight{};
 		};
 		Stats last_stats() const noexcept { return m_stats; }
 		// GPU time per stage of a recent frame's lighting (empty without timestamp queries); also Tracy plots.
@@ -213,7 +218,7 @@ namespace ax
 		wgpu::TextureFormat m_targetFormat{ wgpu::TextureFormat::Undefined };
 		std::uint32_t m_sampleCount{};
 		wgpu::RenderPipeline m_lightPipeline{}, m_shadowPipeline{}, m_occluderPipeline{}, m_applyPipeline{}, m_brightApplyPipeline{}, m_glowPipeline{},
-			m_lightOnlyPipeline{};
+			m_lightOnlyPipeline{}, m_mistPipeline{};
 		wgpu::BindGroupLayout m_instanceLayout{}, m_applyLayout{}, m_marchLayout{};
 		gpu::TrackedBuffer m_uniforms{}, m_marchUniforms{};
 		wgpu::BindGroup m_marchGroup{};
@@ -230,6 +235,7 @@ namespace ax
 		// over a few frames rather than the traced light jumping.
 		std::array<RadianceCascades, 2> m_cascades{};
 		AmbientOcclusion m_ambientOcclusion{};
+		MistRenderer m_mist{};
 		GpuPassTimer m_timer{};
 		std::size_t m_active{};
 		float m_lastTexelsPerPixel{};

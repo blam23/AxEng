@@ -397,3 +397,68 @@ fn fs_apply(in_: FullscreenOut) -> @location(0) vec4<f32> {
 fn fs_apply_bright(in_: FullscreenOut) -> @location(0) vec4<f32> {
 	return vec4<f32>(applied_light(in_.pos.xy) * 0.5, 0.5);
 }
+
+// Mist (mist.wgsl draws its density and halos): over the lit scene, lit by the same light, brighter round
+// bright lights where light scatters in it, its sides facing a low sun brighter, and thinner over things that stand up.
+struct MistComposite {
+	colour: vec4<f32>, // the mist's colour in white light, its opacity where densest
+	sun: vec4<f32>, // towards the sun xyz, how much its sides facing it brighten
+	shape: vec4<f32>, // halo strength, tall thinning, debug view, 1 when there is a tall mask
+	mask: vec4<f32>, // the tall mask's margin round the screen (screen pixels), the area it covers (w, h)
+	density: vec4<f32>, // density width, height (texels), screen pixels per texel
+	grid: vec4<f32>, // stirring grid origin xy, world pixels per texel, 1 when stirring
+	gridSize: vec4<f32>, // width, height
+};
+@group(1) @binding(0) var<uniform> mistc: MistComposite;
+@group(1) @binding(1) var mistDensity: texture_2d<f32>;
+@group(1) @binding(2) var mistHalo: texture_2d<f32>;
+@group(1) @binding(3) var mistTall: texture_2d<f32>;
+@group(1) @binding(4) var mistState: texture_2d<f32>;
+
+fn mist_density_at(uv: vec2<f32>) -> vec4<f32> {
+	return textureSampleLevel(mistDensity, lightSampler, uv, 0.0);
+}
+
+@fragment
+fn fs_mist(in_: FullscreenOut) -> @location(0) vec4<f32> {
+	let screen = in_.pos.xy;
+	let uv = screen / u.viewport.xy;
+	let duv = screen / (mistc.density.z * mistc.density.xy);
+	let texel = 1.0 / mistc.density.xy;
+	let here = mist_density_at(duv);
+	var density = here.r;
+	var tall = 0.0;
+	if (mistc.shape.w > 0.5) {
+		tall = textureSampleLevel(mistTall, lightSampler, (screen + vec2<f32>(mistc.mask.x)) / mistc.mask.yz, 0.0).r;
+		density = density * (1.0 - mistc.shape.y * tall);
+	}
+	let view = u32(mistc.shape.z + 0.5);
+	if (view == 1u) {
+		return vec4<f32>(vec3<f32>(density), 1.0);
+	}
+	if (view == 2u) {
+		let world = (screen - u.viewport.xy * 0.5) / u.camera.z + u.camera.xy;
+		let g = (world - mistc.grid.xy) / mistc.grid.z / mistc.gridSize.xy;
+		let v = select(vec4<f32>(0.0), textureSampleLevel(mistState, lightSampler, g, 0.0), mistc.grid.w > 0.5);
+		return vec4<f32>(clamp(v.xy / 64.0 * 0.5 + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0)), 0.5, 1.0);
+	}
+	if (view == 3u) {
+		return vec4<f32>(vec3<f32>(here.g), 1.0);
+	}
+	if (view == 4u) {
+		return vec4<f32>(0.0, 0.0, here.b, 1.0);
+	}
+	if (view == 5u) {
+		return vec4<f32>(vec3<f32>(tall), 1.0);
+	}
+	// Light scattered from bright lights nearby: what the blurred light map has above the ambient.
+	let halo = max(textureSampleLevel(mistHalo, lightSampler, uv, 0.0).rgb - u.ambient.rgb, vec3<f32>(0.0));
+	let light = textureSampleLevel(lightMap, lightSampler, uv, 0.0).rgb + halo * mistc.shape.x;
+	// The density's slope as the mist's surface: sides facing the sun catch more of it.
+	let gx = mist_density_at(duv + vec2<f32>(texel.x, 0.0)).r - mist_density_at(duv - vec2<f32>(texel.x, 0.0)).r;
+	let gy = mist_density_at(duv + vec2<f32>(0.0, texel.y)).r - mist_density_at(duv - vec2<f32>(0.0, texel.y)).r;
+	let normal = normalize(vec3<f32>(-gx * 2.0, -gy * 2.0, 1.0));
+	let sunSide = 1.0 + mistc.sun.w * (dot(normal, mistc.sun.xyz) - mistc.sun.z);
+	let colour = mistc.colour.rgb * tonemap(light) * max(sunSide, 0.0);
+	return vec4<f32>(colour, clamp(density * mistc.colour.a, 0.0, 1.0));
+}

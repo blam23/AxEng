@@ -180,6 +180,7 @@ bool ax::AmbientOcclusion::encode(const wgpu::Device& device, const wgpu::Queue&
 	const auto height{ std::max<std::uint32_t>(1, static_cast<std::uint32_t>(std::ceil(covered.y / resolution))) };
 	if (!ensure_targets(device, width, height))
 		return false;
+	m_margin = margin;
 	if (!m_factor.texture || m_factorWidth != mapWidth || m_factorHeight != mapHeight)
 	{
 		wgpu::TextureDescriptor desc{};

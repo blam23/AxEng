@@ -1879,3 +1879,323 @@ TEST_F(LightRendererTest, RadianceBounceReflectsLightOffLitOccluders)
 	EXPECT_GT(litAfter, litBefore + 3) << litBefore << " -> " << litAfter;
 	EXPECT_NEAR(bounced.at(at(40.0f), at(0.0f))[0], plain.at(at(40.0f), at(0.0f))[0], 2);
 }
+
+// ---- Mist ----
+
+namespace
+{
+	// Mist everywhere at full amount (the noise is always above a threshold this low), in white light, without halos,
+	// stirring or thinning unless a test turns them on.
+	ax::Mist2D even_mist(float opacity = 0.5f)
+	{
+		return { .amount = 1.0f, .colour = { 1.0f, 1.0f, 1.0f }, .opacity = opacity, .coverage = -2.0f,
+			.haloStrength = 0.0f, .tallThinning = 0.0f, .stir = false };
+	}
+}
+
+class MistTest : public LightRendererTest
+{
+protected:
+	struct Frame
+	{
+		ax::LightView view{ centred_view() };
+		ax::Mist2D mist{};
+		std::vector<ax::MistMover> movers{};
+	};
+
+	// Draws the frames one after another with one renderer, each submitted on its own (as the window does), and reads
+	// back the last. Each frame starts from a target cleared to `clear`.
+	static Image render_mist(glm::vec4 clear, const ax::LightingSettings& lighting, std::span<const ax::Light2D> lights,
+		const std::vector<Frame>& frames, const ax::MistMask* mask = nullptr,
+		const ax::AmbientOcclusion::CasterDraw& casters = {}, ax::LightRenderer::Stats* stats = nullptr)
+	{
+		constexpr auto format{ wgpu::TextureFormat::RGBA8Unorm };
+		wgpu::TextureDescriptor desc{};
+		desc.size = { s_size, s_size };
+		desc.format = format;
+		desc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopySrc;
+		const auto target{ s_device.CreateTexture(&desc) };
+		const auto targetView{ target.CreateView() };
+		ax::LightRenderer renderer{};
+		EXPECT_TRUE(renderer.init(s_device, format, 1));
+		s_device.PushErrorScope(wgpu::ErrorFilter::Validation);
+		wgpu::Buffer readback{};
+		constexpr std::uint32_t bytesPerRow{ s_size * 4 };
+		for (std::size_t index{}; index < frames.size(); ++index)
+		{
+			const auto& frame{ frames[index] };
+			auto encoder{ s_device.CreateCommandEncoder() };
+			wgpu::RenderPassColorAttachment colour{};
+			colour.view = targetView;
+			colour.loadOp = wgpu::LoadOp::Clear;
+			colour.storeOp = wgpu::StoreOp::Store;
+			colour.clearValue = { clear.r, clear.g, clear.b, clear.a };
+			wgpu::RenderPassDescriptor passDesc{};
+			passDesc.colorAttachmentCount = 1;
+			passDesc.colorAttachments = &colour;
+			encoder.BeginRenderPass(&passDesc).End();
+			const ax::MistFrame mistFrame{ .mist = frame.mist, .movers = frame.movers, .mask = mask };
+			renderer.encode(s_device, s_device.GetQueue(), encoder, targetView, s_size, s_size, frame.view, lighting,
+				lights, {}, {}, nullptr, {}, {}, {}, 0, nullptr, casters, &mistFrame);
+			if (stats)
+				*stats = renderer.last_stats();
+			if (index + 1 == frames.size())
+			{
+				wgpu::BufferDescriptor readbackDesc{};
+				readbackDesc.size = bytesPerRow * s_size;
+				readbackDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+				readback = s_device.CreateBuffer(&readbackDesc);
+				wgpu::TexelCopyTextureInfo source{};
+				source.texture = target;
+				wgpu::TexelCopyBufferInfo destination{};
+				destination.buffer = readback;
+				destination.layout.bytesPerRow = bytesPerRow;
+				destination.layout.rowsPerImage = s_size;
+				const wgpu::Extent3D extent{ s_size, s_size };
+				encoder.CopyTextureToBuffer(&source, &destination, &extent);
+			}
+			const auto commands{ encoder.Finish() };
+			s_device.GetQueue().Submit(1, &commands);
+			renderer.submitted();
+		}
+		std::string validationError;
+		s_instance.WaitAny(s_device.PopErrorScope(wgpu::CallbackMode::WaitAnyOnly,
+			[&validationError](wgpu::PopErrorScopeStatus, wgpu::ErrorType type, wgpu::StringView message)
+			{
+				if (type != wgpu::ErrorType::NoError)
+					validationError = std::string(message.data, message.length);
+			}), UINT64_MAX);
+		EXPECT_TRUE(validationError.empty()) << validationError;
+		Image image{ std::vector<std::uint8_t>(bytesPerRow * s_size) };
+		bool mapped{};
+		s_instance.WaitAny(readback.MapAsync(wgpu::MapMode::Read, 0, image.rgba.size(), wgpu::CallbackMode::WaitAnyOnly,
+			[&mapped](wgpu::MapAsyncStatus status, wgpu::StringView) { mapped = status == wgpu::MapAsyncStatus::Success; }),
+			UINT64_MAX);
+		EXPECT_TRUE(mapped);
+		if (mapped)
+		{
+			std::memcpy(image.rgba.data(), readback.GetConstMappedRange(), image.rgba.size());
+			readback.Unmap();
+		}
+		return image;
+	}
+
+	static Image render_mist(glm::vec4 clear, const ax::LightingSettings& lighting, std::span<const ax::Light2D> lights,
+		const ax::Mist2D& mist, const ax::MistMask* mask = nullptr,
+		const ax::AmbientOcclusion::CasterDraw& casters = {}, ax::LightRenderer::Stats* stats = nullptr)
+	{
+		return render_mist(clear, lighting, lights, std::vector<Frame>{ Frame{ .mist = mist } }, mask, casters, stats);
+	}
+
+	// Average red over a rectangle of pixels.
+	static double mean(const Image& image, std::uint32_t x0, std::uint32_t y0, std::uint32_t x1, std::uint32_t y1)
+	{
+		double sum{};
+		for (auto y{ y0 }; y < y1; ++y)
+			for (auto x{ x0 }; x < x1; ++x)
+				sum += image.at(x, y)[0];
+		return sum / static_cast<double>((x1 - x0) * (y1 - y0));
+	}
+};
+
+TEST(Mist, VisibleOnlyWithAmountAndOpacity)
+{
+	EXPECT_FALSE(ax::mist_visible({}));
+	EXPECT_TRUE(ax::mist_visible({ .amount = 0.2f }));
+	EXPECT_FALSE(ax::mist_visible({ .amount = 0.2f, .opacity = 0.0f }));
+	EXPECT_FALSE(ax::mist_visible({ .amount = std::nanf("") }));
+}
+
+TEST(Mist, GridIsFixedInTheWorldAndCoversTheView)
+{
+	const ax::LightView view{ .viewport = { 1920.0f, 1080.0f }, .cameraPosition = { 1003.0f, -517.0f }, .zoom = 1.0f };
+	const auto grid{ ax::mist_grid(view, 8.0f) };
+	EXPECT_EQ(grid.texel, 8.0f);
+	EXPECT_EQ(grid.width % 64u, 0u);
+	EXPECT_EQ(grid.height % 64u, 0u);
+	EXPECT_EQ(std::fmod(grid.origin.x, 8.0f), 0.0f);
+	EXPECT_EQ(std::fmod(grid.origin.y, 8.0f), 0.0f);
+	EXPECT_LE(grid.origin.x, view.cameraPosition.x - 960.0f);
+	EXPECT_GE(grid.origin.x + static_cast<float>(grid.width) * grid.texel, view.cameraPosition.x + 960.0f);
+	EXPECT_LE(grid.origin.y, view.cameraPosition.y - 540.0f);
+	EXPECT_GE(grid.origin.y + static_cast<float>(grid.height) * grid.texel, view.cameraPosition.y + 540.0f);
+	// A small move keeps the size and moves the origin by whole texels.
+	auto moved{ view };
+	moved.cameraPosition.x += 21.0f;
+	const auto after{ ax::mist_grid(moved, 8.0f) };
+	EXPECT_EQ(after.width, grid.width);
+	EXPECT_EQ(std::fmod(after.origin.x - grid.origin.x, 8.0f), 0.0f);
+	// Zoomed far out the texel doubles until the grid fits.
+	const auto zoomedOut{ ax::mist_grid({ .viewport = { 1920.0f, 1080.0f }, .zoom = 0.1f }, 8.0f) };
+	EXPECT_GT(zoomedOut.texel, 8.0f);
+	EXPECT_LE(zoomedOut.width, 512u);
+}
+
+TEST_F(MistTest, NoFogRendersUnchanged)
+{
+	const auto plain{ render({ 0.6f, 0.3f, 0.2f, 1.0f }, settings({ 0.5f, 0.5f, 0.5f }), {}) };
+	ax::LightRenderer::Stats stats{};
+	auto mist{ even_mist() };
+	mist.amount = 0.0f;
+	const auto fogless{ render_mist({ 0.6f, 0.3f, 0.2f, 1.0f }, settings({ 0.5f, 0.5f, 0.5f }), {}, mist, nullptr, {},
+		&stats) };
+	EXPECT_FALSE(stats.mist);
+	EXPECT_EQ(plain.rgba, fogless.rgba);
+}
+
+TEST_F(MistTest, FogBlendsTheSceneTowardsItsLitColour)
+{
+	ax::LightRenderer::Stats stats{};
+	const auto image{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), {}, even_mist(0.5f), nullptr,
+		{}, &stats) };
+	EXPECT_TRUE(stats.mist);
+	EXPECT_TRUE(close_to(image.at(20, 20), { 128, 128, 128, 255 }, 3));
+	EXPECT_TRUE(close_to(image.at(100, 90), { 128, 128, 128, 255 }, 3));
+	// Under a dim, tinted light the mist takes the light's colour and brightness.
+	const auto dim{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 0.2f, 0.4f, 0.8f }), {}, even_mist(1.0f)) };
+	EXPECT_TRUE(close_to(dim.at(64, 64), { 51, 102, 204, 255 }, 3));
+}
+
+TEST_F(MistTest, FogIsLitByLights)
+{
+	const std::array lights{ ax::Light2D{ .position = { 0.0f, 0.0f }, .radius = 30.0f, .intensity = 1.0f } };
+	const auto image{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 0.1f, 0.1f, 0.1f }), lights, even_mist(1.0f)) };
+	const auto lit{ image.at(64, 64)[0] }, dark{ image.at(10, 10)[0] };
+	EXPECT_GT(lit, 200);
+	EXPECT_NEAR(dark, 26, 3);
+}
+
+TEST_F(MistTest, HalosSpreadBrightLightThroughFog)
+{
+	const std::array lights{ ax::Light2D{ .position = { 0.0f, 0.0f }, .radius = 16.0f, .intensity = 1.0f } };
+	auto mist{ even_mist(1.0f) };
+	const auto plain{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 0.05f, 0.05f, 0.05f }), lights, mist) };
+	mist.haloStrength = 1.0f;
+	mist.haloRadius = 40.0f;
+	const auto haloed{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 0.05f, 0.05f, 0.05f }), lights, mist) };
+	// Beyond the light's own reach the halo carries some of it; far away, nothing.
+	EXPECT_GT(haloed.at(64 + 22, 64)[0], plain.at(64 + 22, 64)[0] + 4);
+	EXPECT_NEAR(haloed.at(4, 4)[0], plain.at(4, 4)[0], 2);
+}
+
+TEST_F(MistTest, PatchesFormWhereTheMaskIsFirst)
+{
+	// Half the mist: dry ground has little, the wet left part is covered.
+	auto mist{ even_mist(1.0f) };
+	mist.amount = 0.5f;
+	mist.coverage = 0.4f;
+	mist.softness = 0.05f;
+	mist.maskBias = 0.7f;
+	mist.scale = 64.0f;
+	ax::MistMask mask{ .origin = { -64.0f, -64.0f }, .texel = 16.0f, .width = 8, .height = 8, .version = 1 };
+	mask.values.resize(64);
+	for (std::uint32_t y{}; y < 8; ++y)
+		for (std::uint32_t x{}; x < 3; ++x) mask.values[y * 8 + x] = 255;
+	const auto image{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), {}, mist, &mask) };
+	const auto wet{ mean(image, 4, 8, 36, 120) }, dry{ mean(image, 80, 8, 124, 120) };
+	EXPECT_GT(wet, 200.0) << wet;
+	EXPECT_LT(dry, wet - 100.0) << dry;
+}
+
+TEST_F(MistTest, FogIsThinnerOverTallThings)
+{
+	// The tall mask covers the left half of the view.
+	wgpu::ShaderSourceWGSL source{};
+	constexpr std::string_view code{ R"(
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+	var p = array<vec2<f32>, 6>(vec2<f32>(-1.0, -1.0), vec2<f32>(0.0, -1.0), vec2<f32>(0.0, 1.0),
+		vec2<f32>(-1.0, -1.0), vec2<f32>(0.0, 1.0), vec2<f32>(-1.0, 1.0));
+	return vec4<f32>(p[i], 0.0, 1.0);
+}
+@fragment fn fs() -> @location(0) vec4<f32> { return vec4<f32>(1.0); }
+)" };
+	source.code = { code.data(), code.size() };
+	wgpu::ShaderModuleDescriptor shaderDesc{};
+	shaderDesc.nextInChain = &source;
+	const auto shader{ s_device.CreateShaderModule(&shaderDesc) };
+	wgpu::ColorTargetState target{};
+	target.format = ax::ao_mask_format;
+	target.writeMask = wgpu::ColorWriteMask::All;
+	wgpu::FragmentState fragment{};
+	fragment.module = shader;
+	fragment.entryPoint = "fs";
+	fragment.targetCount = 1;
+	fragment.targets = &target;
+	wgpu::RenderPipelineDescriptor desc{};
+	desc.vertex.module = shader;
+	desc.vertex.entryPoint = "vs";
+	desc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+	desc.multisample.count = 1;
+	desc.multisample.mask = ~0u;
+	desc.fragment = &fragment;
+	const auto pipeline{ s_device.CreateRenderPipeline(&desc) };
+	int drawn{};
+	const ax::AmbientOcclusion::CasterDraw casters{ [&](wgpu::RenderPassEncoder& pass, const ax::LightView&,
+		std::uint32_t slot)
+	{
+		EXPECT_EQ(slot, 1u);
+		++drawn;
+		pass.SetPipeline(pipeline);
+		pass.Draw(6);
+	} };
+	auto mist{ even_mist(1.0f) };
+	mist.tallThinning = 0.75f;
+	const auto image{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), {}, mist, nullptr, casters) };
+	EXPECT_EQ(drawn, 1);
+	EXPECT_NEAR(image.at(20, 64)[0], 64, 4);
+	EXPECT_NEAR(image.at(108, 64)[0], 255, 2);
+}
+
+TEST_F(MistTest, AMoverClearsFogThatThenRefills)
+{
+	auto mist{ even_mist(1.0f) };
+	mist.stir = true;
+	mist.refillSeconds = 1.0f;
+	mist.deltaSeconds = 0.05f;
+	const std::vector<ax::MistMover> clearing{ { .position = { 0.0f, 0.0f }, .radius = 24.0f, .push = 0.0f,
+		.clear = 40.0f } };
+	std::vector<Frame> frames(3, Frame{ .mist = mist, .movers = clearing });
+	ax::LightRenderer::Stats stats{};
+	const auto cleared{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), {}, frames, nullptr, {},
+		&stats) };
+	EXPECT_GT(stats.mistGridWidth, 0u);
+	EXPECT_LT(cleared.at(64, 64)[0], 80);
+	EXPECT_GT(cleared.at(8, 8)[0], 240);
+	// Without the mover, within the refill time it fills back in.
+	for (int index{}; index < 30; ++index) frames.push_back(Frame{ .mist = mist });
+	const auto refilled{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), {}, frames) };
+	EXPECT_GT(refilled.at(64, 64)[0], 240);
+}
+
+TEST_F(MistTest, StirredAirFlowsAwayFromAMover)
+{
+	auto mist{ even_mist(1.0f) };
+	mist.stir = true;
+	mist.deltaSeconds = 0.05f;
+	mist.debugView = 2;
+	const std::vector<ax::MistMover> pushing{ { .position = { 0.0f, 0.0f }, .radius = 20.0f, .push = 0.0f,
+		.outward = 60.0f } };
+	const auto image{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), {},
+		std::vector<Frame>(4, Frame{ .mist = mist, .movers = pushing })) };
+	// Debug view 2: red is the velocity east (128 still), green south.
+	EXPECT_GT(image.at(64 + 12, 64)[0], 131);
+	EXPECT_LT(image.at(64 - 12, 64)[0], 125);
+	EXPECT_GT(image.at(64, 64 + 12)[1], 131);
+	EXPECT_LT(image.at(64, 64 - 12)[1], 125);
+}
+
+TEST_F(MistTest, StirringStaysPutInTheWorldAsTheViewMoves)
+{
+	auto mist{ even_mist(1.0f) };
+	mist.stir = true;
+	mist.refillSeconds = 60.0f;
+	mist.deltaSeconds = 0.05f;
+	const std::vector<ax::MistMover> clearing{ { .position = { 0.0f, 0.0f }, .radius = 12.0f, .push = 0.0f,
+		.clear = 40.0f } };
+	std::vector<Frame> frames(3, Frame{ .mist = mist, .movers = clearing });
+	// The camera moves 32 world pixels east: the hole at the world's origin is now 32 pixels left of the centre.
+	frames.push_back(Frame{ .view = { .viewport = { 128.0f, 128.0f }, .cameraPosition = { 32.0f, 0.0f } }, .mist = mist });
+	const auto image{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), {}, frames) };
+	EXPECT_LT(image.at(64 - 32, 64)[0], 100);
+	EXPECT_GT(image.at(64, 64)[0], 230);
+}

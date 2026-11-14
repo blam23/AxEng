@@ -2562,7 +2562,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				[](const Light2D& light) { return light.intensity < 0.0f; }) };
 			lightingActive = lighting_active(lightingSettings, m_queuedLights.size() + particleLights,
 				m_queuedGlows.size(), hasNegativeLights || (m_queuedNoiseShadow && m_queuedNoiseShadow->darkness > 0.0f)
-					|| (m_queuedAmbientOcclusion && m_queuedAmbientOcclusion->darkness > 0.0f));
+					|| (m_queuedAmbientOcclusion && m_queuedAmbientOcclusion->darkness > 0.0f)
+					|| (m_queuedMist && mist_visible(*m_queuedMist)));
 		}
 		if (lightingActive && !m_lightRenderer.init(m_device, m_surfaceFormat, m_sampleCount))
 			lightingActive = false;
@@ -2742,7 +2743,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		m_collectOccluders = lightingActive && lightingSettings.radiance.enabled;
 		{
 			std::lock_guard lock{ m_lightingMutex };
-			m_collectAoCasters = lightingActive && m_queuedAmbientOcclusion && m_queuedAmbientOcclusion->darkness > 0.0f;
+			m_collectAoCasters = lightingActive && ((m_queuedAmbientOcclusion && m_queuedAmbientOcclusion->darkness > 0.0f)
+				|| (m_queuedMist && mist_visible(*m_queuedMist) && m_queuedMist->tallThinning > 0.0f));
 		}
 		handle_render_pass(scenePass, delta, lightingActive);
 		drawMaterials(scenePass, MaterialPass::Scene);
@@ -2829,6 +2831,9 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 
 		std::optional<NoiseShadow2D> frameNoiseShadow{};
 		std::optional<AmbientOcclusion2D> frameAmbientOcclusion{};
+		std::optional<MistFrame> frameMist{};
+		// Held for the frame, so replacing it meanwhile cannot free it.
+		std::shared_ptr<const MistMask> frameMistMask{};
 		{
 			std::lock_guard lock{ m_lightingMutex };
 			m_frameLights.swap(m_queuedLights);
@@ -2837,6 +2842,12 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_frameRadianceCircles.swap(m_queuedRadianceCircles);
 			frameNoiseShadow = std::exchange(m_queuedNoiseShadow, std::nullopt);
 			frameAmbientOcclusion = std::exchange(m_queuedAmbientOcclusion, std::nullopt);
+			m_frameMistMovers.swap(m_queuedMistMovers);
+			m_queuedMistMovers.clear();
+			frameMistMask = m_mistMask;
+			if (m_queuedMist)
+				frameMist = MistFrame{ .mist = *m_queuedMist, .movers = m_frameMistMovers, .mask = frameMistMask.get() };
+			m_queuedMist.reset();
 			m_queuedLights.clear();
 			m_queuedGlows.clear();
 			m_queuedOccluders.clear();
@@ -2919,7 +2930,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 						pass.SetBindGroup(0, get_texture_bind_group(range.tex));
 						pass.Draw(6, range.count, 0, range.start);
 					}
-				});
+				}, frameMist ? &*frameMist : nullptr);
 
 			{
 			ZoneScopedN("Window::unlit-scene-pass");
@@ -3409,6 +3420,20 @@ void ax::Window::submit_noise_shadow(std::optional<NoiseShadow2D> shadow)
 {
 	std::lock_guard lock{ m_lightingMutex };
 	m_queuedNoiseShadow = std::move(shadow);
+}
+
+void ax::Window::submit_mist(std::optional<Mist2D> mist, std::vector<MistMover>& movers)
+{
+	std::lock_guard lock{ m_lightingMutex };
+	m_queuedMist = std::move(mist);
+	m_queuedMistMovers.swap(movers);
+	movers.clear();
+}
+
+void ax::Window::submit_mist_mask(std::shared_ptr<const MistMask> mask)
+{
+	std::lock_guard lock{ m_lightingMutex };
+	m_mistMask = std::move(mask);
 }
 
 void ax::Window::submit_ambient_occlusion(std::optional<AmbientOcclusion2D> occlusion)

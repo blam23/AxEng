@@ -229,6 +229,11 @@ namespace ax
 		// Round occluders for the next frame's radiance cascades, swapped in like submit_lights. Sprites with
 		// sprite_flag_occluder occlude too.
 		void submit_radiance_circles(std::vector<RadianceCircle>& circles);
+		// Mist for the next frame (none without one) and what stirs it, swapped in like submit_lights. Like the noise
+		// shadow it keeps the lighting passes running by day.
+		void submit_mist(std::optional<Mist2D> mist, std::vector<MistMover>& movers);
+		// Where the mist forms first (MistMask); kept until replaced (null for none).
+		void submit_mist_mask(std::shared_ptr<const MistMask> mask);
 		// Queues a material draw for the next frame (see MaterialRenderer). World space draws land in the scene, or after
 		// lighting for an unlit material; screen space draws land with the overlays. Thread safe.
 		//
@@ -505,6 +510,9 @@ namespace ax
 		std::vector<Light2D> m_mergedLights;
 		std::optional<NoiseShadow2D> m_queuedNoiseShadow{};
 		std::optional<AmbientOcclusion2D> m_queuedAmbientOcclusion{};
+		std::optional<Mist2D> m_queuedMist{};
+		std::vector<MistMover> m_queuedMistMovers{}, m_frameMistMovers{};
+		std::shared_ptr<const MistMask> m_mistMask{};
 		bool m_lightingRan{};
 		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };
 		uint32_t m_uniformsCapacity{ 1024 };
