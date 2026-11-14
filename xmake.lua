@@ -167,6 +167,7 @@ target("AxEngLib")
     add_files(src .. "/axeng/core/shapes/shape_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     add_files(src .. "/axeng/core/particles/particle_system.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     add_files(src .. "/axeng/core/lighting/light_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
+    add_files(src .. "/axeng/core/lighting/radiance_cascades.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     add_files(src .. "/axeng/core/window.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     -- stb_image.h defines helpers that are only used on some code paths
     add_files(src .. "/axeng/core/texture.cpp", {force = {cxxflags = "-Wno-unused-function"}})

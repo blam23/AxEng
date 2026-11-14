@@ -233,7 +233,8 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 	const wgpu::TextureView& target, std::uint32_t width, std::uint32_t height, const LightView& view,
 	const LightingSettings& settings, std::span<const Light2D> lights, std::span<const Glow2D> glows,
 	const std::function<void(wgpu::RenderPassEncoder&, std::uint32_t)>& extraLights, const NoiseShadow2D* noiseShadow,
-	std::span<const LightOccluder2D> occluders)
+	std::span<const LightOccluder2D> occluders, std::span<const RadianceCircle> radianceCircles,
+	const RadianceCascades::OccluderDraw& radianceOccluders)
 {
 	ZoneScopedN("LightRenderer::encode");
 	m_stats = {};
@@ -242,8 +243,49 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 	const auto divisor{ std::clamp<std::uint32_t>(settings.resolutionDivisor, 1, 4) };
 	const auto mapWidth{ std::max<std::uint32_t>(1, (width + divisor - 1) / divisor) };
 	const auto mapHeight{ std::max<std::uint32_t>(1, (height + divisor - 1) / divisor) };
+	const bool freshLightMap{ !m_lightMap || m_lightMap->width() != mapWidth || m_lightMap->height() != mapHeight };
 	if (!ensure_light_map(device, mapWidth, mapHeight))
 		return;
+
+	// Radiance cascades: lights that may cast shadows, before the first occluder (so deck layering still works), are
+	// traced and resolved into the light map instead of drawn.
+	const auto& radiance{ settings.radiance };
+	bool traced{};
+	if (radiance.enabled && m_radiance.init(device, light_map_format))
+	{
+		const auto firstOccluded{ occluders.empty() ? lights.size()
+			: std::min<std::size_t>(occluders.front().firstLight, lights.size()) };
+		float reach{ radiance.aoStrength > 0.0f ? radiance.aoRange : 0.0f };
+		const auto anyGrid{ radiance_grid(view, radiance, 1.0f) };
+		for (std::size_t index{}; index < firstOccluded; ++index)
+			if (radiance_traces(lights[index], anyGrid, radiance))
+				reach = std::max(reach, lights[index].radius);
+		const bool wanted{ reach > 0.0f || radiance.debugView != 0 };
+		const auto grid{ wanted ? radiance_grid(view, radiance, reach) : RadianceGrid{} };
+		m_tracedLights.clear();
+		m_analyticLights.clear();
+		for (std::size_t index{}; index < lights.size(); ++index)
+			(index < firstOccluded && m_tracedLights.size() < radiance_max_lights
+				&& radiance_traces(lights[index], grid, radiance) ? m_tracedLights : m_analyticLights).push_back(lights[index]);
+		if (grid.width > 0)
+		{
+			const RadianceCascades::Previous previous{
+				.lightMap = (m_lightMapDrawn && !freshLightMap) ? m_lightMap->view() : wgpu::TextureView{},
+				.view = m_previousView, .divisor = m_previousDivisor };
+			m_radiance.encode(device, queue, encoder, grid, radiance, view, divisor, settings.ambient, m_tracedLights,
+				radianceCircles, radianceOccluders, previous);
+			traced = m_radiance.ready();
+		}
+		if (traced && !m_tracedLights.empty())
+		{
+			const auto removed{ static_cast<std::uint32_t>(m_tracedLights.size()) };
+			m_shiftedOccluders.assign(occluders.begin(), occluders.end());
+			for (auto& occluder : m_shiftedOccluders)
+				occluder.firstLight = occluder.firstLight >= removed ? occluder.firstLight - removed : 0;
+			lights = m_analyticLights;
+			occluders = m_shiftedOccluders;
+		}
+	}
 
 	const Uniforms uniforms{
 		.viewport = { view.viewport.x, view.viewport.y, 0.0f, 0.0f },
@@ -275,6 +317,8 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		passDesc.colorAttachmentCount = 1;
 		passDesc.colorAttachments = &attachment;
 		auto pass{ encoder.BeginRenderPass(&passDesc) };
+		if (traced)
+			m_radiance.draw_resolve(pass);
 		if (!lights.empty())
 		{
 			const auto bytes{ lights.size_bytes() };
@@ -355,4 +399,16 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 
 	m_stats = { static_cast<std::uint32_t>(lights.size()), static_cast<std::uint32_t>(glows.size()), mapWidth, mapHeight,
 		static_cast<std::uint32_t>(occluders.size()) };
+	if (traced)
+	{
+		const auto radianceStats{ m_radiance.last_stats() };
+		m_stats.radianceWidth = radianceStats.width;
+		m_stats.radianceHeight = radianceStats.height;
+		m_stats.radianceCascades = radianceStats.cascades;
+		m_stats.radianceLights = radianceStats.lights;
+		m_stats.radianceCircles = radianceStats.circles;
+	}
+	m_previousView = view;
+	m_previousDivisor = divisor;
+	m_lightMapDrawn = true;
 }

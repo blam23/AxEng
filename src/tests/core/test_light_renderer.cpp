@@ -125,7 +125,8 @@ protected:
 		std::span<const ax::Glow2D> glows = {}, std::uint32_t samples = 1, const ax::LightView& view = centred_view(),
 		const std::function<void(wgpu::CommandEncoder&)>& before = {},
 		const std::function<void(wgpu::RenderPassEncoder&, std::uint32_t)>& extra = {}, const ax::NoiseShadow2D* noiseShadow = nullptr,
-		std::span<const ax::LightOccluder2D> occluders = {})
+		std::span<const ax::LightOccluder2D> occluders = {}, std::span<const ax::RadianceCircle> circles = {},
+		ax::LightRenderer::Stats* stats = nullptr, const ax::RadianceCascades::OccluderDraw& radianceOccluders = {})
 	{
 		constexpr auto format{ wgpu::TextureFormat::RGBA8Unorm };
 		const auto makeTexture = [](std::uint32_t sampleCount, wgpu::TextureUsage usage)
@@ -160,7 +161,9 @@ protected:
 		if (before)
 			before(encoder);
 		renderer.encode(s_device, s_device.GetQueue(), encoder, targetView, s_size, s_size, view, lighting,
-			lights, glows, extra, noiseShadow, occluders);
+			lights, glows, extra, noiseShadow, occluders, circles, radianceOccluders);
+		if (stats)
+			*stats = renderer.last_stats();
 		if (samples > 1)
 		{
 			wgpu::RenderPassColorAttachment colour{};
@@ -577,4 +580,180 @@ TEST_F(LightRendererTest, DISABLED_ReportsGpuTimeForManyLights)
 			const auto elapsed{ std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() };
 			std::printf("%u lights + glows, light map 1/%u: %.3f ms per frame\n", count, divisor, elapsed / frames);
 		}
+}
+
+namespace
+{
+	ax::LightingSettings radiance_settings()
+	{
+		auto lighting{ settings(glm::vec3{ 0.0f }) };
+		lighting.resolutionDivisor = 1;
+		lighting.radiance = { .enabled = true, .divisor = 1, .probeSpacing = 1 };
+		return lighting;
+	}
+
+	// Screen pixel of a world position in the centred view.
+	std::uint32_t at(float world) { return static_cast<std::uint32_t>(static_cast<float>(s_size) * 0.5f + world); }
+}
+
+TEST(RadianceGrid, CoversTheViewAndMarginSnappedToTheCoarsestProbes)
+{
+	const ax::LightView view{ .viewport = { 200.0f, 100.0f }, .cameraPosition = { 13.0f, -7.0f }, .zoom = 2.0f };
+	const ax::RadianceSettings radiance{ .enabled = true, .divisor = 2, .probeSpacing = 1, .margin = 20.0f };
+	const auto grid{ ax::radiance_grid(view, radiance, 100.0f) };
+	EXPECT_FLOAT_EQ(grid.texelsPerPixel, 1.0f);
+	// 100 texels of reach: four cascades reach (4^4 - 1) / 3 = 85 texels, five reach 341.
+	EXPECT_EQ(grid.cascades, 5u);
+	const auto snap{ static_cast<float>(1u << (grid.cascades - 1)) };
+	EXPECT_FLOAT_EQ(std::fmod(grid.origin.x, snap), 0.0f);
+	EXPECT_FLOAT_EQ(std::fmod(grid.origin.y, snap), 0.0f);
+	EXPECT_EQ(grid.width % 16u, 0u);
+	EXPECT_EQ(grid.height % 16u, 0u);
+	EXPECT_LE(grid.world_min().x, 13.0f - 50.0f - 20.0f);
+	EXPECT_LE(grid.world_min().y, -7.0f - 25.0f - 20.0f);
+	EXPECT_GE(grid.world_max().x, 13.0f + 50.0f + 20.0f);
+	EXPECT_GE(grid.world_max().y, -7.0f + 25.0f + 20.0f);
+	// Moving the camera by less than a snap keeps the origin.
+	auto moved{ view };
+	moved.cameraPosition.x += 0.25f;
+	EXPECT_EQ(ax::radiance_grid(moved, radiance, 100.0f).origin, grid.origin);
+}
+
+TEST(RadianceGrid, TracesOnlyShadowCastingLightsInside)
+{
+	const ax::LightView view{ .viewport = { 128.0f, 128.0f } };
+	const ax::RadianceSettings radiance{ .enabled = true, .divisor = 1, .margin = 0.0f };
+	const auto grid{ ax::radiance_grid(view, radiance, 64.0f) };
+	ax::Light2D light{ .position = { 0.0f, 0.0f }, .radius = 40.0f };
+	EXPECT_TRUE(ax::radiance_traces(light, grid, radiance));
+	auto noShadows{ light };
+	noShadows.shadows = 0.0f;
+	EXPECT_FALSE(ax::radiance_traces(noShadows, grid, radiance));
+	auto beam{ light };
+	beam.length = 20.0f;
+	EXPECT_FALSE(ax::radiance_traces(beam, grid, radiance));
+	auto tiny{ light };
+	tiny.radius = 3.0f;
+	EXPECT_FALSE(ax::radiance_traces(tiny, grid, radiance));
+	auto outside{ light };
+	outside.position = { 1000.0f, 0.0f };
+	EXPECT_FALSE(ax::radiance_traces(outside, grid, radiance));
+	auto off{ radiance };
+	off.enabled = false;
+	EXPECT_FALSE(ax::radiance_traces(light, grid, off));
+}
+
+TEST_F(LightRendererTest, RadianceMatchesTheUnoccludedLight)
+{
+	const std::array lights{ ax::Light2D{ .position = { 0.0f, 0.0f }, .radius = 48.0f, .intensity = 1.0f } };
+	auto plain{ radiance_settings() };
+	plain.radiance.enabled = false;
+	const auto analytic{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, plain, lights) };
+	for (const auto spacing : { 1u, 2u })
+	{
+		auto lighting{ radiance_settings() };
+		lighting.radiance.probeSpacing = spacing;
+		ax::LightRenderer::Stats stats{};
+		const auto traced{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, lighting, lights, {}, 1, centred_view(), {}, {},
+			nullptr, {}, {}, &stats) };
+		EXPECT_EQ(stats.radianceLights, 1u);
+		EXPECT_EQ(stats.lights, 0u);
+		EXPECT_GT(stats.radianceCascades, 1u);
+		// Coarser probes resolve a little less precisely.
+		const int tolerance{ spacing == 1 ? 24 : 32 };
+		for (const auto distance : { 6.0f, 14.0f, 24.0f, 34.0f })
+		{
+			EXPECT_TRUE(close_to(traced.at(at(distance), at(0.0f)), analytic.at(at(distance), at(0.0f)), tolerance))
+				<< distance << " spacing " << spacing;
+			EXPECT_TRUE(close_to(traced.at(at(0.0f), at(-distance)), analytic.at(at(0.0f), at(-distance)), tolerance))
+				<< distance << " spacing " << spacing;
+			const auto diagonal{ distance * 0.7071f };
+			EXPECT_TRUE(close_to(traced.at(at(diagonal), at(diagonal)), analytic.at(at(diagonal), at(diagonal)), tolerance))
+				<< distance << " spacing " << spacing;
+		}
+		EXPECT_TRUE(close_to(traced.at(at(54.0f), at(0.0f)), { 0, 0, 0, 255 }, 6));
+	}
+}
+
+TEST_F(LightRendererTest, RadianceOccluderCastsASoftShadow)
+{
+	const std::array lights{ ax::Light2D{ .position = { -36.0f, 0.0f }, .radius = 80.0f, .intensity = 1.0f,
+		.falloff = 1.0f } };
+	const std::array circles{ ax::RadianceCircle{ .centre = { -12.0f, 0.0f }, .radius = 6.0f } };
+	const auto open{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, radiance_settings(), lights) };
+	const auto shadowed{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, radiance_settings(), lights, {}, 1, centred_view(), {}, {},
+		nullptr, {}, circles) };
+	// Behind the circle: dark. Beside the shadow: as lit as without the circle.
+	const auto behind{ shadowed.at(at(20.0f), at(0.0f))[0] };
+	EXPECT_LT(behind, open.at(at(20.0f), at(0.0f))[0] / 3) << behind;
+	EXPECT_TRUE(close_to(shadowed.at(at(-36.0f), at(30.0f)), open.at(at(-36.0f), at(30.0f)), 12));
+	// The shadow's edge is soft: across it, behind the circle, several pixels are partly lit.
+	int partial{};
+	for (float y{}; y < 30.0f; y += 1.0f)
+	{
+		const auto ratio{ static_cast<float>(shadowed.at(at(20.0f), at(y))[0])
+			/ static_cast<float>(std::max(open.at(at(20.0f), at(y))[0], 1)) };
+		partial += ratio > 0.15f && ratio < 0.85f ? 1 : 0;
+	}
+	EXPECT_GE(partial, 3);
+}
+
+TEST_F(LightRendererTest, RadianceLightsAnOccludersInteriorFromItsLitSide)
+{
+	const std::array lights{ ax::Light2D{ .position = { -40.0f, 0.0f }, .radius = 90.0f, .intensity = 1.0f,
+		.falloff = 1.0f } };
+	const std::array circles{ ax::RadianceCircle{ .centre = { 0.0f, 0.0f }, .radius = 14.0f } };
+	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, radiance_settings(), lights, {}, 1, centred_view(), {}, {},
+		nullptr, {}, circles) };
+	const auto litSide{ image.at(at(-10.0f), at(0.0f))[0] };
+	const auto farSide{ image.at(at(10.0f), at(0.0f))[0] };
+	EXPECT_GT(litSide, 60);
+	EXPECT_GT(litSide, farSide + 40) << litSide << " " << farSide;
+}
+
+TEST_F(LightRendererTest, RadianceLeavesLightsWithoutShadowsAnalytic)
+{
+	const std::array lights{ ax::Light2D{ .position = { -36.0f, 0.0f }, .radius = 80.0f, .intensity = 1.0f,
+		.falloff = 1.0f, .shadows = 0.0f } };
+	const std::array circles{ ax::RadianceCircle{ .centre = { -12.0f, 0.0f }, .radius = 6.0f } };
+	ax::LightRenderer::Stats stats{};
+	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, radiance_settings(), lights, {}, 1, centred_view(), {}, {},
+		nullptr, {}, circles, &stats) };
+	EXPECT_EQ(stats.radianceLights, 0u);
+	EXPECT_EQ(stats.lights, 1u);
+	auto plain{ radiance_settings() };
+	plain.radiance.enabled = false;
+	const auto analytic{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, plain, lights) };
+	EXPECT_TRUE(close_to(image.at(at(20.0f), at(0.0f)), analytic.at(at(20.0f), at(0.0f)), 3));
+}
+
+TEST_F(LightRendererTest, RadianceSkyOcclusionDarkensAmbientNearOccluders)
+{
+	auto lighting{ radiance_settings() };
+	lighting.ambient = glm::vec3{ 0.5f };
+	lighting.radiance.aoStrength = 1.0f;
+	lighting.radiance.aoRange = 24.0f;
+	const std::array circles{ ax::RadianceCircle{ .centre = { 0.0f, 0.0f }, .radius = 10.0f } };
+	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, lighting, {}, {}, 1, centred_view(), {}, {}, nullptr, {},
+		circles) };
+	const auto distant{ image.at(at(-50.0f), at(-50.0f))[0] };
+	const auto beside{ image.at(at(13.0f), at(0.0f))[0] };
+	EXPECT_NEAR(distant, 128, 4);
+	EXPECT_LT(beside, distant - 15) << beside;
+}
+
+TEST_F(LightRendererTest, DISABLED_RadianceProfileDump)
+{
+	for (const auto source : { 0.0f, 3.5f, 4.5f })
+	{
+		const std::array lights{ ax::Light2D{ .position = { 0.0f, 0.0f }, .radius = 48.0f, .intensity = 1.0f, .sourceRadius = source } };
+		const auto traced{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, radiance_settings(), lights) };
+		auto plain{ radiance_settings() };
+		plain.radiance.enabled = false;
+		const auto analytic{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, plain, lights) };
+		std::printf("source %g\n", source);
+		for (int d = 0; d < 48; d += 3)
+			std::printf("%d: %d %d | %d\n", d, traced.at(at(static_cast<float>(d)), at(0.0f))[0], analytic.at(at(static_cast<float>(d)), at(0.0f))[0],
+				traced.at(at(static_cast<float>(d) * 0.7071f), at(static_cast<float>(d) * 0.7071f))[0]);
+	}
 }

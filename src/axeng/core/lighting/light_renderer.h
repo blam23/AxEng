@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "axeng/core/texture.h"
+#include "axeng/core/lighting/radiance_cascades.h"
 
 namespace ax
 {
@@ -25,6 +26,8 @@ namespace ax
 	// A length above 0 makes it a beam instead: a line from position along direction (a unit vector) for length pixels,
 	// lit the same along its whole length and fading out to radius on every side of the line, d being the distance to
 	// it. A beam has no cone.
+	// With radiance cascades on (LightingSettings::radiance), a light with shadows above 0 is blocked by occluders, light
+	// leaving a disc of sourceRadius pixels round its position (0 for the smallest the grid can resolve).
 	struct Light2D
 	{
 		glm::vec2 position{};
@@ -36,7 +39,9 @@ namespace ax
 		float coneInner{ -1.0f };
 		float coneOuter{ -1.0f };
 		float length{ 0.0f };
-		std::array<float, 3> reserved{};
+		float sourceRadius{ 0.0f };
+		float shadows{ 1.0f };
+		float reserved{ 0.0f };
 
 		static constexpr std::size_t gpuDataSize{ 64 };
 	};
@@ -72,6 +77,7 @@ namespace ax
 	static_assert(offsetof(Light2D, coneInner) == 40);
 	static_assert(offsetof(Light2D, coneOuter) == 44);
 	static_assert(offsetof(Light2D, length) == 48);
+	static_assert(offsetof(Light2D, sourceRadius) == 52);
 	static_assert(sizeof(Light2D) == Light2D::gpuDataSize);
 	static_assert(offsetof(Glow2D, colour) == 16);
 	static_assert(sizeof(Glow2D) == Glow2D::gpuDataSize);
@@ -101,15 +107,10 @@ namespace ax
 		// False leaves out the lights of particle emitters (their own and each particle's), as when zoomed out too far to
 		// see them.
 		bool particleLights{ true };
+		// Shadows from radiance cascades (radiance_cascades.h).
+		RadianceSettings radiance{};
 
 		bool operator==(const LightingSettings&) const = default;
-	};
-
-	struct LightView
-	{
-		glm::vec2 viewport{ 0.0f };
-		glm::vec2 cameraPosition{ 0.0f };
-		float zoom{ 1.0f };
 	};
 
 	// Whether a frame with these settings and lights needs the lighting passes at all.
@@ -133,11 +134,14 @@ namespace ax
 			std::span<const Light2D>, std::span<const Glow2D>,
 		const std::function<void(wgpu::RenderPassEncoder&, std::uint32_t layer)>& extraLights = {},
 			const NoiseShadow2D* noiseShadow = nullptr,
-			std::span<const LightOccluder2D> occluders = {});
+			std::span<const LightOccluder2D> occluders = {}, std::span<const RadianceCircle> radianceCircles = {},
+			const RadianceCascades::OccluderDraw& radianceOccluders = {});
 
 		struct Stats
 		{
 			std::uint32_t lights{}, glows{}, lightMapWidth{}, lightMapHeight{}, occluders{};
+			// The radiance cascades grid (0 when they did not run), its cascades and the lights traced through it.
+			std::uint32_t radianceWidth{}, radianceHeight{}, radianceCascades{}, radianceLights{}, radianceCircles{};
 		};
 		Stats last_stats() const noexcept { return m_stats; }
 		// The light map the last encode drew (empty before the first), for materials that read it.
@@ -163,6 +167,12 @@ namespace ax
 		wgpu::Sampler m_sampler{};
 		wgpu::BindGroup m_applyBindGroup{};
 		std::vector<glm::vec2> m_occluderScratch{};
+		RadianceCascades m_radiance{};
+		std::vector<Light2D> m_tracedLights{}, m_analyticLights{};
+		std::vector<LightOccluder2D> m_shiftedOccluders{};
+		LightView m_previousView{};
+		std::uint32_t m_previousDivisor{ 1 };
+		bool m_lightMapDrawn{};
 		Stats m_stats{};
 	};
 }
