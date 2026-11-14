@@ -139,6 +139,17 @@ fn fs_main(in_: VSOut) -> @location(0) vec4<f32> {
 	return col;
 }
 
+// The silhouette of an occluder sprite for the radiance cascades' scene: its colour as albedo where it is at least
+// half opaque.
+@fragment
+fn fs_radiance_occluder(in_: VSOut) -> @location(0) vec4<f32> {
+	let col = sprite_color(in_);
+	if (col.a < 0.5) {
+		discard;
+	}
+	return vec4<f32>(col.rgb, 1.0);
+}
+
 @fragment
 fn fs_opaque(in_: VSOut) -> @location(0) vec4<f32> {
 	if (in_.pos.x < in_.clip_rect.x || in_.pos.y < in_.clip_rect.y

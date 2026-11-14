@@ -63,6 +63,8 @@ namespace ax
 	inline constexpr std::uint32_t sprite_flag_region{ 1u };
 	// Drawn after lighting is applied, like every screen space sprite.
 	inline constexpr std::uint32_t sprite_flag_unlit{ 8u };
+	// Blocks shadow-casting light where its alpha is at least a half, when radiance cascades run (LightingSettings).
+	inline constexpr std::uint32_t sprite_flag_occluder{ 16u };
 
 	// A sprite as the engine and scripts author it. Sprites are packed into SpriteGpuData for the GPU.
 	struct SpriteData
@@ -73,7 +75,8 @@ namespace ax
 		glm::vec4 tint{ 1.0f, 1.0f, 1.0f, 1.0f };
 		float z{ 0.0f };
 		float rotation{ 0.0f };
-		// Bit flags: sprite_flag_region uses `region`, sprite_flag_unlit draws after lighting.
+		// Bit flags: sprite_flag_region uses `region`, sprite_flag_unlit draws after lighting, sprite_flag_occluder blocks
+		// shadow-casting light.
 		std::uint32_t useRegion{ 0 };
 		std::uint32_t screenSpace{ 0 };
 		// Screen pixels; a max below the min disables clipping.

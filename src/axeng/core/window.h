@@ -223,6 +223,9 @@ namespace ax
 		// As above, with occluders hiding the lights before them (see LightOccluder2D).
 		void submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>& glows, std::vector<LightOccluder2D>& occluders);
 		void submit_noise_shadow(std::optional<NoiseShadow2D> shadow);
+		// Round occluders for the next frame's radiance cascades, swapped in like submit_lights. Sprites with
+		// sprite_flag_occluder occlude too.
+		void submit_radiance_circles(std::vector<RadianceCircle>& circles);
 		// Queues a material draw for the next frame (see MaterialRenderer). World space draws land in the scene, or after
 		// lighting for an unlit material; screen space draws land with the overlays. Thread safe.
 		//
@@ -396,6 +399,10 @@ namespace ax
 		wgpu::BindGroupLayout m_globalLayout;
 		gpu::TrackedBuffer m_viewportBuffer;
 		wgpu::BindGroup m_viewportBindGroup;
+		// Occluder sprites drawn into the radiance cascades' scene, with the grid's view.
+		wgpu::RenderPipeline m_radianceOccluderPipeline;
+		gpu::TrackedBuffer m_radianceViewportBuffer;
+		wgpu::BindGroup m_radianceViewportBindGroup;
 		// Keyed by address, with the texture's serial: a texture freed without invalidating its entry may have its
 		// address reused by a new one, which must not draw with the old texture's bind group.
 		struct TextureBindGroup
@@ -449,6 +456,10 @@ namespace ax
 		std::vector<SpriteGroupRange> m_spriteGroupRanges;
 		std::vector<SpriteGroupRange> m_unlitSpriteGroupRanges;
 		std::vector<SpriteGroupRange> m_screenSpaceSpriteGroupRanges;
+		// Lit sprites with sprite_flag_occluder, again, when radiance cascades run this frame.
+		std::vector<SpriteGroupRange> m_occluderSpriteGroupRanges;
+		std::vector<const SpriteDefinition*> m_occluderUploadScratch;
+		bool m_collectOccluders{};
 		UnlitShapeCapture m_unlitShapes;
 		ShapeList m_unlitOverlayShapes;
 		UnlitShapeCapture m_interfaceShapes;
@@ -469,6 +480,7 @@ namespace ax
 		std::vector<Light2D> m_queuedLights, m_frameLights;
 		std::vector<Glow2D> m_queuedGlows, m_frameGlows;
 		std::vector<LightOccluder2D> m_queuedOccluders, m_frameOccluders;
+		std::vector<RadianceCircle> m_queuedRadianceCircles, m_frameRadianceCircles;
 		std::vector<Light2D> m_mergedLights;
 		std::optional<NoiseShadow2D> m_queuedNoiseShadow{};
 		bool m_lightingRan{};

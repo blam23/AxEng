@@ -1019,6 +1019,29 @@ void ax::Window::reload_pipeline()
 	pipelineDesc.layout = layout;
 	m_pipeline = m_device.CreateRenderPipeline(&pipelineDesc);
 
+	{
+		// Sprite silhouettes for the radiance cascades: single sampled, no depth, into the scene format.
+		auto occluderDesc{ pipelineDesc };
+		auto occluderFragment{ fragmentState };
+		auto occluderTarget{ colorTarget };
+		occluderTarget.format = radiance_scene_format;
+		occluderTarget.blend = nullptr;
+		occluderFragment.entryPoint = "fs_radiance_occluder";
+		occluderFragment.targets = &occluderTarget;
+		occluderDesc.fragment = &occluderFragment;
+		occluderDesc.depthStencil = nullptr;
+		occluderDesc.multisample.count = 1;
+		occluderDesc.label = "Radiance occluder sprites";
+		m_radianceOccluderPipeline = m_device.CreateRenderPipeline(&occluderDesc);
+		vpDesc.label = "RadianceViewportUBO";
+		m_radianceViewportBuffer = gpu::create_buffer(m_device, vpDesc, "Window");
+		auto radianceEntries{ vpEntries };
+		radianceEntries[0].buffer = m_radianceViewportBuffer;
+		auto radianceBindDesc{ vpBindDesc };
+		radianceBindDesc.entries = radianceEntries.data();
+		m_radianceViewportBindGroup = m_device.CreateBindGroup(&radianceBindDesc);
+	}
+
 	wgpu::BlendState spriteBlend{};
 	spriteBlend.color.srcFactor = wgpu::BlendFactor::SrcAlpha;
 	spriteBlend.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
@@ -2686,6 +2709,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_pendingTextures.swap(m_queuedTextures);
 			m_queuedTextures.clear();
 		}
+		m_collectOccluders = lightingActive && lightingSettings.radiance.enabled;
 		handle_render_pass(scenePass, delta, lightingActive);
 		drawMaterials(scenePass, MaterialPass::Scene);
 		m_postSceneRenderEventHandler.fire({ .delta = delta, .pass = scenePass });
@@ -2775,10 +2799,12 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_frameLights.swap(m_queuedLights);
 			m_frameGlows.swap(m_queuedGlows);
 			m_frameOccluders.swap(m_queuedOccluders);
+			m_frameRadianceCircles.swap(m_queuedRadianceCircles);
 			frameNoiseShadow = std::exchange(m_queuedNoiseShadow, std::nullopt);
 			m_queuedLights.clear();
 			m_queuedGlows.clear();
 			m_queuedOccluders.clear();
+			m_queuedRadianceCircles.clear();
 		}
 		if (lightingActive)
 		{
@@ -2827,7 +2853,21 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 						m_particleSystem.draw_lights(pass, [&](std::uint32_t emitter) { return !occluded(emitter); });
 					else
 						m_particleSystem.draw_lights(pass, [layer](std::uint32_t emitter) { return emitter == layer; });
-				}, frameNoiseShadow ? &*frameNoiseShadow : nullptr, m_frameOccluders);
+				}, frameNoiseShadow ? &*frameNoiseShadow : nullptr, m_frameOccluders, m_frameRadianceCircles,
+				[this](wgpu::RenderPassEncoder& pass, const LightView& gridView)
+				{
+					if (m_occluderSpriteGroupRanges.empty()) return;
+					const float vp[8]{ gridView.viewport.x, gridView.viewport.y, 0.0f, 0.0f,
+						gridView.cameraPosition.x, gridView.cameraPosition.y, gridView.zoom, 0.0f };
+					m_queue.WriteBuffer(m_radianceViewportBuffer, 0, vp, sizeof(vp));
+					pass.SetPipeline(m_radianceOccluderPipeline);
+					pass.SetBindGroup(1, m_radianceViewportBindGroup);
+					for (const auto& range : m_occluderSpriteGroupRanges)
+					{
+						pass.SetBindGroup(0, get_texture_bind_group(range.tex));
+						pass.Draw(6, range.count, 0, range.start);
+					}
+				});
 
 			{
 			ZoneScopedN("Window::unlit-scene-pass");
@@ -3051,6 +3091,7 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 			m_spriteGroupRanges.clear();
 			m_unlitSpriteGroupRanges.clear();
 			m_screenSpaceSpriteGroupRanges.clear();
+			m_occluderSpriteGroupRanges.clear();
 			for (auto* sprite : m_activeSprites)
 			{
 				if (sprite->tex == sprite->groupedTexture)
@@ -3082,7 +3123,13 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 		{
 			for (const auto& group : groups)
 				if (!group.second.empty())
+				{
 					(group.first->distance_field() ? sdfSpriteCount : spriteCount) += group.second.size();
+					// Occluders are uploaded a second time for the radiance cascades' scene.
+					if (m_collectOccluders && !group.first->distance_field())
+						for (const auto* sprite : group.second)
+							spriteCount += (sprite->gpuData.useRegion & sprite_flag_occluder) != 0 ? 1 : 0;
+				}
 		};
 		countGroups(m_spriteGroups);
 		countGroups(m_pendingSpriteGroups);
@@ -3113,6 +3160,8 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 			m_litUploadScratch.clear();
 			m_unlitUploadScratch.clear();
 			m_screenSpaceUploadScratch.clear();
+			m_occluderUploadScratch.clear();
+			const bool distanceField{ tex->distance_field() };
 			for (const auto* sprite : m_spriteUploadSources)
 			{
 				if (sprite->gpuData.screenSpace != 0)
@@ -3120,10 +3169,13 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 				else if (splitUnlit && sprite_unlit(sprite->gpuData))
 					m_unlitUploadScratch.push_back(sprite);
 				else
+				{
 					m_litUploadScratch.push_back(sprite);
+					if (m_collectOccluders && !distanceField && (sprite->gpuData.useRegion & sprite_flag_occluder) != 0)
+						m_occluderUploadScratch.push_back(sprite);
+				}
 			}
 
-			const bool distanceField{ tex->distance_field() };
 			auto& cursor{ distanceField ? sdfInstanceCursor : instanceCursor };
 			m_spriteUploadData.clear();
 			m_sdfUploadData.clear();
@@ -3145,6 +3197,7 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 			append(m_litUploadScratch, m_spriteGroupRanges);
 			append(m_unlitUploadScratch, m_unlitSpriteGroupRanges);
 			append(m_screenSpaceUploadScratch, m_screenSpaceSpriteGroupRanges);
+			append(m_occluderUploadScratch, m_occluderSpriteGroupRanges);
 
 			if (distanceField)
 			{
@@ -3259,6 +3312,13 @@ void ax::Window::submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>
 	lights.clear();
 	glows.clear();
 	occluders.clear();
+}
+
+void ax::Window::submit_radiance_circles(std::vector<RadianceCircle>& circles)
+{
+	std::lock_guard lock{ m_lightingMutex };
+	m_queuedRadianceCircles.swap(circles);
+	circles.clear();
 }
 
 void ax::Window::submit_noise_shadow(std::optional<NoiseShadow2D> shadow)
