@@ -2199,3 +2199,60 @@ TEST_F(MistTest, StirringStaysPutInTheWorldAsTheViewMoves)
 	EXPECT_LT(image.at(64 - 32, 64)[0], 100);
 	EXPECT_GT(image.at(64, 64)[0], 230);
 }
+
+TEST_F(MistTest, DISABLED_MistGpuTime)
+{
+	// Prints the mist's GPU time at 1080p for the game's fog presets, for the plan's numbers.
+	constexpr std::uint32_t width{ 1920 }, height{ 1080 };
+	constexpr auto format{ wgpu::TextureFormat::RGBA8Unorm };
+	wgpu::TextureDescriptor desc{};
+	desc.size = { width, height };
+	desc.format = format;
+	desc.usage = wgpu::TextureUsage::RenderAttachment;
+	const auto target{ s_device.CreateTexture(&desc) };
+	const auto view{ target.CreateView() };
+	ax::LightRenderer renderer{};
+	ASSERT_TRUE(renderer.init(s_device, format, 1));
+	const ax::LightView camera{ .viewport = { static_cast<float>(width), static_cast<float>(height) }, .zoom = 1.0f };
+	std::vector<ax::Light2D> lights{};
+	std::vector<ax::MistMover> movers{};
+	for (std::uint32_t index{}; index < 60; ++index)
+		lights.push_back({ .position = { static_cast<float>((index * 7919u) % 1900u) - 950.0f,
+			static_cast<float>((index * 104729u) % 1060u) - 530.0f }, .radius = 320.0f, .intensity = 0.5f });
+	for (std::uint32_t index{}; index < 200; ++index)
+		movers.push_back({ .position = { static_cast<float>((index * 331u) % 1900u) - 950.0f,
+			static_cast<float>((index * 977u) % 1060u) - 530.0f }, .velocity = { 40.0f, 0.0f }, .radius = 14.0f,
+			.clear = 0.2f });
+	struct Preset
+	{
+		const char* name;
+		bool stir;
+		float halo, resolution;
+	};
+	for (const auto& preset : { Preset{ "Low", false, 0.0f, 4.0f }, Preset{ "Medium", true, 0.6f, 2.0f },
+		Preset{ "High", true, 0.6f, 1.0f } })
+	{
+		const auto settings{ ax::LightingSettings{ .enabled = true, .ambient = glm::vec3{ 0.15f }, .resolutionDivisor = 2 } };
+		const ax::MistFrame mist{ .mist = { .amount = 0.8f, .haloStrength = preset.halo, .stir = preset.stir,
+			.resolution = preset.resolution }, .movers = movers };
+		const auto frame{ [&]
+		{
+			auto encoder{ s_device.CreateCommandEncoder() };
+			renderer.encode(s_device, s_device.GetQueue(), encoder, view, width, height, camera, settings, lights, {}, {},
+				nullptr, {}, {}, {}, 0, nullptr, {}, &mist);
+			const auto commands{ encoder.Finish() };
+			s_device.GetQueue().Submit(1, &commands);
+			renderer.submitted();
+			s_instance.WaitAny(s_device.GetQueue().OnSubmittedWorkDone(wgpu::CallbackMode::WaitAnyOnly,
+				[](wgpu::QueueWorkDoneStatus, wgpu::StringView) {}), UINT64_MAX);
+		} };
+		for (int index{}; index < 40; ++index) frame();
+		double mistMs{};
+		for (const auto& timing : renderer.gpu_timings())
+			if (std::string_view{ timing.category } == "GPU ms: mist") mistMs += timing.milliseconds;
+		std::printf("mist %s: %.3f ms on the GPU (grid %ux%u)\n", preset.name, mistMs, renderer.last_stats().mistGridWidth,
+			renderer.last_stats().mistGridHeight);
+		for (const auto& timing : renderer.gpu_timings())
+			std::printf("    %s %.3f\n", timing.category, timing.milliseconds);
+	}
+}
