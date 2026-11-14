@@ -74,7 +74,8 @@ or its own body shades it.
 outlines) and `RadianceCircle`s from `Window::submit_radiance_circles`. Static sprite batches and distance-field
 sprites do not occlude.
 
-**Passes**, all fragment passes, so they run the same on Dawn and in browsers:
+**Passes**, all render (fragment) passes using only core WebGPU, so they need nothing beyond what the rest of the
+renderer does on Dawn or in a browser:
 
 1. A world-aligned grid round the view plus `margin` (capped at `maxMarginFraction` of the view each side), a GI texel
    being `divisor` screen pixels. Its origin snaps to the coarsest probe spacing so probes stay put while the camera
