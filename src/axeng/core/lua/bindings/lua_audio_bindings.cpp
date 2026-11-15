@@ -295,7 +295,7 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 				"rms", info->rms,
 				"seam", info->seam,
 				"fm", info->fm,
-				"nature", info->nature,
+				"generated", info->generated,
 				"loop", info->loop,
 				"bus", std::string{ ax::audio::bus_name(info->bus) });
 		};
@@ -608,6 +608,15 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 		[with_audio]() -> std::size_t
 		{
 			return with_audio([](ax::audio::AudioSystem& audio) { return audio.voice_count(); }, std::size_t{});
+		};
+
+	// Adds a bus by name (or finds it): its id's name, for set_volume and definitions' `bus`. Nil once all are taken.
+	audio_table["register_bus"] =
+		[](const std::string& name) -> sol::optional<std::string>
+		{
+			const auto bus{ ax::audio::register_bus(name) };
+			if (!bus) return sol::nullopt;
+			return std::string{ ax::audio::bus_name(*bus) };
 		};
 
 	audio_table["set_volume"] =

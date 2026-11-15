@@ -4,12 +4,14 @@
 #include "axeng/core/audio/audio_system.h"
 #include "axeng/core/audio/instrument.h"
 #include "axeng/core/audio/sfx_synth.h"
+#include "axeng/core/audio/sound_generator.h"
 #include "tests/main/log_capture.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <memory>
 #include <numbers>
 #include <span>
 #include <string>
@@ -1479,4 +1481,76 @@ TEST(AudioSystem, SoundVariantsCanBeSuppliedFromACache)
 	fm.fm = FmSfxParams{};
 	ASSERT_TRUE(target.define_sound("beep", fm));
 	EXPECT_NE(source.sound_render_key("beep"), target.sound_render_key("beep"));
+}
+
+namespace
+{
+	// A generator for tests: a sine at a frequency that differs per variant, so variants and caching can be seen.
+	class ToneGenerator final : public ax::audio::SoundGenerator
+	{
+	public:
+		explicit ToneGenerator(float hz) : m_hz{ hz } {}
+		std::vector<float> render(std::uint32_t variant, float, std::uint64_t, const ax::audio::SynthOptions&) const override
+		{
+			std::vector<float> out(ax::audio::sfx_sample_rate / 10);
+			const auto hz{ m_hz * (1.0f + 0.1f * static_cast<float>(variant)) };
+			for (std::size_t i{}; i < out.size(); ++i)
+				out[i] = 0.5f * std::sin(2.0f * std::numbers::pi_v<float> * hz * static_cast<float>(i) / ax::audio::sfx_sample_rate);
+			++renders;
+			return out;
+		}
+		void hash(ax::ContentHash& hash) const override { hash.add(m_hz); }
+		mutable int renders{};
+
+	private:
+		float m_hz;
+	};
+}
+
+TEST(AudioSystem, ApplicationsRenderTheirOwnSoundsThroughGenerators)
+{
+	auto audio{ make_offline_audio() };
+	const auto tone{ std::make_shared<ToneGenerator>(440.0f) };
+	ASSERT_TRUE(audio.define_sound("tone", { .generator = tone, .variants = 3 }));
+	const auto info{ audio.sound_info("tone") };
+	ASSERT_TRUE(info);
+	EXPECT_TRUE(info->generated);
+	EXPECT_NEAR(info->length, 0.1f, 0.01f);
+	EXPECT_NEAR(info->peak, 0.5f, 0.01f);
+	const auto variants{ audio.sound_variants("tone") };
+	ASSERT_EQ(variants.size(), 3u);
+	EXPECT_NE(*variants[0], *variants[1]);
+	EXPECT_EQ(tone->renders, 3);
+	// The render key follows the generator's hash.
+	ASSERT_TRUE(audio.define_sound("other", { .generator = std::make_shared<ToneGenerator>(220.0f), .variants = 3 }));
+	EXPECT_NE(audio.sound_render_key("tone"), audio.sound_render_key("other"));
+	EXPECT_NE(audio.play("tone"), 0u);
+}
+
+TEST(AudioSystem, ApplicationsAddBusesByName)
+{
+	EXPECT_EQ(ax::audio::bus_from_name("sfx"), ax::audio::Bus::Sfx);
+	EXPECT_FALSE(ax::audio::bus_from_name("test_custom_bus"));
+	const auto custom{ ax::audio::register_bus("test_custom_bus") };
+	ASSERT_TRUE(custom);
+	EXPECT_GE(static_cast<std::size_t>(*custom), 4u);
+	EXPECT_EQ(ax::audio::register_bus("test_custom_bus"), custom);
+	EXPECT_EQ(ax::audio::bus_from_name("test_custom_bus"), custom);
+	EXPECT_EQ(ax::audio::bus_name(*custom), "test_custom_bus");
+	EXPECT_FALSE(ax::audio::register_bus(""));
+	// A sound on it is scaled by its volume.
+	auto audio{ make_offline_audio() };
+	ASSERT_TRUE(audio.define_sound("hum", { .generator = std::make_shared<ToneGenerator>(220.0f), .loop = true, .bus = *custom }));
+	EXPECT_EQ(audio.sound_info("hum")->bus, *custom);
+	ASSERT_NE(audio.play("hum"), 0u);
+	const auto loud{ peak(mix_for(audio, 0.2f)) };
+	audio.set_bus_volume(*custom, 0.25f);
+	mix_for(audio, 0.2f);
+	const auto quiet{ peak(mix_for(audio, 0.2f)) };
+	EXPECT_GT(loud, 0.1f);
+	EXPECT_NEAR(quiet, loud * 0.25f, loud * 0.08f);
+	// An unregistered id falls back to sfx.
+	ASSERT_TRUE(audio.define_sound("stray", { .generator = std::make_shared<ToneGenerator>(220.0f),
+		.bus = static_cast<ax::audio::Bus>(ax::audio::max_buses - 1) }));
+	EXPECT_EQ(audio.sound_info("stray")->bus, ax::audio::Bus::Sfx);
 }

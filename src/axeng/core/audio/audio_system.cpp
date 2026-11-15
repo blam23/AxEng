@@ -21,14 +21,25 @@
 
 namespace
 {
-	constexpr std::array<std::string_view, static_cast<std::size_t>(ax::audio::Bus::Count)> s_bus_names
+	// Bus names by id: the built-in ones, then those registered. Slots are filled once and never move, so a name read
+	// from a slot below the count is stable.
+	struct BusRegistry
 	{
-		"master",
-		"sfx",
-		"ui",
-		"music",
-		"ambience",
+		std::mutex mutex{};
+		std::array<std::string, ax::audio::max_buses> names{ "master", "sfx", "ui", "music" };
+		std::atomic<std::size_t> count{ 4 };
 	};
+
+	BusRegistry& bus_registry()
+	{
+		static BusRegistry registry{};
+		return registry;
+	}
+
+	bool valid_bus(ax::audio::Bus bus) noexcept
+	{
+		return bus != ax::audio::Bus::Master && static_cast<std::size_t>(bus) < ax::audio::bus_count();
+	}
 
 	constexpr std::size_t s_max_voices{ 64 };
 	constexpr std::uint32_t s_max_variants{ 32 };
@@ -504,8 +515,8 @@ struct ax::audio::AudioSystem::Impl
 	std::map<std::string, std::shared_ptr<const PreparedArrangement>> arrangements{};
 	std::array<ArrangementPlayback, 2> arrangementPlayers{};
 	int currentArrangement{ -1 };
-	std::array<float, static_cast<std::size_t>(Bus::Count)> busTargets{};
-	std::array<float, static_cast<std::size_t>(Bus::Count)> busGains{};
+	std::array<float, max_buses> busTargets{};
+	std::array<float, max_buses> busGains{};
 
 	std::vector<std::unique_ptr<MusicStream>> music{};
 	std::vector<const Music*> playlist{};
@@ -592,10 +603,10 @@ struct ax::audio::AudioSystem::Impl
 			slot = std::make_shared<const std::vector<float>>(render_fm_sfx(params, options));
 			return slot;
 		}
-		if (def.nature)
+		if (def.generator)
 		{
-			const auto params{ index == 0 ? *def.nature : mutate_nature(*def.nature, def.mutation, mix_seed(def.seed, index)) };
-			slot = std::make_shared<const std::vector<float>>(render_nature(params, options));
+			slot = std::make_shared<const std::vector<float>>(
+				def.generator->render(index, def.mutation, mix_seed(def.seed, index), options));
 			return slot;
 		}
 		const auto params{ index == 0 ? def.params : mutate(def.params, def.mutation, mix_seed(def.seed, index)) };
@@ -1153,19 +1164,45 @@ struct ax::audio::AudioSystem::Impl
 	}
 };
 
+std::optional<ax::audio::Bus> ax::audio::register_bus(std::string_view name)
+{
+	if (name.empty())
+		return std::nullopt;
+	auto& registry{ bus_registry() };
+	std::lock_guard lock{ registry.mutex };
+	const auto count{ registry.count.load() };
+	for (std::size_t i{}; i < count; ++i)
+		if (registry.names[i] == name)
+			return static_cast<Bus>(i);
+	if (count >= max_buses)
+	{
+		spdlog::error("<Audio> Can't add bus '{}': all {} are taken", name, max_buses);
+		return std::nullopt;
+	}
+	registry.names[count] = std::string{ name };
+	registry.count.store(count + 1);
+	return static_cast<Bus>(count);
+}
+
+std::size_t ax::audio::bus_count() noexcept
+{
+	return bus_registry().count.load();
+}
+
 std::string_view ax::audio::bus_name(Bus bus) noexcept
 {
 	const auto index{ static_cast<std::size_t>(bus) };
-	return index < s_bus_names.size() ? s_bus_names[index] : std::string_view{};
+	auto& registry{ bus_registry() };
+	return index < registry.count.load() ? std::string_view{ registry.names[index] } : std::string_view{};
 }
 
 std::optional<ax::audio::Bus> ax::audio::bus_from_name(std::string_view name) noexcept
 {
-	for (std::size_t i{}; i < s_bus_names.size(); ++i)
-	{
-		if (s_bus_names[i] == name)
+	auto& registry{ bus_registry() };
+	const auto count{ registry.count.load() };
+	for (std::size_t i{}; i < count; ++i)
+		if (registry.names[i] == name)
 			return static_cast<Bus>(i);
-	}
 	return std::nullopt;
 }
 
@@ -1207,8 +1244,6 @@ bool ax::audio::AudioSystem::define_sound(const std::string& name, const SoundDe
 	clamp_params(def.params);
 	if (def.fm)
 		clamp_fm_sfx(*def.fm);
-	if (def.nature)
-		clamp_nature(*def.nature);
 	def.variants = std::clamp<std::uint32_t>(def.variants, 1, s_max_variants);
 	def.mutation = sanitise(def.mutation, 0.0f, 1.0f, 0.0f);
 	def.pitchVariation = sanitise(def.pitchVariation, 0.0f, 24.0f, 0.0f);
@@ -1216,7 +1251,7 @@ bool ax::audio::AudioSystem::define_sound(const std::string& name, const SoundDe
 	def.volumeVariation = sanitise(def.volumeVariation, 0.0f, 1.0f, 0.0f);
 	def.maxInstances = std::max<std::uint32_t>(def.maxInstances, 1);
 	def.cooldown = sanitise(def.cooldown, 0.0f, 60.0f, 0.0f);
-	if (def.bus == Bus::Master || def.bus >= Bus::Count)
+	if (!valid_bus(def.bus))
 		def.bus = Bus::Sfx;
 
 	auto [it, inserted]{ m_impl->sounds.try_emplace(name) };
@@ -1293,7 +1328,7 @@ std::optional<ax::audio::SoundInfo> ax::audio::AudioSystem::sound_info(const std
 	if (info.loop)
 		info.seam = loop_seam(*first);
 	info.fm = entry.definition.fm.has_value();
-	info.nature = entry.definition.nature.has_value();
+	info.generated = entry.definition.generator != nullptr;
 	info.bus = entry.definition.bus;
 	return info;
 }
@@ -1358,12 +1393,10 @@ namespace
 			hash.add(fm.note).add(fm.velocity).add(fm.hold).add(fm.loopLength);
 			return;
 		}
-		hash.add(def.nature.has_value());
-		if (def.nature)
+		hash.add(def.generator != nullptr);
+		if (def.generator)
 		{
-			const auto& n{ *def.nature };
-			hash.add(static_cast<std::uint32_t>(n.kind)).add(n.length).add(n.pitch).add(n.brightness).add(n.intensity)
-				.add(n.density).add(static_cast<std::uint32_t>(n.species)).add(n.reverb).add(n.volume);
+			def.generator->hash(hash);
 			return;
 		}
 		const auto& p{ def.params };
@@ -1565,7 +1598,7 @@ ax::audio::VoiceId ax::audio::AudioSystem::play_synth(const SynthInstrumentDefin
 	std::uint8_t note, float velocity, const InstrumentPlayOptions& options)
 {
 	m_impl->pump();
-	if (options.bus == Bus::Master || static_cast<std::size_t>(options.bus) >= static_cast<std::size_t>(Bus::Count))
+	if (!valid_bus(options.bus))
 		return 0;
 
 	Voice voice{};
@@ -1588,7 +1621,7 @@ ax::audio::VoiceId ax::audio::AudioSystem::play_fm(const FmInstrumentDefinition&
 	std::uint8_t note, float velocity, const InstrumentPlayOptions& options)
 {
 	m_impl->pump();
-	if (options.bus == Bus::Master || static_cast<std::size_t>(options.bus) >= static_cast<std::size_t>(Bus::Count))
+	if (!valid_bus(options.bus))
 		return 0;
 
 	Voice voice{};
@@ -1612,7 +1645,7 @@ ax::audio::VoiceId ax::audio::AudioSystem::play_sampler(const AudioSampleData& s
 	const InstrumentPlayOptions& options)
 {
 	m_impl->pump();
-	if (options.bus == Bus::Master || static_cast<std::size_t>(options.bus) >= static_cast<std::size_t>(Bus::Count))
+	if (!valid_bus(options.bus))
 		return 0;
 
 	Voice voice{};
