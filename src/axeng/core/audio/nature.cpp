@@ -64,7 +64,11 @@ namespace
 		rumble.set(220.0f * p.brightness, 0.7f, s_rate);
 		const auto crash{ rng.range(0.9f, 1.5f) * std::min(1.0f, length / 6.0f) };
 		const auto washDecay{ rng.range(1.2f, 2.2f) * std::clamp(p.intensity, 0.4f, 1.6f) };
-		float grain{}, grainLeft{};
+		// Foam fizz: a steady hiss that flutters (countless tiny bubbles, not separate crackles, which would sound like
+		// leaves), fading faster than the wash.
+		dsp::OnePole flutter{};
+		flutter.set_cutoff(18.0f, s_rate);
+		float flutterTarget{ 1.0f };
 		for (std::size_t i{}; i < out.size(); ++i)
 		{
 			const auto t{ static_cast<float>(i) / s_rate };
@@ -76,18 +80,13 @@ namespace
 			const auto washLevel{ dsp::attack_decay(t, crash - 0.12f, 0.3f, washDecay) * p.intensity };
 			const auto cutoff{ (350.0f + 2300.0f * std::exp(-after / (washDecay * 0.4f))) * p.brightness };
 			body.set(cutoff, 0.6f, s_rate);
-			// Foam: crackle of tiny bursts while the wash runs.
-			if (grainLeft <= 0.0f && rng.chance(0.004f * washLevel * p.density))
-			{
-				grainLeft = rng.range(0.002f, 0.009f) * s_rate;
-				grain = rng.range(0.3f, 1.0f);
-			}
-			float crackle{};
-			if (grainLeft > 0.0f) { crackle = white.next() * grain; grainLeft -= 1.0f; }
-			foam.set(3500.0f * p.brightness, 0.7f, s_rate);
+			if (i % 1470 == 0) flutterTarget = rng.range(0.55f, 1.0f);
+			const auto fizz{ dsp::attack_decay(t, crash, 0.15f, washDecay * 0.45f) * p.intensity * flutter.process(flutterTarget)
+				* std::clamp(p.density, 0.0f, 2.0f) };
+			if (i % 32 == 0) foam.set(4800.0f * p.brightness, 0.45f, s_rate);
 			out[i] = rumble.process(brown.next()).low * swellLevel * p.intensity
 				+ body.process(pink.next()).low * washLevel
-				+ foam.process(crackle).high * 0.5f * washLevel;
+				+ foam.process(white.next()).band * 0.35f * fizz;
 		}
 		return out;
 	}
@@ -291,8 +290,9 @@ namespace
 			for (auto i{ first }; i < last; ++i)
 			{
 				const auto u{ static_cast<float>(i - first) / s_rate };
-				const auto env{ std::exp(-u / (click * 0.35f)) };
-				out[i] += (high.process(noise.next()).high * 0.8f + ping.sine(pingHz) * 0.4f) * env * gain;
+				// Hard little taps: the ring carries it, with only a touch of noise (more would sound like leaves).
+				const auto env{ std::exp(-u / (click * 0.25f)) };
+				out[i] += (high.process(noise.next()).high * 0.25f + ping.sine(pingHz) * 0.9f) * env * gain;
 			}
 			// Legs in quick runs of three to five, then a pause.
 			at += (c % rng.between(3, 5) == 0) ? rng.range(0.05f, 0.1f) : rng.range(0.016f, 0.035f);
