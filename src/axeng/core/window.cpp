@@ -2833,7 +2833,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		std::optional<AmbientOcclusion2D> frameAmbientOcclusion{};
 		std::optional<MistFrame> frameMist{};
 		// Held for the frame, so replacing it meanwhile cannot free it.
-		std::shared_ptr<const MistMask> frameMistMask{}, frameMistBlockers{};
+		std::shared_ptr<const MistMask> frameMistMask{};
 		{
 			std::lock_guard lock{ m_lightingMutex };
 			m_frameLights.swap(m_queuedLights);
@@ -2845,10 +2845,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_frameMistMovers.swap(m_queuedMistMovers);
 			m_queuedMistMovers.clear();
 			frameMistMask = m_mistMask;
-			frameMistBlockers = m_mistBlockers;
 			if (m_queuedMist)
-				frameMist = MistFrame{ .mist = *m_queuedMist, .movers = m_frameMistMovers, .mask = frameMistMask.get(),
-					.blockers = frameMistBlockers.get() };
+				frameMist = MistFrame{ .mist = *m_queuedMist, .movers = m_frameMistMovers, .mask = frameMistMask.get() };
 			m_queuedMist.reset();
 			m_queuedLights.clear();
 			m_queuedGlows.clear();
@@ -3436,12 +3434,6 @@ void ax::Window::submit_mist_mask(std::shared_ptr<const MistMask> mask)
 {
 	std::lock_guard lock{ m_lightingMutex };
 	m_mistMask = std::move(mask);
-}
-
-void ax::Window::submit_mist_blockers(std::shared_ptr<const MistMask> blockers)
-{
-	std::lock_guard lock{ m_lightingMutex };
-	m_mistBlockers = std::move(blockers);
 }
 
 void ax::Window::submit_ambient_occlusion(std::optional<AmbientOcclusion2D> occlusion)

@@ -234,8 +234,6 @@ namespace ax
 		void submit_mist(std::optional<Mist2D> mist, std::vector<MistMover>& movers);
 		// Where the mist forms first (MistMask); kept until replaced (null for none).
 		void submit_mist_mask(std::shared_ptr<const MistMask> mask);
-		// Where the mist cannot be (MistFrame::blockers); kept until replaced (null for none).
-		void submit_mist_blockers(std::shared_ptr<const MistMask> blockers);
 		// Queues a material draw for the next frame (see MaterialRenderer). World space draws land in the scene, or after
 		// lighting for an unlit material; screen space draws land with the overlays. Thread safe.
 		//
@@ -514,7 +512,7 @@ namespace ax
 		std::optional<AmbientOcclusion2D> m_queuedAmbientOcclusion{};
 		std::optional<Mist2D> m_queuedMist{};
 		std::vector<MistMover> m_queuedMistMovers{}, m_frameMistMovers{};
-		std::shared_ptr<const MistMask> m_mistMask{}, m_mistBlockers{};
+		std::shared_ptr<const MistMask> m_mistMask{};
 		bool m_lightingRan{};
 		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };
 		uint32_t m_uniformsCapacity{ 1024 };

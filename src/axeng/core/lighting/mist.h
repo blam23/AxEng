@@ -83,9 +83,7 @@ namespace ax
 		float displace{ 0.25f };
 		// Screen pixels per texel of the mist's density (1 to 8).
 		float resolution{ 2.0f };
-		// How fully blockers (MistFrame::blockers) keep it out: 0 not at all, 1 none over them.
-		float blocking{ 1.0f };
-		// Debug: 1 density, 2 stirring (velocity), 3 cleared, 4 mask, 5 the tall mask, 6 blockers; drawn opaque.
+		// Debug: 1 density, 2 stirring (velocity), 3 cleared, 4 mask, 5 the tall mask; drawn opaque.
 		std::uint32_t debugView{};
 
 		bool operator==(const Mist2D&) const = default;
@@ -97,9 +95,6 @@ namespace ax
 		Mist2D mist{};
 		std::span<const MistMover> movers{};
 		const MistMask* mask{};
-		// Where the mist cannot be (0 open, 1 blocked: solid things), the same kind of world-aligned grid: none over
-		// them, and the stirred air flows round them.
-		const MistMask* blockers{};
 	};
 
 	// Whether the mist draws anything.
@@ -159,14 +154,7 @@ namespace ax
 			wgpu::TextureFormat format) const;
 		wgpu::BindGroup bind(const wgpu::Device&, const gpu::TrackedBuffer& uniforms, const wgpu::TextureView& a,
 			const wgpu::TextureView& b, const wgpu::TextureView& c) const;
-		struct Uploaded
-		{
-			Target target{};
-			std::uint64_t version{ ~0ull };
-			glm::vec4 rect{};
-		};
-		// Uploads a mask when its version changed; false without one.
-		bool upload(const wgpu::Device&, const wgpu::Queue&, const MistMask*, Uploaded&, const char* label);
+		void upload_mask(const wgpu::Device&, const wgpu::Queue&, const MistMask&);
 
 		wgpu::RenderPipeline m_splatPipeline{}, m_advectPipeline{}, m_divergencePipeline{}, m_jacobiPipeline{},
 			m_projectPipeline{}, m_densityPipeline{}, m_downsamplePipeline{}, m_blurPipeline{};
@@ -185,7 +173,9 @@ namespace ax
 		bool m_hasState{};
 		MistGrid m_grid{};
 		Target m_density{}, m_halo[2]{}, m_tall{};
-		Uploaded m_mask{}, m_blockers{};
+		Target m_mask{};
+		std::uint64_t m_maskVersion{ ~0ull };
+		glm::vec4 m_maskRect{};
 		wgpu::BindGroup m_compositeGroup{};
 		Stats m_stats{};
 	};

@@ -451,9 +451,6 @@ fn fs_mist(in_: FullscreenOut) -> @location(0) vec4<f32> {
 	if (view == 5u) {
 		return vec4<f32>(vec3<f32>(tall), 1.0);
 	}
-	if (view == 6u) {
-		return vec4<f32>(here.a, 0.0, 0.0, 1.0);
-	}
 	// Light scattered from bright lights nearby: what the blurred light map has above the ambient.
 	let halo = max(textureSampleLevel(mistHalo, lightSampler, uv, 0.0).rgb - u.ambient.rgb, vec3<f32>(0.0));
 	let light = textureSampleLevel(lightMap, lightSampler, uv, 0.0).rgb + halo * mistc.shape.x;
