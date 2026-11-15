@@ -1907,7 +1907,8 @@ protected:
 	// back the last. Each frame starts from a target cleared to `clear`.
 	static Image render_mist(glm::vec4 clear, const ax::LightingSettings& lighting, std::span<const ax::Light2D> lights,
 		const std::vector<Frame>& frames, const ax::MistMask* mask = nullptr,
-		const ax::AmbientOcclusion::CasterDraw& casters = {}, ax::LightRenderer::Stats* stats = nullptr)
+		const ax::AmbientOcclusion::CasterDraw& casters = {}, ax::LightRenderer::Stats* stats = nullptr,
+		const ax::MistMask* blockers = nullptr)
 	{
 		constexpr auto format{ wgpu::TextureFormat::RGBA8Unorm };
 		wgpu::TextureDescriptor desc{};
@@ -1934,7 +1935,8 @@ protected:
 			passDesc.colorAttachmentCount = 1;
 			passDesc.colorAttachments = &colour;
 			encoder.BeginRenderPass(&passDesc).End();
-			const ax::MistFrame mistFrame{ .mist = frame.mist, .movers = frame.movers, .mask = mask };
+			const ax::MistFrame mistFrame{ .mist = frame.mist, .movers = frame.movers, .mask = mask,
+				.blockers = blockers };
 			renderer.encode(s_device, s_device.GetQueue(), encoder, targetView, s_size, s_size, frame.view, lighting,
 				lights, {}, {}, nullptr, {}, {}, {}, 0, nullptr, casters, &mistFrame);
 			if (stats)
@@ -2255,4 +2257,52 @@ TEST_F(MistTest, DISABLED_MistGpuTime)
 		for (const auto& timing : renderer.gpu_timings())
 			std::printf("    %s %.3f\n", timing.category, timing.milliseconds);
 	}
+}
+
+namespace
+{
+	// Blocked over the world's x from x0 to x1 (all of y), in 8 pixel texels over the test view.
+	ax::MistMask blocked_columns(float x0, float x1)
+	{
+		ax::MistMask blockers{ .origin = { -64.0f, -64.0f }, .texel = 8.0f, .width = 16, .height = 16, .version = 1 };
+		blockers.values.resize(256);
+		for (std::uint32_t y{}; y < 16; ++y)
+			for (std::uint32_t x{}; x < 16; ++x)
+			{
+				const auto centre{ -64.0f + (static_cast<float>(x) + 0.5f) * 8.0f };
+				blockers.values[y * 16 + x] = centre >= x0 && centre <= x1 ? 255 : 0;
+			}
+		return blockers;
+	}
+}
+
+TEST_F(MistTest, BlockersKeepTheMistOut)
+{
+	const auto blockers{ blocked_columns(-64.0f, -1.0f) };
+	const auto image{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), {},
+		std::vector<Frame>{ Frame{ .mist = even_mist(1.0f) } }, nullptr, {}, nullptr, &blockers) };
+	EXPECT_NEAR(image.at(20, 64)[0], 0, 3);
+	EXPECT_NEAR(image.at(108, 64)[0], 255, 2);
+	// Half blocking lets half through.
+	auto half{ even_mist(1.0f) };
+	half.blocking = 0.5f;
+	const auto halved{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), {},
+		std::vector<Frame>{ Frame{ .mist = half } }, nullptr, {}, nullptr, &blockers) };
+	EXPECT_NEAR(halved.at(20, 64)[0], 128, 4);
+}
+
+TEST_F(MistTest, StirredAirDoesNotFlowThroughBlockers)
+{
+	// A wall east of a mover pushing outwards: the air flows away from it everywhere but inside the wall.
+	auto mist{ even_mist(1.0f) };
+	mist.stir = true;
+	mist.deltaSeconds = 0.05f;
+	mist.debugView = 2;
+	const auto blockers{ blocked_columns(10.0f, 40.0f) };
+	const std::vector<ax::MistMover> pushing{ { .position = { 0.0f, 0.0f }, .radius = 20.0f, .push = 0.0f,
+		.outward = 60.0f } };
+	const auto image{ render_mist({ 0.0f, 0.0f, 0.0f, 1.0f }, settings({ 1.0f, 1.0f, 1.0f }), {},
+		std::vector<Frame>(4, Frame{ .mist = mist, .movers = pushing }), nullptr, {}, nullptr, &blockers) };
+	EXPECT_NEAR(image.at(64 + 20, 64)[0], 128, 2);
+	EXPECT_LT(image.at(64 - 12, 64)[0], 125);
 }

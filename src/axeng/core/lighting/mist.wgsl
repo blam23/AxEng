@@ -14,6 +14,8 @@ struct Mist {
 	maskSize: vec4<f32>, // width, height
 	blur: vec4<f32>, // one step in target texels (xy), sigma and reach in steps
 	extent: vec4<f32>, // this pass's target width, height
+	blockers: vec4<f32>, // origin xy, world pixels per texel, 1 when there are blockers
+	blockerSize: vec4<f32>, // width, height, how fully they keep the mist out
 };
 
 @group(0) @binding(0) var<uniform> mist: Mist;
@@ -23,6 +25,16 @@ struct Mist {
 @group(0) @binding(4) var linearSampler: sampler;
 // Movers are two vec4s each: (position, velocity), (radius, push, outward, clear).
 @group(0) @binding(5) var<storage, read> movers: array<vec4<f32>>;
+// Where the mist cannot be (red: 1 blocked).
+@group(0) @binding(6) var blockerMap: texture_2d<f32>;
+
+fn blocked_at(world: vec2<f32>) -> f32 {
+	if (mist.blockers.w < 0.5) {
+		return 0.0;
+	}
+	let uv = (world - mist.blockers.xy) / mist.blockers.z / mist.blockerSize.xy;
+	return textureSampleLevel(blockerMap, linearSampler, uv, 0.0).r;
+}
 
 struct FullscreenOut {
 	@builtin(position) pos: vec4<f32>,
@@ -100,7 +112,8 @@ fn fs_advect(in_: FullscreenOut) -> @location(0) vec4<f32> {
 	if (force.a > 0.0) {
 		s = vec4<f32>(mix(s.xy, force.xy / force.a, min(force.a, 1.0)), s.z, s.w);
 	}
-	let calmed = s.xy * exp(-mist.sim.y * dt);
+	// Nothing flows inside a blocker: the pressure then turns the air round it.
+	let calmed = s.xy * exp(-mist.sim.y * dt) * (1.0 - step(0.5, blocked_at(world)));
 	let cleared = clamp(s.z + force.z * dt - mist.sim.x * dt, 0.0, 1.0);
 	return vec4<f32>(calmed, cleared, 1.0);
 }
@@ -145,9 +158,10 @@ fn fs_jacobi(in_: FullscreenOut) -> @location(0) vec4<f32> {
 fn fs_project(in_: FullscreenOut) -> @location(0) vec4<f32> {
 	let p = vec2<i32>(in_.pos.xy);
 	let s = textureLoad(texA, p, 0);
+	let open = 1.0 - step(0.5, blocked_at(mist.grid.xy + in_.pos.xy * mist.grid.z));
 	let gradient = vec2<f32>(load_or_zero(texB, p + vec2<i32>(1, 0)) - load_or_zero(texB, p - vec2<i32>(1, 0)),
 		load_or_zero(texB, p + vec2<i32>(0, 1)) - load_or_zero(texB, p - vec2<i32>(0, 1))) / (2.0 * mist.grid.z);
-	return vec4<f32>(s.xy - gradient, s.z, 1.0);
+	return vec4<f32>((s.xy - gradient) * open, s.z, 1.0);
 }
 
 // ---- Density ----
@@ -203,7 +217,7 @@ fn mask_at(world: vec2<f32>) -> f32 {
 	return textureSampleLevel(texC, linearSampler, uv, 0.0).r;
 }
 
-// Red: density (0 to 1), green: cleared, blue: mask. texA: the stirring's state, texC: the mask mask.
+// Red: density (0 to 1), green: cleared, blue: mask, alpha: blocked. texA: the stirring's state, texC: the mask.
 @fragment
 fn fs_density(in_: FullscreenOut) -> @location(0) vec4<f32> {
 	let screen = in_.pos.xy * mist.frame.y;
@@ -221,8 +235,9 @@ fn fs_density(in_: FullscreenOut) -> @location(0) vec4<f32> {
 	let threshold = mix(1.1, mist.shape.y, amount) - mist.shape.w * mask;
 	let soft = max(mist.shape.z, 0.001);
 	let cover = smoothstep(threshold - soft, threshold + soft, n);
-	let density = cover * min(amount * 3.0, 1.0) * (1.0 - state.z);
-	return vec4<f32>(density, state.z, mask, 1.0);
+	let blocked = blocked_at(world);
+	let density = cover * min(amount * 3.0, 1.0) * (1.0 - state.z) * (1.0 - blocked * mist.blockerSize.z);
+	return vec4<f32>(density, state.z, mask, blocked);
 }
 
 // ---- Halos ----

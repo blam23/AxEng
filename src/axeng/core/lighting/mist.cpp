@@ -31,9 +31,9 @@ namespace
 	struct Uniforms
 	{
 		glm::vec4 view{}, frame{}, grid{}, gridSize{}, sim{}, noise{}, shape{}, wind{}, mask{}, maskSize{}, blur{},
-			extent{};
+			extent{}, blockers{}, blockerSize{};
 	};
-	static_assert(sizeof(Uniforms) == 192);
+	static_assert(sizeof(Uniforms) == 224);
 
 	struct CompositeUniforms
 	{
@@ -84,7 +84,7 @@ bool ax::MistRenderer::init(const wgpu::Device& device)
 	shaderDesc.label = "Mist shader";
 	const auto shader{ device.CreateShaderModule(&shaderDesc) };
 
-	std::array<wgpu::BindGroupLayoutEntry, 6> entries{};
+	std::array<wgpu::BindGroupLayoutEntry, 7> entries{};
 	entries[0].binding = 0;
 	entries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
 	entries[0].buffer.type = wgpu::BufferBindingType::Uniform;
@@ -102,6 +102,10 @@ bool ax::MistRenderer::init(const wgpu::Device& device)
 	entries[5].binding = 5;
 	entries[5].visibility = wgpu::ShaderStage::Vertex;
 	entries[5].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+	entries[6].binding = 6;
+	entries[6].visibility = wgpu::ShaderStage::Fragment;
+	entries[6].texture.sampleType = wgpu::TextureSampleType::Float;
+	entries[6].texture.viewDimension = wgpu::TextureViewDimension::e2D;
 	wgpu::BindGroupLayoutDescriptor layoutDesc{};
 	layoutDesc.entryCount = entries.size();
 	layoutDesc.entries = entries.data();
@@ -223,10 +227,12 @@ ax::MistRenderer::Target ax::MistRenderer::make(const wgpu::Device& device, cons
 wgpu::BindGroup ax::MistRenderer::bind(const wgpu::Device& device, const gpu::TrackedBuffer& uniforms,
 	const wgpu::TextureView& a, const wgpu::TextureView& b, const wgpu::TextureView& c) const
 {
-	std::array<wgpu::BindGroupEntry, 6> entries{};
+	std::array<wgpu::BindGroupEntry, 7> entries{};
 	entries[0].binding = 0;
 	entries[0].buffer = uniforms;
 	entries[0].size = sizeof(Uniforms);
+	entries[6].binding = 6;
+	entries[6].textureView = m_blockers.target.view ? m_blockers.target.view : m_dummyView;
 	entries[1].binding = 1;
 	entries[1].textureView = a ? a : m_dummyView;
 	entries[2].binding = 2;
@@ -245,30 +251,39 @@ wgpu::BindGroup ax::MistRenderer::bind(const wgpu::Device& device, const gpu::Tr
 	return device.CreateBindGroup(&desc);
 }
 
-void ax::MistRenderer::upload_mask(const wgpu::Device& device, const wgpu::Queue& queue, const MistMask& mask)
+bool ax::MistRenderer::upload(const wgpu::Device& device, const wgpu::Queue& queue, const MistMask* source,
+	Uploaded& uploaded, const char* label)
 {
-	if (mask.version == m_maskVersion && m_mask.texture)
-		return;
-	m_maskVersion = mask.version;
+	if (!source)
+	{
+		uploaded = {};
+		return false;
+	}
+	const auto& mask{ *source };
+	if (mask.version == uploaded.version && uploaded.target.texture)
+		return true;
+	uploaded.version = mask.version;
 	const auto expected{ static_cast<std::size_t>(mask.width) * mask.height };
 	if (mask.width == 0 || mask.height == 0 || mask.values.size() < expected)
 	{
-		m_mask = {};
-		return;
+		uploaded.target = {};
+		return false;
 	}
-	if (!m_mask.texture || m_mask.width != mask.width || m_mask.height != mask.height)
-		m_mask = make(device, "Mist mask", mask.width, mask.height, s_mask_format);
-	if (!m_mask.texture)
-		return;
+	auto& target{ uploaded.target };
+	if (!target.texture || target.width != mask.width || target.height != mask.height)
+		target = make(device, label, mask.width, mask.height, s_mask_format);
+	if (!target.texture)
+		return false;
 	// Rows of a texture copy need no alignment through the queue.
 	wgpu::TexelCopyTextureInfo destination{};
-	destination.texture = m_mask.texture;
+	destination.texture = target.texture;
 	wgpu::TexelCopyBufferLayout layout{};
 	layout.bytesPerRow = mask.width;
 	layout.rowsPerImage = mask.height;
 	const wgpu::Extent3D size{ mask.width, mask.height, 1 };
 	queue.WriteTexture(&destination, mask.values.data(), expected, &layout, &size);
-	m_maskRect = { mask.origin, std::max(mask.texel, 0.001f), 1.0f };
+	uploaded.rect = { mask.origin, std::max(mask.texel, 0.001f), 1.0f };
+	return true;
 }
 
 bool ax::MistRenderer::encode(const wgpu::Device& device, const wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
@@ -321,14 +336,8 @@ bool ax::MistRenderer::encode(const wgpu::Device& device, const wgpu::Queue& que
 	if (!frame.movers.empty())
 		queue.WriteBuffer(m_movers, 0, frame.movers.data(), frame.movers.size_bytes());
 
-	if (frame.mask)
-		upload_mask(device, queue, *frame.mask);
-	else
-	{
-		m_mask = {};
-		m_maskVersion = ~0ull;
-	}
-	const bool masked{ frame.mask && m_mask.texture };
+	const bool masked{ upload(device, queue, frame.mask, m_mask, "Mist mask") };
+	const bool blocked{ upload(device, queue, frame.blockers, m_blockers, "Mist blockers") };
 
 	const auto dt{ std::clamp(finite_or(mist.deltaSeconds, 0.0f), 0.0f, 0.1f) };
 	const auto resolution{ std::clamp(finite_or(mist.resolution, 2.0f), 1.0f, 8.0f) };
@@ -366,9 +375,12 @@ bool ax::MistRenderer::encode(const wgpu::Device& device, const wgpu::Queue& que
 		.shape = { std::clamp(mist.amount, 0.0f, 1.0f), finite_or(mist.coverage, 0.5f), finite_or(mist.softness, 0.2f),
 			masked ? finite_or(mist.maskBias, 0.0f) : 0.0f },
 		.wind = { finite_or(mist.wind.x, 0.0f), finite_or(mist.wind.y, 0.0f), 0.0f, 0.0f },
-		.mask = masked ? m_maskRect : glm::vec4{},
-		.maskSize = { static_cast<float>(m_mask.width), static_cast<float>(m_mask.height), 0.0f, 0.0f },
+		.mask = masked ? m_mask.rect : glm::vec4{},
+		.maskSize = { static_cast<float>(m_mask.target.width), static_cast<float>(m_mask.target.height), 0.0f, 0.0f },
 		.extent = { static_cast<float>(grid.width), static_cast<float>(grid.height), 0.0f, 0.0f },
+		.blockers = blocked ? m_blockers.rect : glm::vec4{},
+		.blockerSize = { static_cast<float>(m_blockers.target.width), static_cast<float>(m_blockers.target.height),
+			std::clamp(finite_or(mist.blocking, 1.0f), 0.0f, 1.0f), 0.0f },
 	};
 
 	if (stirring)
@@ -415,7 +427,7 @@ bool ax::MistRenderer::encode(const wgpu::Device& device, const wgpu::Queue& que
 		densityUniforms.extent = { static_cast<float>(densityWidth), static_cast<float>(densityHeight), 0.0f, 0.0f };
 		queue.WriteBuffer(m_uniforms[1], 0, &densityUniforms, sizeof(densityUniforms));
 		fullscreen(m_densityPipeline, m_density.view, bind(device, m_uniforms[1],
-			stirring ? m_state[m_current].view : wgpu::TextureView{}, {}, masked ? m_mask.view : wgpu::TextureView{}),
+			stirring ? m_state[m_current].view : wgpu::TextureView{}, {}, masked ? m_mask.target.view : wgpu::TextureView{}),
 			"Mist density");
 	}
 
