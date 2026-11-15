@@ -13,7 +13,7 @@
 #include <thread>
 #ifdef _WIN32
 #include <shlobj.h>
-#include <windows.h>
+#include "axeng/core/windows_include.h"
 
 std::optional<std::filesystem::path> get_app_data_directory() noexcept
 {

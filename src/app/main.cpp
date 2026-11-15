@@ -1,5 +1,5 @@
 #ifdef _WIN32
-#include <windows.h>
+#include "axeng/core/windows_include.h"
 #endif
 #include <filesystem>
 #include <map>

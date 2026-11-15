@@ -21,6 +21,8 @@ set_encodings("utf-8")
 set_warnings("all", "error")
 -- LuaJIT's protected calls need sol2 to convert C++ callback exceptions into Lua errors.
 add_defines("SOL_EXCEPTIONS_SAFE_PROPAGATION=0")
+-- Windows headers without min/max macros or rarely used APIs (axeng/core/windows_include.h also drops near/far).
+if is_plat("windows") then add_defines("NOMINMAX", "WIN32_LEAN_AND_MEAN") end
 add_rules("mode.debug", "mode.release")
 
 local engine_root = os.scriptdir()
@@ -167,6 +169,9 @@ target("AxEngLib")
     add_files(src .. "/axeng/core/shapes/shape_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     add_files(src .. "/axeng/core/particles/particle_system.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     add_files(src .. "/axeng/core/lighting/light_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
+    add_files(src .. "/axeng/core/lighting/radiance_cascades.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
+    add_files(src .. "/axeng/core/lighting/ambient_occlusion.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
+    add_files(src .. "/axeng/core/lighting/mist.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     add_files(src .. "/axeng/core/window.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
     -- stb_image.h defines helpers that are only used on some code paths
     add_files(src .. "/axeng/core/texture.cpp", {force = {cxxflags = "-Wno-unused-function"}})

@@ -4,12 +4,26 @@ struct Uniforms {
 	ambient: vec4<f32>, // rgb, max exposure
 	noiseTransform: vec4<f32>, // scale xy, offset xy
 	noiseShape: vec4<f32>, // coverage, softness, darkness, seed
+	tonemap: vec4<f32>, // curve (0 clamp, 1 reinhard, 2 aces, 3 filmic), exposure, white, saturation
+	tonemapExtra: vec4<f32>, // gamma, preserve hue (1)
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
 // Lights are four vec4s each: (position, radius, intensity), (colour, falloff), (direction, cone inner, cone outer),
-// (length, reserved). Glows are two: (position, radius, intensity), colour.
+// (length, source radius, shadows, near reach). Glows are two: (position, radius, intensity), colour.
 @group(0) @binding(1) var<storage, read> items: array<vec4<f32>>;
+
+// Lights with marched shadows (shadows 2) march through the radiance cascades' distance field: signed texels to the
+// nearest surface as a half float in the low 16 bits, the offset to that surface texel in the high 16 (see
+// radiance.wgsl), and the scene, whose alpha tells occluders (1, or below -1.5 for a light's own body) from lights'
+// see-through discs (2 and above).
+struct March {
+	grid: vec4<f32>, // world origin xy, texels per world pixel, 1 when there is a distance field
+	size: vec4<f32>, // width, height (texels)
+};
+@group(1) @binding(0) var<uniform> march: March;
+@group(1) @binding(1) var marchDistance: texture_2d<u32>;
+@group(1) @binding(2) var marchScene: texture_2d<f32>;
 
 struct InstanceOut {
 	@builtin(position) pos: vec4<f32>,
@@ -19,6 +33,10 @@ struct InstanceOut {
 	@location(2) @interpolate(flat) cone: vec4<f32>,
 	// A beam's half length in radii, and 1 for a beam (0 otherwise).
 	@location(3) @interpolate(flat) beam: vec2<f32>,
+	// A traced light's near part (see fs_light): where it starts fading and where it is gone, in radii; 0, 0 otherwise.
+	@location(4) @interpolate(flat) near: vec2<f32>,
+	// A light with marched shadows: its position and radius (world pixels) and source radius + 1; all 0 otherwise.
+	@location(5) @interpolate(flat) marched: vec4<f32>,
 };
 
 struct FullscreenOut {
@@ -59,11 +77,16 @@ fn vs_light(@builtin(vertex_index) vertex: u32, @builtin(instance_index) instanc
 		let across = vec2<f32>(-c.y, c.x);
 		out.pos = to_clip(a.xy + c.xy * half + c.xy * (local.x * (half + a.z)) + across * (local.y * a.z));
 		out.beam = vec2<f32>(half / max(a.z, 0.0001), 1.0);
+		out.local = local;
 	} else {
-		out.pos = to_clip(a.xy + local * a.z);
+		// A near part only reaches nearReach: its octagon shrinks to that, local staying in radii.
+		let reach = select(a.z, min(a.z, e.w), e.w > 0.0);
+		out.pos = to_clip(a.xy + local * reach);
 		out.beam = vec2<f32>(0.0);
+		out.local = local * (reach / max(a.z, 0.0001));
 	}
-	out.local = local;
+	out.near = select(vec2<f32>(0.0), vec2<f32>(e.y, e.w) / max(a.z, 0.0001), e.w > 0.0);
+	out.marched = select(vec4<f32>(0.0), vec4<f32>(a.xy, a.z, e.y + 1.0), e.z >= 1.5 && e.x <= 0.0);
 	return out;
 }
 
@@ -86,8 +109,123 @@ fn fs_light(in_: InstanceOut) -> @location(0) vec4<f32> {
 		let cone = smoothstep(in_.cone.w, in_.cone.z, facing);
 		attenuation *= mix(1.0, cone, smoothstep(0.0, 0.12, len));
 	}
+	if (in_.near.y > 0.0) {
+		// The near part of a traced light, the cascades taking over beyond (near_weight in radiance.wgsl).
+		attenuation *= 1.0 - smoothstep(in_.near.x, in_.near.y, sqrt(d2));
+	}
+	if (in_.marched.w > 0.0 && attenuation > 0.0) {
+		attenuation *= marched_visibility(in_.marched.xy + in_.local * in_.marched.z, in_.marched.xy, in_.marched.w - 1.0);
+	}
 	return vec4<f32>(in_.colour.rgb * attenuation, 0.0);
 }
+
+// The distance field at a texel: x signed texels to the nearest surface, safe to step by; y the distance that shades,
+// to an occluder or a light's own body; z 1 inside a light's see-through disc. A see-through disc does not block, but
+// the body inside it does: its texels hold how far in from the disc's edge the body begins (radiance.wgsl, fs_stamp),
+// so y is the distance to the body, as if round.
+fn march_texel(p: vec2<i32>) -> vec3<f32> {
+	let size = vec2<i32>(march.size.xy);
+	if (any(p < vec2<i32>(0)) || any(p >= size)) {
+		return vec3<f32>(1000.0, 1000.0, 0.0);
+	}
+	let packed = textureLoad(marchDistance, p, 0).r;
+	let d = unpack2x16float(packed & 0xFFFFu).x;
+	let offset = vec2<i32>(i32((packed >> 16u) & 0xFFu), i32(packed >> 24u)) - vec2<i32>(128);
+	let surface = select(clamp(p + offset, vec2<i32>(0), size - vec2<i32>(1)), p, d < 0.0);
+	let scene = textureLoad(marchScene, surface, 0);
+	if (scene.a > 1.5) {
+		return vec3<f32>(d, d + scene.g, select(0.0, 1.0, d < 0.0));
+	}
+	return vec3<f32>(d, d, 0.0);
+}
+
+// The distance at g, blended between texel centres near surfaces (where it sets a penumbra) so shadows are not stepped.
+fn march_distance(g: vec2<f32>) -> vec3<f32> {
+	let nearest = march_texel(vec2<i32>(floor(g)));
+	if (abs(nearest.x) > 3.0 && abs(nearest.y) > 3.0) {
+		return nearest;
+	}
+	let q = g - vec2<f32>(0.5);
+	let base = vec2<i32>(floor(q));
+	let f = q - floor(q);
+	let d00 = march_texel(base).xy;
+	let d10 = march_texel(base + vec2<i32>(1, 0)).xy;
+	let d01 = march_texel(base + vec2<i32>(0, 1)).xy;
+	let d11 = march_texel(base + vec2<i32>(1, 1)).xy;
+	return vec3<f32>(mix(mix(d00, d10, f.x), mix(d01, d11, f.x), f.y), nearest.z);
+}
+
+// How much of a light's source (world pixels) a point sees past the occluders: a soft shadow marched along the way to
+// it through the distance field, its penumbra as wide as the source subtends. Lights' discs do not block. A point
+// inside an occluder takes the light where it leaves it towards the light, fading the deeper it is, so a building's
+// top is lit on the light's side.
+fn marched_visibility(world: vec2<f32>, light: vec2<f32>, source: f32) -> f32 {
+	if (march.grid.w < 0.5) {
+		return 1.0;
+	}
+	let k = march.grid.z;
+	let g = (world - march.grid.xy) * k;
+	let l = (light - march.grid.xy) * k;
+	if (any(g < vec2<f32>(0.0)) || any(g >= march.size.xy)) {
+		return 1.0;
+	}
+	let toLight = l - g;
+	let dist = length(toLight);
+	let sourceTexels = max(source * k, 1.0);
+	let dir = toLight / dist;
+	let spread = sourceTexels / dist;
+	// The march stops this far short of the light: where a traced light's own body may reach (OWN_SCALE times its source
+	// in radiance.wgsl) and a margin, so that body does not shade the light's own near part.
+	let stop = sourceTexels * MARCH_OWN_SCALE + MARCH_SOURCE_MARGIN;
+	if (dist <= stop) {
+		return 1.0;
+	}
+	var t = 0.0;
+	var inside = 1.0;
+	var here = march_distance(g);
+	if (here.y < 0.0) {
+		for (var i = 0; i < 16; i++) {
+			here = march_distance(g + dir * t);
+			if (here.y >= 0.0) {
+				break;
+			}
+			t += max(-here.y, 0.5);
+		}
+		inside = 1.0 - smoothstep(0.0, max(MARCH_INTERIOR_DEPTH * k, 2.0), t);
+		if (inside <= 0.0) {
+			return 0.0;
+		}
+	}
+	t += 0.5;
+	// -1 deep in shadow to 1 fully seen; the geometric shadow's edge at 0.
+	var seen = 1.0;
+	for (var i = 0; i < MARCH_STEPS; i++) {
+		if (t >= dist - stop) {
+			break;
+		}
+		let s = march_distance(g + dir * t);
+		// What lies within the light's own source (its own body) does not shade it.
+		if (dist - t - max(s.y, 0.0) >= stop) {
+			seen = min(seen, s.y / (spread * t));
+		}
+		if (seen <= -1.0) {
+			break;
+		}
+		// Inside a see-through disc only the body inside it can block, so on by the distance to that.
+		t += clamp(select(s.x, s.y, s.z > 0.5), 0.5, 64.0);
+	}
+	seen = max(seen, -1.0);
+	return inside * 0.25 * (1.0 + seen) * (1.0 + seen) * (2.0 - seen);
+}
+
+const MARCH_STEPS: i32 = 64;
+// Texels past a light's source its march stops at: a body's corners just inside the source poke out about this far
+// once drawn on the grid.
+const MARCH_SOURCE_MARGIN: f32 = 2.0;
+// As OWN_SCALE in radiance.wgsl.
+const MARCH_OWN_SCALE: f32 = 1.75;
+// World pixels into an occluder over which a marched light on its top fades out.
+const MARCH_INTERIOR_DEPTH: f32 = 16.0;
 
 // Occluders are two vec4s of corners, drawn as two triangles: 0 1 2 and 0 2 3.
 @vertex
@@ -183,6 +321,8 @@ fn fs_glow(in_: InstanceOut) -> @location(0) vec4<f32> {
 
 @group(0) @binding(1) var lightMap: texture_2d<f32>;
 @group(0) @binding(2) var lightSampler: sampler;
+// The ambient occlusion's factor over the light map (red; white without it), applied once the light is clamped.
+@group(0) @binding(3) var aoFactor: texture_2d<f32>;
 
 @vertex
 fn vs_apply(@builtin(vertex_index) vertex: u32) -> FullscreenOut {
@@ -192,9 +332,57 @@ fn vs_apply(@builtin(vertex_index) vertex: u32) -> FullscreenOut {
 	return out;
 }
 
+fn aces_curve(x: vec3<f32>) -> vec3<f32> {
+	return clamp(x * (2.51 * x + 0.03) / (x * (2.43 * x + 0.59) + 0.14), vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+fn hable_curve(x: vec3<f32>) -> vec3<f32> {
+	let a = 0.15; let b = 0.5; let c = 0.1; let d = 0.2; let e = 0.02; let f = 0.3;
+	return (x * (a * x + c * b) + d * e) / (x * (a * x + b) + d * f) - e / f;
+}
+
+// Light (0 up) curved into 0..1 (keep in step with curve_channel in light_renderer.cpp).
+fn curve(x_: vec3<f32>) -> vec3<f32> {
+	let x = max(x_, vec3<f32>(0.0));
+	let kind = u32(u.tonemap.x + 0.5);
+	let white = u.tonemap.z;
+	var c: vec3<f32>;
+	if (kind == 1u) {
+		c = x * (1.0 + x / (white * white)) / (1.0 + x);
+	} else if (kind == 2u) {
+		c = aces_curve(x) / max(aces_curve(vec3<f32>(white)).x, 0.0001);
+	} else if (kind == 3u) {
+		c = hable_curve(x) / max(hable_curve(vec3<f32>(white)).x, 0.0001);
+	} else {
+		c = select(vec3<f32>(0.0), x / u.ambient.w, u.ambient.w > 0.0);
+	}
+	return clamp(c, vec3<f32>(0.0), vec3<f32>(1.0));
+}
+
+// See Tonemap in light_renderer.h.
+fn tonemap(light: vec3<f32>) -> vec3<f32> {
+	var x = max(light * u.tonemap.y, vec3<f32>(0.0));
+	if (u.tonemap.w != 1.0) {
+		let luma = dot(x, vec3<f32>(0.2126, 0.7152, 0.0722));
+		x = max(mix(vec3<f32>(luma), x, u.tonemap.w), vec3<f32>(0.0));
+	}
+	var c: vec3<f32>;
+	if (u.tonemapExtra.y > 0.5) {
+		let peak = max(x.r, max(x.g, x.b));
+		c = select(vec3<f32>(0.0), x * (curve(vec3<f32>(peak)).x / peak), peak > 0.0);
+	} else {
+		c = curve(x);
+	}
+	if (u.tonemapExtra.x != 1.0) {
+		c = pow(c, vec3<f32>(u.tonemapExtra.x));
+	}
+	return c * u.ambient.w;
+}
+
 fn applied_light(position: vec2<f32>) -> vec3<f32> {
-	let light = textureSampleLevel(lightMap, lightSampler, position / u.viewport.xy, 0.0).rgb;
-	return min(light, vec3<f32>(u.ambient.w));
+	let uv = position / u.viewport.xy;
+	let light = textureSampleLevel(lightMap, lightSampler, uv, 0.0).rgb;
+	return tonemap(light) * textureSampleLevel(aoFactor, lightSampler, uv, 0.0).r;
 }
 
 // The target times the light, for exposures up to 1.
@@ -208,4 +396,69 @@ fn fs_apply(in_: FullscreenOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_apply_bright(in_: FullscreenOut) -> @location(0) vec4<f32> {
 	return vec4<f32>(applied_light(in_.pos.xy) * 0.5, 0.5);
+}
+
+// Mist (mist.wgsl draws its density and halos): over the lit scene, lit by the same light, brighter round
+// bright lights where light scatters in it, its sides facing a low sun brighter, and thinner over things that stand up.
+struct MistComposite {
+	colour: vec4<f32>, // the mist's colour in white light, its opacity where densest
+	sun: vec4<f32>, // towards the sun xyz, how much its sides facing it brighten
+	shape: vec4<f32>, // halo strength, tall thinning, debug view, 1 when there is a tall mask
+	mask: vec4<f32>, // the tall mask's margin round the screen (screen pixels), the area it covers (w, h)
+	density: vec4<f32>, // density width, height (texels), screen pixels per texel
+	grid: vec4<f32>, // stirring grid origin xy, world pixels per texel, 1 when stirring
+	gridSize: vec4<f32>, // width, height
+};
+@group(1) @binding(0) var<uniform> mistc: MistComposite;
+@group(1) @binding(1) var mistDensity: texture_2d<f32>;
+@group(1) @binding(2) var mistHalo: texture_2d<f32>;
+@group(1) @binding(3) var mistTall: texture_2d<f32>;
+@group(1) @binding(4) var mistState: texture_2d<f32>;
+
+fn mist_density_at(uv: vec2<f32>) -> vec4<f32> {
+	return textureSampleLevel(mistDensity, lightSampler, uv, 0.0);
+}
+
+@fragment
+fn fs_mist(in_: FullscreenOut) -> @location(0) vec4<f32> {
+	let screen = in_.pos.xy;
+	let uv = screen / u.viewport.xy;
+	let duv = screen / (mistc.density.z * mistc.density.xy);
+	let texel = 1.0 / mistc.density.xy;
+	let here = mist_density_at(duv);
+	var density = here.r;
+	var tall = 0.0;
+	if (mistc.shape.w > 0.5) {
+		tall = textureSampleLevel(mistTall, lightSampler, (screen + vec2<f32>(mistc.mask.x)) / mistc.mask.yz, 0.0).r;
+		density = density * (1.0 - mistc.shape.y * tall);
+	}
+	let view = u32(mistc.shape.z + 0.5);
+	if (view == 1u) {
+		return vec4<f32>(vec3<f32>(density), 1.0);
+	}
+	if (view == 2u) {
+		let world = (screen - u.viewport.xy * 0.5) / u.camera.z + u.camera.xy;
+		let g = (world - mistc.grid.xy) / mistc.grid.z / mistc.gridSize.xy;
+		let v = select(vec4<f32>(0.0), textureSampleLevel(mistState, lightSampler, g, 0.0), mistc.grid.w > 0.5);
+		return vec4<f32>(clamp(v.xy / 64.0 * 0.5 + vec2<f32>(0.5), vec2<f32>(0.0), vec2<f32>(1.0)), 0.5, 1.0);
+	}
+	if (view == 3u) {
+		return vec4<f32>(vec3<f32>(here.g), 1.0);
+	}
+	if (view == 4u) {
+		return vec4<f32>(0.0, 0.0, here.b, 1.0);
+	}
+	if (view == 5u) {
+		return vec4<f32>(vec3<f32>(tall), 1.0);
+	}
+	// Light scattered from bright lights nearby: what the blurred light map has above the ambient.
+	let halo = max(textureSampleLevel(mistHalo, lightSampler, uv, 0.0).rgb - u.ambient.rgb, vec3<f32>(0.0));
+	let light = textureSampleLevel(lightMap, lightSampler, uv, 0.0).rgb + halo * mistc.shape.x;
+	// The density's slope as the mist's surface: sides facing the sun catch more of it.
+	let gx = mist_density_at(duv + vec2<f32>(texel.x, 0.0)).r - mist_density_at(duv - vec2<f32>(texel.x, 0.0)).r;
+	let gy = mist_density_at(duv + vec2<f32>(0.0, texel.y)).r - mist_density_at(duv - vec2<f32>(0.0, texel.y)).r;
+	let normal = normalize(vec3<f32>(-gx * 2.0, -gy * 2.0, 1.0));
+	let sunSide = 1.0 + mistc.sun.w * (dot(normal, mistc.sun.xyz) - mistc.sun.z);
+	let colour = mistc.colour.rgb * tonemap(light) * max(sunSide, 0.0);
+	return vec4<f32>(colour, clamp(density * mistc.colour.a, 0.0, 1.0));
 }

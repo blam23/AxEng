@@ -12,6 +12,7 @@
 #include "axeng/core/audio/arrangement.h"
 #include "axeng/core/audio/instrument.h"
 #include "axeng/core/audio/fm_sfx.h"
+#include "axeng/core/audio/sound_generator.h"
 #include "axeng/core/audio/sfx_synth.h"
 #include "axeng/core/helpers.h"
 
@@ -22,15 +23,22 @@ namespace ax
 
 namespace ax::audio
 {
+	// A mixer bus (channel): every voice plays on one, and its level is voice volume x bus x master. The engine's own are
+	// named here; applications add more by name with register_bus (an "ambience" bus, say), up to max_buses in all.
 	enum class Bus : std::uint8_t
 	{
 		Master,
 		Sfx,
 		Ui,
 		Music,
-		Count,
 	};
+	inline constexpr std::size_t max_buses{ 64 };
 
+	// Adds a bus by name, or finds the one already registered under it (for the whole process, so names mean the same
+	// to every audio system). None for an empty name or once max_buses are taken. Thread safe.
+	std::optional<Bus> register_bus(std::string_view name);
+	// How many buses there are, built in and registered.
+	std::size_t bus_count() noexcept;
 	std::string_view bus_name(Bus bus) noexcept;
 	std::optional<Bus> bus_from_name(std::string_view name) noexcept;
 
@@ -42,6 +50,8 @@ namespace ax::audio
 		SfxParams params{};
 		// When set, the sound is played on the FM voice instead of the sfxr-style synth, and `params` is unused.
 		std::optional<FmSfxParams> fm{};
+		// When set (and fm is not), the application renders the sound (see SoundGenerator) and `params` is unused.
+		std::shared_ptr<const SoundGenerator> generator{};
 		std::uint64_t seed{ 0 };
 		// How far each variant's parameters may drift from `params` (see audio::mutate).
 		float mutation{ 0.0f };
@@ -100,6 +110,8 @@ namespace ax::audio
 		float seam{};
 		bool loop{};
 		bool fm{};
+		// Rendered by a SoundGenerator.
+		bool generated{};
 		Bus bus{};
 	};
 

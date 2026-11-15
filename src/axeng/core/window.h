@@ -2,7 +2,7 @@
 
 #ifdef _WIN32
 #include "axeng/debug/gpu_memory.h"
-#include <windows.h>
+#include "axeng/core/windows_include.h"
 #endif
 
 // STD
@@ -223,6 +223,17 @@ namespace ax
 		// As above, with occluders hiding the lights before them (see LightOccluder2D).
 		void submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>& glows, std::vector<LightOccluder2D>& occluders);
 		void submit_noise_shadow(std::optional<NoiseShadow2D> shadow);
+		// Soft shadows for the next frame round the sprites with sprite_flag_ao_caster (none without one). Like the noise
+		// shadow it keeps the lighting passes running by day.
+		void submit_ambient_occlusion(std::optional<AmbientOcclusion2D> occlusion);
+		// Round occluders for the next frame's radiance cascades, swapped in like submit_lights. Sprites with
+		// sprite_flag_occluder occlude too.
+		void submit_radiance_circles(std::vector<RadianceCircle>& circles);
+		// Mist for the next frame (none without one) and what stirs it, swapped in like submit_lights. Like the noise
+		// shadow it keeps the lighting passes running by day.
+		void submit_mist(std::optional<Mist2D> mist, std::vector<MistMover>& movers);
+		// Where the mist forms first (MistMask); kept until replaced (null for none).
+		void submit_mist_mask(std::shared_ptr<const MistMask> mask);
 		// Queues a material draw for the next frame (see MaterialRenderer). World space draws land in the scene, or after
 		// lighting for an unlit material; screen space draws land with the overlays. Thread safe.
 		//
@@ -233,6 +244,10 @@ namespace ax
 		// Whether the most recent frame ran the lighting passes, and what they drew.
 		bool lighting_ran() const noexcept { return m_lightingRan; }
 		LightRenderer::Stats lighting_stats() const noexcept { return m_lightRenderer.last_stats(); }
+		// How many sprites the latest frame drew as shadow occluders (sprite_flag_occluder), 0 when no shadows ran.
+		std::uint32_t occluder_sprites() const noexcept { return m_collectOccluders ? m_occluderSprites : 0u; }
+		// How many sprites the latest frame drew as ambient occlusion casters (sprite_flag_ao_caster), 0 without it.
+		std::uint32_t ao_caster_sprites() const noexcept { return m_collectAoCasters ? m_aoCasterSprites : 0u; }
 
 		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view);
 		wgpu::BindGroup setup_bind_groups(const wgpu::TextureView& view, const wgpu::Buffer& buffer);
@@ -396,6 +411,14 @@ namespace ax
 		wgpu::BindGroupLayout m_globalLayout;
 		gpu::TrackedBuffer m_viewportBuffer;
 		wgpu::BindGroup m_viewportBindGroup;
+		// Occluder sprites drawn into the radiance cascades' scene, with the grid's view.
+		wgpu::RenderPipeline m_radianceOccluderPipeline;
+		gpu::TrackedBuffer m_radianceViewportBuffer;
+		wgpu::BindGroup m_radianceViewportBindGroup;
+		// The ambient occlusion caster views (AmbientOcclusion::CasterDraw's slots), each with a camera buffer of its own.
+		wgpu::RenderPipeline m_aoCasterPipeline;
+		std::array<gpu::TrackedBuffer, 4> m_aoViewportBuffers;
+		std::array<wgpu::BindGroup, 4> m_aoViewportBindGroups;
 		// Keyed by address, with the texture's serial: a texture freed without invalidating its entry may have its
 		// address reused by a new one, which must not draw with the old texture's bind group.
 		struct TextureBindGroup
@@ -449,6 +472,20 @@ namespace ax
 		std::vector<SpriteGroupRange> m_spriteGroupRanges;
 		std::vector<SpriteGroupRange> m_unlitSpriteGroupRanges;
 		std::vector<SpriteGroupRange> m_screenSpaceSpriteGroupRanges;
+		// Lit sprites with sprite_flag_occluder, again, when radiance cascades run this frame.
+		std::vector<SpriteGroupRange> m_occluderSpriteGroupRanges;
+		std::vector<const SpriteDefinition*> m_occluderUploadScratch;
+		// A hash of this frame's shadow occluder sprites (LightRenderer::encode's radianceOccluderSignature).
+		std::uint64_t m_occluderSignature{};
+		std::uint32_t m_occluderSprites{};
+		bool m_collectOccluders{};
+		// Lit sprites with sprite_flag_ao_caster, again, when the frame has ambient occlusion: those drawn as themselves,
+		// then the stand-ins (sprite_flag_ao_only).
+		// The stand-ins' silhouettes (sprite_flag_ao_silhouette) come third.
+		std::array<std::vector<SpriteGroupRange>, 3> m_aoSpriteGroupRanges;
+		std::array<std::vector<const SpriteDefinition*>, 3> m_aoUploadScratch;
+		std::uint32_t m_aoCasterSprites{};
+		bool m_collectAoCasters{};
 		UnlitShapeCapture m_unlitShapes;
 		ShapeList m_unlitOverlayShapes;
 		UnlitShapeCapture m_interfaceShapes;
@@ -469,8 +506,13 @@ namespace ax
 		std::vector<Light2D> m_queuedLights, m_frameLights;
 		std::vector<Glow2D> m_queuedGlows, m_frameGlows;
 		std::vector<LightOccluder2D> m_queuedOccluders, m_frameOccluders;
+		std::vector<RadianceCircle> m_queuedRadianceCircles, m_frameRadianceCircles;
 		std::vector<Light2D> m_mergedLights;
 		std::optional<NoiseShadow2D> m_queuedNoiseShadow{};
+		std::optional<AmbientOcclusion2D> m_queuedAmbientOcclusion{};
+		std::optional<Mist2D> m_queuedMist{};
+		std::vector<MistMover> m_queuedMistMovers{}, m_frameMistMovers{};
+		std::shared_ptr<const MistMask> m_mistMask{};
 		bool m_lightingRan{};
 		size_t m_uniformStride{ SpriteGpuData::gpuDataSize };
 		uint32_t m_uniformsCapacity{ 1024 };

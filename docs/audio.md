@@ -370,9 +370,18 @@ C++ code parses these tables with `ax::lua::bindings::sound_definition_from_tabl
 Use `info(name).peak` and `rms` when tuning levels. A peak of exactly 1 means the synth clipped; lower the
 params `volume` and raise the playback `volume` instead.
 
+### Generators
+
+A `SoundDefinition` can carry a `SoundGenerator` (`audio/sound_generator.h`) instead of synth parameters: the
+application renders each variant itself (mono floats at `sfx_sample_rate`; variant 0 as defined, the others drifting by
+the definition's `mutation`) and adds what changes its output to the render key. The sound bank plays, loops, caches and
+pre-renders it like any other sound. `audio/dsp.h` has building blocks for that: white, pink and brown noise, a state
+variable filter, a one-pole smoother, a small Freeverb and envelope helpers.
+
 ### Buses
 
-`master`, `sfx`, `ui` and `music`. A voice's level is `voice volume × bus × master`; changes glide over ~30 ms.
+`master`, `sfx`, `ui` and `music` are built in; applications add their own by name (up to 64 in all) with
+`audio::register_bus(name)` or `audio.register_bus(name)` in Lua, and then use the name like the others. A voice's level is `voice volume × bus × master`; changes glide over ~30 ms.
 
 ```lua
 audio.set_volume("music", 0.6)     -- returns false for an unknown bus

@@ -346,7 +346,7 @@ std::optional<ax::audio::SoundDefinition> ax::lua::bindings::sound_definition_fr
 		const auto parsed{ ax::audio::bus_from_name(*bus) };
 		if (!parsed || *parsed == ax::audio::Bus::Master || *parsed == ax::audio::Bus::Music)
 		{
-			spdlog::error("<Audio> Sound '{}' uses invalid bus '{}' (use 'sfx' or 'ui')", name, *bus);
+			spdlog::error("<Audio> Sound '{}' uses invalid bus '{}' (use 'sfx', 'ui' or a registered one)", name, *bus);
 			return std::nullopt;
 		}
 		def.bus = *parsed;

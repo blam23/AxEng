@@ -1,6 +1,6 @@
 #include <gtest/gtest.h>
 #include <dawn/native/DawnNative.h>
-#include <windows.h>
+#include "axeng/core/windows_include.h"
 
 #include "axeng/core/font_data.h"
 #include "axeng/core/msdf_font.h"
@@ -816,4 +816,30 @@ TEST(SpritePacking, DistanceFieldEffectRoundTrips)
 	EXPECT_EQ(packed.flags, 1u | 2u << 1);
 	EXPECT_EQ(glm::unpackHalf2x16(packed.effect), glm::vec2(1.5f, 0.5f));
 	EXPECT_EQ(glm::unpackHalf2x16(packed.effectOffset), glm::vec2(-2.0f, 3.0f));
+}
+
+TEST_F(SpriteShaderTest, RadianceOccluderWritesOpaqueSilhouetteWithAlbedo)
+{
+	// Left texel mostly opaque, right texel mostly transparent: the silhouette keeps only the left, fully opaque.
+	ax::SpriteData sprite{};
+	sprite.pos = { 0.0f, 0.0f };
+	sprite.scale = { 16.0f, 16.0f };
+	sprite.screenSpace = 1;
+	const auto image{ render({ { 200, 100, 50, 200 }, { 0, 255, 0, 100 } }, 2, 1, { sprite }, "fs_radiance_occluder") };
+	ASSERT_EQ(image.size(), s_size * s_size);
+	EXPECT_EQ(image[4 * s_size + 4], (Pixel{ 200, 100, 50, 255 }));
+	EXPECT_EQ(image[4 * s_size + 28], (Pixel{ 0, 0, 0, 0 }));
+}
+
+TEST_F(SpriteShaderTest, AmbientOcclusionSilhouetteIsFullCoverageWhereHalfOpaque)
+{
+	// Whatever its colour, a mostly opaque texel covers fully and a mostly transparent one not at all.
+	ax::SpriteData sprite{};
+	sprite.pos = { 0.0f, 0.0f };
+	sprite.scale = { 16.0f, 16.0f };
+	sprite.screenSpace = 1;
+	const auto image{ render({ { 200, 100, 50, 200 }, { 0, 255, 0, 100 } }, 2, 1, { sprite }, "fs_ao_silhouette") };
+	ASSERT_EQ(image.size(), s_size * s_size);
+	EXPECT_EQ(image[4 * s_size + 4], (Pixel{ 255, 255, 255, 255 }));
+	EXPECT_EQ(image[4 * s_size + 28], (Pixel{ 0, 0, 0, 0 }));
 }

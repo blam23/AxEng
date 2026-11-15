@@ -575,7 +575,13 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 			const auto stats{ app.window()->lighting_stats() };
 			return sol::state_view{ lua }.create_table_with("ran", app.window()->lighting_ran(),
 				"lights", stats.lights, "glows", stats.glows, "map_width", stats.lightMapWidth,
-				"map_height", stats.lightMapHeight, "occluders", stats.occluders);
+				"map_height", stats.lightMapHeight, "occluders", stats.occluders,
+				"radiance_width", stats.radianceWidth, "radiance_height", stats.radianceHeight,
+				"radiance_cascades", stats.radianceCascades, "radiance_lights", stats.radianceLights,
+				"radiance_circles", stats.radianceCircles, "radiance_reused", stats.radianceReused,
+				"occluder_sprites", app.window()->occluder_sprites(),
+				"ambient_occlusion", stats.ambientOcclusion, "ao_casters", app.window()->ao_caster_sprites(),
+				"mist", stats.mist, "mist_grid_width", stats.mistGridWidth, "mist_grid_height", stats.mistGridHeight);
 		};
 
 	window_table["compare_next_frame"] =

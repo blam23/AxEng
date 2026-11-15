@@ -9,7 +9,7 @@
 #include <filesystem>
 #include <string>
 #include <utility>
-#include <windows.h>
+#include "axeng/core/windows_include.h"
 
 namespace
 {

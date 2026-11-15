@@ -56,3 +56,141 @@ The cost is fill rate in the light map, not draw calls: all lights are one draw 
 number. At 1920x1080 with 4x MSAA on the development machine, 1000 lights of 192 screen pixels' radius cost about
 0.6 ms at half resolution, and 5000 about 2 ms (`LightRendererTest.DISABLED_ReportsGpuTimeForManyLights`). Callers with
 very many lights should cull ones smaller than a light map texel and lower `resolutionDivisor` as coverage grows.
+
+## Ambient occlusion
+
+`Window::submit_ambient_occlusion(AmbientOcclusion2D)` darkens the light map round sprites drawn with
+`sprite_flag_ao_caster`, by day and night, like the noise (cloud) shadow: it keeps the lighting passes running in full
+daylight. `AmbientOcclusion` (`ambient_occlusion.{h,cpp,wgsl}`) draws the casters' silhouettes with the radiance occluder
+sprite pipeline into a mask, `offset` world pixels from where they stand (the way their shadow falls), over the screen
+plus a margin a shadow can fall in from. Sprites drawn as themselves and stand-ins (`sprite_flag_ao_only`: casters
+that are not drawn, for things drawn as shapes or baked into the ground) are kept in two sets: each set's silhouettes
+take less of its own shadows (`selfDarkness`) but all of the other's, so a flying player's shadow falls on a building.
+Both masks are blurred together (sigma half of `radius`) into a factor at the light map's size, `1 - darkness * shadow`,
+which the apply pass multiplies the light by after clamping it, so lights brightening past daylight cannot wash it out.
+The masks are `resolution` screen pixels per texel. Each of the four silhouette draws has a camera buffer of its own,
+since all are written before the frame's commands run.
+
+## Mist
+
+`Window::submit_mist(Mist2D, movers)` draws a layer of mist over the lit scene for the next frame (fog, steam, dust: the
+game decides what it is and when). `mist.h`, `mist.wgsl`, and `fs_mist` in `lighting.wgsl`.
+
+- **Density**: drifting, domain-warped noise, thresholded by `amount` (0 none, 1 all the noise gives) and `coverage`.
+  `Window::submit_mist_mask(MistMask)` (a world-aligned R8 grid, uploaded when its `version` changes) lowers the
+  threshold by `maskBias`, so mist shows there first. Drawn at `resolution` screen pixels a texel.
+- **Stirring**: `MistMover`s (position, velocity, radius, push, outward, clear) splat forces into a small fluid grid
+  fixed in the world (`mist_grid`: `gridTexel` world pixels a texel, doubled until it fits in 512², sized in 64 texel
+  blocks, scrolled in whole texels as the view moves). Each frame: splat, semi-Lagrangian advection, 10 Jacobi
+  pressure iterations and projection (so stirred air flows round), calming (`damping`) and refilling of what movers
+  cleared (`refillSeconds`). The density is reduced by what was cleared and its pattern dragged by the flow
+  (`displace`). Cosmetic: the state lives on the GPU and is lost when the grid resets (size, texel).
+- **Lighting**: the composite reads the light map and tonemaps it like the apply pass, so mist takes the ambient's
+  colour, lamps, shadows and cloud shadows. Halos: the light map downsampled 4× and blurred by `haloRadius`, its excess
+  over the ambient added by `haloStrength`. The density's slope serves as a normal: sides facing `toSun` brighten by
+  `sunStrength`. `colour` is the mist's colour in white light (albedo times any sky tint), `opacity` its densest.
+- **Tall things**: thinner by `tallThinning` over `sprite_flag_ao_caster` sprites: the ambient occlusion's silhouettes
+  when it runs, otherwise drawn by the mist into its own mask (AO caster slot 1).
+- Drawn in the apply pass after the light, before glows and unlit content; skipped with `lightOnly`. A visible mist keeps
+  the lighting passes running by day. `debugView`: 1 density, 2 velocity, 3 cleared, 4 mask, 5 tall mask.
+- Every pass is a fragment pass on RGBA16Float (R8 for masks); one bind group each, so the same WebGPU constraints as
+  the radiance cascades. Each pass's uniforms have their own buffer (queue writes land before the frame's commands).
+  GPU timer category `GPU ms: mist`.
+
+## Shadows (radiance cascades)
+
+With `LightingSettings::radiance.enabled`, lights are blocked by occluders with soft, correct penumbrae, using 2D
+radiance cascades (`RadianceCascades`, `radiance_cascades.h`, `radiance.wgsl`). The cost does not depend on how many
+lights there are.
+
+**Which lights.** A light is traced when `Light2D::shadows` is above 0, it is positive, omni or a cone (not a beam), at
+least `minLightTexels` GI texels in radius, inside the grid, and before the first `LightOccluder2D` (so a deck's own
+lights stay analytic and its occluder still hides what is beneath). At most 2046 are traced. The rest are drawn as
+before. Light leaves a disc of `Light2D::sourceRadius` world pixels round the light (never smaller than 2.5 probe
+spacings, below which sources fall between the rays): give a light on a solid thing a source radius inside it: what blocks
+within 1.75 times the source is taken as its body and lets its light out. Close to its source the cascades' few nearby rays cannot resolve a light and it would flicker
+as it moves, so a traced light's near part (out to four times its source plus four probe spacings,
+`radiance_near_scale` and `radiance_near_spacings`) is drawn plainly with marched shadows, fading out as the cascades
+fade in (`radiance_near_part`, `Light2D::nearReach`). The cascades take that fade, like any shape, at their probes, so
+it must be gentle: a short one shows as a ring round the light.
+
+**Marched lights.** A light that would be traced but cannot be (outside the grid, below `minLightTexels`, past the
+traced limit) is marched instead, so lamps crossing the grid's edge as the view moves or zooms keep their shadows.
+A light with `shadows` 2 (`Light2D::marched_shadows`) is not traced: it is drawn plainly, and each
+pixel marches the cascades' distance field towards it for a soft shadow as wide as its source subtends (light discs do
+not block; a pixel inside an occluder takes the light where it leaves it towards the light, fading over 16 world
+pixels). Its shape is exact and nothing is sampled on the cascades' fixed grid, so it does not crawl as it moves: use it
+for the few lights that move (a player's). It needs the grid but adds nothing to its reach; about 0.1 to 0.2 ms for a
+player's two lights at 1080p. Without the cascades it is drawn unshadowed.
+
+**Occluders.** Sprites with `sprite_flag_occluder` (where their alpha is at least a half, so shadows follow their
+outlines) and `RadianceCircle`s from `Window::submit_radiance_circles`. Static sprite batches and distance-field
+sprites do not occlude.
+
+**Passes**, all render (fragment) passes using only core WebGPU, so they need nothing beyond what the rest of the
+renderer does on Dawn or in a browser:
+
+1. A world-aligned grid round the view plus `margin` (capped at `maxMarginFraction` of the view each side), a GI texel
+   being about `divisor` screen pixels: its size in world pixels is a power of the square root of two, so the probes
+   stay put in the world while the view zooms within a half octave (otherwise each zoom step shifts them all and the
+   light flickers), changing once at each half octave. When it changes, the old grid's last result fades out over the new one
+   for 12 frames (not traced again, only its resolve pointed at the current view: the grid is fixed in the world and
+   lamps stay put), so the light does not jump. Its origin snaps to the coarsest probe spacing so probes stay put while the camera
+   moves. `radiance_grid` picks the fewest cascades that reach the largest traced light.
+2. Scene (RGBA16F): occluders and traced lights' discs are drawn apart and combined: occluder albedo with alpha 1,
+   discs with alpha 2 + their index, and an occluder within 1.75 times a light's source (`OWN_SCALE`: its own body, a
+   lamp's head or a machine, corners and all) alpha -(2 + index). A body glows with its light and blocks all others,
+   shaped as drawn. Where nothing covers a source (a light with no body) it is see-through; give a light on a solid
+   thing a source inside its body, so its body is all the cascades (and marched shadows) see of it. How far each light's body reaches from it is gathered (an atomic max) and stamped into its disc's
+   texels, so a ray crossing a disc walks a texel at a time only where it could meet the body. Consecutive lights
+   with the same position and source radius (a lamp and its cone) share a disc and add together (up to four).
+3. Jump flood from the occluders' edge texels, then a distance field (packed with the offset to the nearest surface).
+4. Cascades from the top down, pre-averaged and direction-first, each texel tracing four rays (sixteen with the
+   `bilinearFix`) by sphere tracing and merging with the cascade above. A ray hitting a light gets its radiance scaled
+   so that, unblocked, a probe receives exactly the light's analytic falloff and cone; blocked, the share of the source
+   it can see. Lights' discs do not block: a ray takes a disc's light and carries on through it (straight to its far
+   side, or to its body), so lamps do not shadow each other's light or the sky except by their bodies; a ray beginning
+   inside a disc does not take it again.
+   A ray hitting a light counts by how much of its wedge (its cascade's angle between rays) covers the true
+   disc, not the texels it was drawn into (drawn a texel wider), so a moving light does not flicker. A ray hitting an
+   occluder gets `bounce` × albedo × last frame's light map. Rays passing within 0.75 texels of a light's disc hit it
+   (so they cannot step past its edge); rays skimming an occluder carry on a texel at a time. The bilinear fix leaves out upper probes inside occluders, whose rays would run into them.
+5. Resolve into the light map in place of its ambient clear: outside occluders the cascade 0 probes (those inside solids
+   and inside lights' discs, which see only that light, left out); inside an occluder the light just past where it ends in each of a ring
+   of directions, nearer exits counting most, so a building's lit side is lit and its far edge dark. Depth and the edge come from the distance field blended between texels, and the
+   two are blended across the edge, so neither shows the GI texels. Ambient is scaled by `mix(1, sky visibility within aoRange, aoStrength)` (sky occlusion, off by default:
+   `aoStrength` 0).
+   Analytic lights, occluders, noise shadows and glows follow as before.
+
+`LightingSettings::lightOnly` (a debug view) draws the light map, then glows, in place of the scene.
+`debugView` draws what the cascades see instead of the light: 1 occluders and lights (a light's own body half red), 2 distance field, 3 traced light
+only, 4 sky visibility. `lighting_stats()` adds `radiance_width`, `radiance_height`, `radiance_cascades`,
+`radiance_lights` and `radiance_circles`.
+
+**Reuse.** When nothing the cascade passes read has changed (the grid, traced lights, circles and the occluder
+signature the window passes, a hash of its occluder sprites), encode traces nothing and only re-points the last
+result's resolve at the view (`RadianceCascades::reused`, `lighting_stats().radiance_reused`). Moving lights should be
+marched so that frames stay reusable. Probes inside occluders are never traced. `fixCascades` can limit the bilinear
+fix to the lowest cascades, but each one left out rings round lights.
+
+**Cost** (`LightRendererTest.DISABLED_ReportsGpuTimeForRadianceCascades`: 1920x1080, zoom 1.5, 60 lights, 800 circles,
+development machine; the lighting passes alone take 0.24 ms):
+
+| divisor, probe spacing | bilinear fix | ms |
+|------------------------|--------------|----|
+| 4, 2 | on  | 1.5 |
+| 2, 2 | on  | 3.0 |
+| 2, 2 | off | 1.8 |
+| 2, 1 | on  | 9.4 |
+| 2, 1 | off | 4.4 |
+
+Without the bilinear fix light leaks in blotches through small gaps between occluders, and small sources ring.
+`LightRendererTest.DISABLED_RadianceProfileDump` prints traced against analytic falloff for tuning
+(`AXENG_RADIANCE_DUMP_SOURCE`, `AXENG_RADIANCE_DUMP_NO_FIX`); `DISABLED_RadianceInteriorDump` and `DISABLED_RadianceTwoTreesDump` write close-ups of lit
+occluders (`radiance_interior_<spacing>.png`, `radiance_two_trees.png`, next to the tests);
+`DISABLED_RadianceMovingLightFlickerDump` and `DISABLED_RadianceGameFlickerDump` (`AXENG_FLICKER_ZOOM`) measure how
+much a moving light flickers beyond its analytic change; `DISABLED_RadianceNearProfileDump` prints traced against
+analytic light near a source.
+
+Gaps between occluders narrower than a few probe spacings let little light through further away, where coarse probes
+carry it.
