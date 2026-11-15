@@ -306,14 +306,21 @@ namespace
 			};
 		window_table["on_frame_image"] = on_frame_image_table;
 
-		window_table["loop_stats"] = [&app](sol::this_state lua)
+		// Fills `into` when given (a caller asking every frame keeps one table) rather than making a new table.
+		window_table["loop_stats"] = [&app](sol::this_state lua, sol::optional<sol::table> into)
 		{
 			const auto& stats{ app.window()->loop_statistics() };
-			return sol::state_view{ lua }.create_table_with(
-				"active_seconds", stats.activeSeconds, "discarded_seconds", stats.discardedSeconds,
-				"updates", stats.updates, "frames", stats.frames, "catch_up_ticks", stats.catchUpTicks,
-				"rendered_update", stats.renderedUpdate, "failed_frames", stats.failedFrames,
-				"update_ms", stats.updateMilliseconds, "render_ms", stats.renderMilliseconds);
+			sol::table result{ into ? *into : sol::state_view{ lua }.create_table() };
+			result["active_seconds"] = stats.activeSeconds;
+			result["discarded_seconds"] = stats.discardedSeconds;
+			result["updates"] = stats.updates;
+			result["frames"] = stats.frames;
+			result["catch_up_ticks"] = stats.catchUpTicks;
+			result["rendered_update"] = stats.renderedUpdate;
+			result["failed_frames"] = stats.failedFrames;
+			result["update_ms"] = stats.updateMilliseconds;
+			result["render_ms"] = stats.renderMilliseconds;
+			return result;
 		};
 
 		auto on_prepare_frame_table{ state.create_table() };

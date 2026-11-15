@@ -3,6 +3,8 @@
 #include "axeng/core/window.h"
 #include "axeng/core/shapes/shape.h"
 
+#include <memory>
+
 namespace ax
 {
     struct ShapeRendererConfig
@@ -29,6 +31,10 @@ namespace ax
         std::uint32_t indices{ 0 };
     };
 
+    // Shapes tessellated once and kept on the GPU (ShapeRenderer::build_static): world space, lit shapes that stay
+    // the same from frame to frame.
+    struct StaticShapeMesh;
+
     class ShapeRenderer
     {
     public:
@@ -53,5 +59,11 @@ namespace ax
 
         // Statistics for the most recent draw() call.
         static ShapeDrawStats last_draw_stats();
+        // Tessellates the shapes once, as draw() would at pixelScale screen pixels per unit (the zoom they should
+        // stay smooth at), into a GPU buffer of their own. Screen space shapes are left out. Null when nothing is
+        // drawn or the renderer is not initialised. Window thread only.
+        static std::shared_ptr<const StaticShapeMesh> build_static(const ShapeList& shapes, float pixelScale);
+        // Draws a static mesh with this frame's view: its opaque parts, then its translucent ones.
+        static void draw_static(wgpu::RenderPassEncoder& pass, const StaticShapeMesh& mesh);
     };
 }

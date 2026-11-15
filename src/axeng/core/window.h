@@ -15,6 +15,7 @@
 #include <optional>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <tuple>
 #include <string_view>
 #include <unordered_map>
@@ -226,6 +227,16 @@ namespace ax
 		// Soft shadows for the next frame round the sprites with sprite_flag_ao_caster (none without one). Like the noise
 		// shadow it keeps the lighting passes running by day.
 		void submit_ambient_occlusion(std::optional<AmbientOcclusion2D> occlusion);
+		// Round ambient occlusion stand-ins kept on the GPU: centre x, y and radius in world pixels each. Drawn into
+		// this frame's shadow mask (submit_ao_discs) as sprite_flag_ao_only disc sprites are: swept from where each
+		// stands out along the shadows' offset, with a silhouette three quarters of its size. Window thread only.
+		struct AoDiscBatch
+		{
+			gpu::TrackedBuffer buffer;
+			std::uint32_t count{};
+		};
+		std::shared_ptr<const AoDiscBatch> create_ao_disc_batch(std::span<const glm::vec3> discs);
+		void submit_ao_discs(std::shared_ptr<const AoDiscBatch> batch);
 		// Round occluders for the next frame's radiance cascades, swapped in like submit_lights. Sprites with
 		// sprite_flag_occluder occlude too.
 		void submit_radiance_circles(std::vector<RadianceCircle>& circles);
@@ -419,6 +430,12 @@ namespace ax
 		wgpu::RenderPipeline m_aoCasterPipeline;
 		std::array<gpu::TrackedBuffer, 4> m_aoViewportBuffers;
 		std::array<wgpu::BindGroup, 4> m_aoViewportBindGroups;
+		// The disc stand-ins (submit_ao_discs): their pipeline, and a camera (with the sweep) for each of their two slots.
+		wgpu::RenderPipeline m_aoDiscPipeline;
+		std::array<gpu::TrackedBuffer, 2> m_aoDiscViewBuffers;
+		std::array<wgpu::BindGroup, 2> m_aoDiscViewBindGroups;
+		std::vector<std::shared_ptr<const AoDiscBatch>> m_queuedAoDiscs;
+		std::vector<std::shared_ptr<const AoDiscBatch>> m_frameAoDiscs;
 		// Keyed by address, with the texture's serial: a texture freed without invalidating its entry may have its
 		// address reused by a new one, which must not draw with the old texture's bind group.
 		struct TextureBindGroup

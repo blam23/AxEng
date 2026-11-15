@@ -61,6 +61,9 @@ namespace
 	constexpr unsigned char s_sdf_shader[] = {
 #embed "../../../shaders/sdf_shader.wgsl"
 	};
+	constexpr unsigned char s_ao_discs_shader[] = {
+#embed "../../../shaders/ao_discs.wgsl"
+	};
 	constexpr unsigned char s_composite_shader[] = {
 #embed "../../../shaders/composite_shader.wgsl"
 	};
@@ -1068,6 +1071,67 @@ void ax::Window::reload_pipeline()
 			auto aoBindDesc{ vpBindDesc };
 			aoBindDesc.entries = aoEntries.data();
 			m_aoViewportBindGroups[slot] = m_device.CreateBindGroup(&aoBindDesc);
+		}
+	}
+	{
+		// The disc stand-ins: instanced capsules into the ambient occlusion masks, coverage only.
+		wgpu::ShaderModuleDescriptor discShaderDesc{};
+		wgpu::ShaderSourceWGSL discShaderCode;
+		discShaderCode.code = embedded_text(s_ao_discs_shader);
+		discShaderDesc.nextInChain = &discShaderCode;
+		const auto discShader{ m_device.CreateShaderModule(&discShaderDesc) };
+		wgpu::BindGroupLayoutEntry viewEntry{};
+		viewEntry.binding = 0;
+		viewEntry.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+		viewEntry.buffer.type = wgpu::BufferBindingType::Uniform;
+		wgpu::BindGroupLayoutDescriptor viewLayoutDesc{};
+		viewLayoutDesc.entryCount = 1;
+		viewLayoutDesc.entries = &viewEntry;
+		const auto viewLayout{ m_device.CreateBindGroupLayout(&viewLayoutDesc) };
+		wgpu::PipelineLayoutDescriptor discLayoutDesc{};
+		discLayoutDesc.bindGroupLayoutCount = 1;
+		discLayoutDesc.bindGroupLayouts = &viewLayout;
+		wgpu::VertexAttribute discAttribute{ .format = wgpu::VertexFormat::Float32x3, .offset = 0, .shaderLocation = 0 };
+		wgpu::VertexBufferLayout discBuffer{};
+		discBuffer.stepMode = wgpu::VertexStepMode::Instance;
+		discBuffer.arrayStride = sizeof(glm::vec3);
+		discBuffer.attributeCount = 1;
+		discBuffer.attributes = &discAttribute;
+		wgpu::ColorTargetState discTarget{};
+		discTarget.format = ao_mask_format;
+		discTarget.writeMask = wgpu::ColorWriteMask::All;
+		wgpu::FragmentState discFragment{};
+		discFragment.module = discShader;
+		discFragment.entryPoint = "fs_main";
+		discFragment.targetCount = 1;
+		discFragment.targets = &discTarget;
+		wgpu::RenderPipelineDescriptor discDesc{};
+		discDesc.label = "Ambient occlusion disc stand-ins";
+		discDesc.layout = m_device.CreatePipelineLayout(&discLayoutDesc);
+		discDesc.vertex.module = discShader;
+		discDesc.vertex.entryPoint = "vs_main";
+		discDesc.vertex.bufferCount = 1;
+		discDesc.vertex.buffers = &discBuffer;
+		discDesc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+		discDesc.multisample.count = 1;
+		discDesc.fragment = &discFragment;
+		m_aoDiscPipeline = m_device.CreateRenderPipeline(&discDesc);
+		for (std::size_t slot{}; slot < m_aoDiscViewBuffers.size(); ++slot)
+		{
+			wgpu::BufferDescriptor viewDesc{};
+			viewDesc.label = "AmbientOcclusionDiscViewUBO";
+			viewDesc.size = 12 * sizeof(float);
+			viewDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+			m_aoDiscViewBuffers[slot] = gpu::create_buffer(m_device, viewDesc, "Window");
+			wgpu::BindGroupEntry entry{};
+			entry.binding = 0;
+			entry.buffer = m_aoDiscViewBuffers[slot];
+			entry.size = viewDesc.size;
+			wgpu::BindGroupDescriptor bindDesc{};
+			bindDesc.layout = viewLayout;
+			bindDesc.entryCount = 1;
+			bindDesc.entries = &entry;
+			m_aoDiscViewBindGroups[slot] = m_device.CreateBindGroup(&bindDesc);
 		}
 	}
 
@@ -2668,9 +2732,9 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			}
 		} };
 
-		const auto drawOverlay{ [&](const ShapeList& shapes)
+		const auto drawOverlay{ [&](const ShapeList& shapes, const std::vector<std::shared_ptr<const StaticShapeMesh>>& statics)
 		{
-			if (shapes.empty())
+			if (shapes.empty() && statics.empty())
 				return;
 			ZoneScopedN("Window::overlay-pass");
 			wgpu::RenderPassColorAttachment overlayColorAttachment
@@ -2698,6 +2762,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			overlayPassDesc.colorAttachments = &overlayColorAttachment;
 			overlayPassDesc.depthStencilAttachment = &overlayDepthAttachment;
 			auto overlayPass = encoder.BeginRenderPass(&overlayPassDesc);
+			for (const auto& mesh : statics)
+				ShapeRenderer::draw_static(overlayPass, *mesh);
 			ShapeRenderer::draw(overlayPass, shapes);
 			overlayPass.End();
 		} };
@@ -2769,7 +2835,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			}
 			overlayShapes.resize(lit);
 		}
-		drawOverlay(overlayShapes);
+		// Static meshes are lit world shapes: they go with the lit ones.
+		drawOverlay(overlayShapes, DebugShapes::take_queued_static());
 
 		// Surfaces that look through themselves (water) go over a copy of the world drawn so far, its shapes included,
 		// before lighting.
@@ -2842,6 +2909,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_frameRadianceCircles.swap(m_queuedRadianceCircles);
 			frameNoiseShadow = std::exchange(m_queuedNoiseShadow, std::nullopt);
 			frameAmbientOcclusion = std::exchange(m_queuedAmbientOcclusion, std::nullopt);
+			m_frameAoDiscs.swap(m_queuedAoDiscs);
+			m_queuedAoDiscs.clear();
 			m_frameMistMovers.swap(m_queuedMistMovers);
 			m_queuedMistMovers.clear();
 			frameMistMask = m_mistMask;
@@ -2915,20 +2984,38 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 						pass.Draw(6, range.count, 0, range.start);
 					}
 				}, m_occluderSignature, frameAmbientOcclusion ? &*frameAmbientOcclusion : nullptr,
-				[this](wgpu::RenderPassEncoder& pass, const LightView& aoView, std::uint32_t slot)
+				[this, &frameAmbientOcclusion](wgpu::RenderPassEncoder& pass, const LightView& aoView, std::uint32_t slot)
 				{
 					// Sprites cast and mark where they stand; stand-ins cast (slot 2) apart from their silhouettes (3).
 					constexpr std::array<std::size_t, 4> lists{ 0, 0, 1, 2 };
-					if (slot >= m_aoViewportBuffers.size() || m_aoSpriteGroupRanges[lists[slot]].empty()) return;
-					const float vp[8]{ aoView.viewport.x, aoView.viewport.y, 0.0f, 0.0f,
-						aoView.cameraPosition.x, aoView.cameraPosition.y, aoView.zoom, 0.0f };
-					m_queue.WriteBuffer(m_aoViewportBuffers[slot], 0, vp, sizeof(vp));
-					pass.SetPipeline(m_aoCasterPipeline);
-					pass.SetBindGroup(1, m_aoViewportBindGroups[slot]);
-					for (const auto& range : m_aoSpriteGroupRanges[lists[slot]])
+					if (slot >= m_aoViewportBuffers.size()) return;
+					if (!m_aoSpriteGroupRanges[lists[slot]].empty())
 					{
-						pass.SetBindGroup(0, get_texture_bind_group(range.tex));
-						pass.Draw(6, range.count, 0, range.start);
+						const float vp[8]{ aoView.viewport.x, aoView.viewport.y, 0.0f, 0.0f,
+							aoView.cameraPosition.x, aoView.cameraPosition.y, aoView.zoom, 0.0f };
+						m_queue.WriteBuffer(m_aoViewportBuffers[slot], 0, vp, sizeof(vp));
+						pass.SetPipeline(m_aoCasterPipeline);
+						pass.SetBindGroup(1, m_aoViewportBindGroups[slot]);
+						for (const auto& range : m_aoSpriteGroupRanges[lists[slot]])
+						{
+							pass.SetBindGroup(0, get_texture_bind_group(range.tex));
+							pass.Draw(6, range.count, 0, range.start);
+						}
+					}
+					// The disc stand-ins: swept along the offset for their shadow, three quarters size for their silhouettes.
+					// A disc sprite is 31.5 pixels across its 64 and covers where it is half opaque.
+					if ((slot != 2 && slot != 3) || m_frameAoDiscs.empty()) return;
+					const auto sweep{ slot == 2 && frameAmbientOcclusion ? frameAmbientOcclusion->offset : glm::vec2{} };
+					const float view[12]{ aoView.viewport.x, aoView.viewport.y, 0.0f, 0.0f,
+						aoView.cameraPosition.x, aoView.cameraPosition.y, aoView.zoom, 0.0f,
+						sweep.x, sweep.y, (slot == 2 ? 1.0f : 0.75f) * 31.5f / 32.0f, 0.0f };
+					m_queue.WriteBuffer(m_aoDiscViewBuffers[slot - 2], 0, view, sizeof(view));
+					pass.SetPipeline(m_aoDiscPipeline);
+					pass.SetBindGroup(0, m_aoDiscViewBindGroups[slot - 2]);
+					for (const auto& batch : m_frameAoDiscs)
+					{
+						pass.SetVertexBuffer(0, batch->buffer, 0, static_cast<std::uint64_t>(batch->count) * sizeof(glm::vec3));
+						pass.Draw(6, batch->count);
 					}
 				}, frameMist ? &*frameMist : nullptr);
 
@@ -2947,7 +3034,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				[](const auto& batch) { return batch->unlit() && batch->ready() && batch->visible(); }) };
 			if (!m_unlitSpriteGroupRanges.empty() || unlitBatches)
 				encodeTransparent(SpriteLayer::Unlit);
-			drawOverlay(m_unlitOverlayShapes);
+			drawOverlay(m_unlitOverlayShapes, {});
 			if (!interfaceActive && !m_screenSpaceSpriteGroupRanges.empty())
 			{
 				ZoneScopedN("Window::screen-space-sprites");
@@ -3214,11 +3301,13 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 		ensure_sdf_uniform_capacity(static_cast<uint32_t>(sdfSpriteCount));
 		m_spriteGroupRanges.reserve(m_spriteGroups.size());
 		m_screenSpaceSpriteGroupRanges.reserve(m_spriteGroups.size());
+		// Every group's instances go into one array per pipeline, uploaded with a single write after the groups.
+		m_spriteUploadData.clear();
+		m_sdfUploadData.clear();
 		m_spriteUploadData.reserve(spriteCount);
+		m_sdfUploadData.reserve(sdfSpriteCount);
 
-		uint32_t instanceCursor = 0;
-		uint32_t sdfInstanceCursor = 0;
-		auto uploadGroup = [this, &instanceCursor, &sdfInstanceCursor, splitUnlit](Texture* tex, const std::vector<const SpriteDefinition*>& activeSprites, const std::vector<const SpriteDefinition*>* pendingSprites)
+		auto uploadGroup = [this, splitUnlit](Texture* tex, const std::vector<const SpriteDefinition*>& activeSprites, const std::vector<const SpriteDefinition*>* pendingSprites)
 		{
 			ZoneScopedN("Window::sprite-upload-group");
 			m_spriteUploadSources.clear();
@@ -3260,15 +3349,12 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 				}
 			}
 
-			auto& cursor{ distanceField ? sdfInstanceCursor : instanceCursor };
-			m_spriteUploadData.clear();
-			m_sdfUploadData.clear();
 			const auto append = [&](const std::vector<const SpriteDefinition*>& sprites,
 				std::vector<SpriteGroupRange>& ranges)
 			{
 				if (sprites.empty())
 					return;
-				ranges.push_back({ tex, cursor + static_cast<uint32_t>(distanceField ? m_sdfUploadData.size() : m_spriteUploadData.size()),
+				ranges.push_back({ tex, static_cast<uint32_t>(distanceField ? m_sdfUploadData.size() : m_spriteUploadData.size()),
 					static_cast<uint32_t>(sprites.size()), distanceField });
 				for (const auto* sprite : sprites)
 				{
@@ -3281,6 +3367,8 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 			append(m_litUploadScratch, m_spriteGroupRanges);
 			append(m_unlitUploadScratch, m_unlitSpriteGroupRanges);
 			append(m_screenSpaceUploadScratch, m_screenSpaceSpriteGroupRanges);
+			// Occluders are never distance field sprites, so theirs are the ordinary instances appended next.
+			const auto occluderStart{ m_spriteUploadData.size() };
 			append(m_occluderUploadScratch, m_occluderSpriteGroupRanges);
 			for (std::size_t set{}; set < m_aoUploadScratch.size(); ++set)
 			{
@@ -3289,25 +3377,17 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 			}
 			// What the shadows' occluders are this frame, so unchanged ones need not be traced again.
 			m_occluderSprites += static_cast<std::uint32_t>(m_occluderUploadScratch.size());
-			for (const auto* sprite : m_occluderUploadScratch)
+			if (!m_occluderUploadScratch.empty())
 			{
-				const auto data{ tex->gpu_data_for(sprite->gpuData) };
-				const auto* bytes{ reinterpret_cast<const unsigned char*>(&data) };
-				for (std::size_t index{}; index < sizeof(data); ++index)
-					m_occluderSignature = (m_occluderSignature ^ bytes[index]) * 1099511628211ull;
-			}
-
-			if (distanceField)
-			{
-				m_queue.WriteBuffer(m_sdfUniforms, static_cast<uint64_t>(cursor) * SdfSpriteGpuData::gpuDataSize,
-					m_sdfUploadData.data(), m_sdfUploadData.size() * SdfSpriteGpuData::gpuDataSize);
-				cursor += static_cast<uint32_t>(m_sdfUploadData.size());
-			}
-			else
-			{
-				m_queue.WriteBuffer(m_uniforms, static_cast<uint64_t>(cursor) * m_uniformStride,
-					m_spriteUploadData.data(), m_spriteUploadData.size() * m_uniformStride);
-				cursor += static_cast<uint32_t>(m_spriteUploadData.size());
+				static_assert(sizeof(SpriteGpuData) % sizeof(std::uint64_t) == 0);
+				const auto* bytes{ reinterpret_cast<const unsigned char*>(m_spriteUploadData.data() + occluderStart) };
+				const auto byteCount{ m_occluderUploadScratch.size() * sizeof(SpriteGpuData) };
+				for (std::size_t offset{}; offset < byteCount; offset += sizeof(std::uint64_t))
+				{
+					std::uint64_t word{};
+					std::memcpy(&word, bytes + offset, sizeof(word));
+					m_occluderSignature = (m_occluderSignature ^ word) * 1099511628211ull;
+				}
 			}
 		};
 
@@ -3322,6 +3402,10 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 			if (m_spriteGroups.find(group.first) == m_spriteGroups.end())
 				uploadGroup(group.first, emptyGroup, &group.second);
 		}
+		if (!m_spriteUploadData.empty())
+			m_queue.WriteBuffer(m_uniforms, 0, m_spriteUploadData.data(), m_spriteUploadData.size() * m_uniformStride);
+		if (!m_sdfUploadData.empty())
+			m_queue.WriteBuffer(m_sdfUniforms, 0, m_sdfUploadData.data(), m_sdfUploadData.size() * SdfSpriteGpuData::gpuDataSize);
 
 		draw_sprite_batches(pass, m_pipeline, m_sdfPipeline, splitUnlit ? SpriteLayer::Lit : SpriteLayer::All);
 	}
@@ -3443,6 +3527,27 @@ void ax::Window::submit_ambient_occlusion(std::optional<AmbientOcclusion2D> occl
 {
 	std::lock_guard lock{ m_lightingMutex };
 	m_queuedAmbientOcclusion = std::move(occlusion);
+}
+
+std::shared_ptr<const ax::Window::AoDiscBatch> ax::Window::create_ao_disc_batch(std::span<const glm::vec3> discs)
+{
+	if (discs.empty()) return nullptr;
+	auto batch{ std::make_shared<AoDiscBatch>() };
+	wgpu::BufferDescriptor desc{};
+	desc.label = "AmbientOcclusionDiscs";
+	desc.size = discs.size_bytes();
+	desc.usage = wgpu::BufferUsage::Vertex | wgpu::BufferUsage::CopyDst;
+	batch->buffer = gpu::create_buffer(m_device, desc, "Lighting");
+	m_queue.WriteBuffer(batch->buffer, 0, discs.data(), discs.size_bytes());
+	batch->count = static_cast<std::uint32_t>(discs.size());
+	return batch;
+}
+
+void ax::Window::submit_ao_discs(std::shared_ptr<const AoDiscBatch> batch)
+{
+	if (!batch || batch->count == 0) return;
+	std::lock_guard lock{ m_lightingMutex };
+	m_queuedAoDiscs.push_back(std::move(batch));
 }
 
 void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)

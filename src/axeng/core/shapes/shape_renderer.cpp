@@ -5,6 +5,7 @@
 #include "spdlog/spdlog.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -83,10 +84,14 @@ namespace
 		Mesh opaque;
 		Mesh translucent;
 		std::vector<std::size_t> order;
+		// Each ordered shape's z with its index, sorted without visiting the shapes again.
+		std::vector<std::pair<float, std::size_t>> depths;
 		std::vector<std::uint32_t> rebased;
 		Loop outer;
 		Loop inner;
 		std::vector<std::uint32_t> triangulation;
+		// Unit circles by segment count, the points append_arc would compute for a full turn from angle 0.
+		std::array<std::vector<glm::vec2>, s_max_circle_segments + 1> unitCircles;
 
 		ax::ShapeDrawStats stats{};
 	};
@@ -129,6 +134,12 @@ namespace
 
 	void transform_loop(Loop& loop, const glm::vec2& pivot, float rotation)
 	{
+		if (rotation == 0.0f)
+		{
+			for (auto& p : loop)
+				p += pivot;
+			return;
+		}
 		const float c{ std::cos(rotation) };
 		const float s{ std::sin(rotation) };
 		for (auto& p : loop)
@@ -330,17 +341,48 @@ namespace
 		glm::vec4 clipRect;
 	};
 
+	// A full turn of `segments` from angle 0 at unit radius, computed as append_arc does, cached by segment count.
+	const std::vector<glm::vec2>& unit_circle(State& state, std::uint32_t segments)
+	{
+		auto& points{ state.unitCircles[segments] };
+		if (points.empty())
+		{
+			const float sweep{ 2.0f * s_pi };
+			points.reserve(segments + 1);
+			for (std::uint32_t i = 0; i <= segments; ++i)
+			{
+				const float a{ 0.0f + sweep * static_cast<float>(i) / static_cast<float>(segments) };
+				points.push_back(glm::vec2{ std::cos(a), std::sin(a) });
+			}
+		}
+		return points;
+	}
+
+	// A closed ellipse's boundary (no repeated end point), from the cached unit circle where the count allows.
+	void append_ellipse(State& state, Loop& loop, glm::vec2 radii, std::uint32_t segments)
+	{
+		if (segments > s_max_circle_segments)
+		{
+			append_arc(loop, {}, radii, 0.0f, 2.0f * s_pi, segments);
+			loop.pop_back();
+			return;
+		}
+		const auto& circle{ unit_circle(state, segments) };
+		for (std::uint32_t i = 0; i < segments; ++i)
+			loop.push_back(glm::vec2{} + circle[i] * radii);
+	}
+
 	// Builds the boundary of a shape in final (rotated, positioned) pixel coordinates.
 	struct LoopBuilder
 	{
 		float pixelScale;
 		Loop& loop;
+		State& state;
 
 		void operator()(const ax::Circle& s) const
 		{
 			const auto segments{ s.segments > 0 ? std::max(3u, s.segments) : full_circle_segments(s.radius * pixelScale) };
-			append_arc(loop, {}, glm::vec2{ s.radius }, 0.0f, 2.0f * s_pi, segments);
-			loop.pop_back();
+			append_ellipse(state, loop, glm::vec2{ s.radius }, segments);
 			transform_loop(loop, s.position, s.rotation);
 		}
 
@@ -348,8 +390,7 @@ namespace
 		{
 			const float radius{ std::max(std::abs(s.radii.x), std::abs(s.radii.y)) };
 			const auto segments{ s.segments > 0 ? std::max(3u, s.segments) : full_circle_segments(radius * pixelScale) };
-			append_arc(loop, {}, s.radii, 0.0f, 2.0f * s_pi, segments);
-			loop.pop_back();
+			append_ellipse(state, loop, s.radii, segments);
 			transform_loop(loop, s.position, s.rotation);
 		}
 
@@ -514,7 +555,7 @@ namespace
 		const float pixelScale{ params.screenSpace ? 1.0f : std::max(state.view.zoom, 1e-3f) };
 
 		state.outer.clear();
-		std::visit(LoopBuilder{ pixelScale, state.outer }, shape);
+		std::visit(LoopBuilder{ pixelScale, state.outer, state }, shape);
 		if (!normalise_loop(state.outer))
 			return;
 
@@ -845,23 +886,40 @@ void ax::ShapeRenderer::draw(wgpu::RenderPassEncoder& pass, const ShapeList& sha
 				});
 			held.resize(count);
 		} };
-	hold(s_screen_capture, ax::shape_screen_space);
-	hold(s_unlit_capture, ax::shape_unlit);
+	{
+		ZoneScopedN("Shapes capture");
+		hold(s_screen_capture, ax::shape_screen_space);
+		hold(s_unlit_capture, ax::shape_unlit);
+	}
 	if (state.order.empty())
 		return;
-	std::stable_sort(state.order.begin(), state.order.end(), [&shapes](std::size_t a, std::size_t b)
-		{
-			const auto za{ std::visit([](const auto& s) { return s.z; }, shapes[a]) };
-			const auto zb{ std::visit([](const auto& s) { return s.z; }, shapes[b]) };
-			return za < zb;
-		});
+#ifdef TRACY_ENABLE
+	TracyPlot("Shapes per draw", static_cast<std::int64_t>(state.order.size()));
+#endif
+	ZoneNamedN(sortZone, "Shapes sort", true);
+	state.depths.clear();
+	state.depths.reserve(state.order.size());
+	for (const auto i : state.order)
+		state.depths.emplace_back(std::visit([](const auto& s) { return s.z; }, shapes[i]), i);
+	// Shapes usually arrive mostly in z order; a stable sort on (z, index) keys keeps ties in submission order.
+	const auto byDepth{ [](const auto& a, const auto& b) { return a.first < b.first; } };
+	if (!std::ranges::is_sorted(state.depths, byDepth))
+	{
+		std::ranges::stable_sort(state.depths, byDepth);
+		for (std::size_t i{}; i < state.depths.size(); ++i)
+			state.order[i] = state.depths[i].second;
+	}
 
 	state.opaque.clear();
 	state.translucent.clear();
-	for (const auto i : state.order)
-		tessellate(state, shapes[i]);
+	{
+		ZoneScopedN("Shapes tessellate");
+		for (const auto i : state.order)
+			tessellate(state, shapes[i]);
+	}
 
 	// Opaque first so translucent geometry can blend over it regardless of submission order.
+	ZoneNamedN(drawZone, "Shapes upload and draw", true);
 	draw_mesh(state, pass, state.opaque, state.opaquePipeline);
 	draw_mesh(state, pass, state.translucent, state.translucentPipeline);
 }
@@ -881,6 +939,95 @@ void ax::ShapeRenderer::set_unlit_capture(UnlitShapeCapture* capture) noexcept
 void ax::ShapeRenderer::set_screen_capture(UnlitShapeCapture* capture) noexcept
 {
 	s_screen_capture = capture;
+}
+
+struct ax::StaticShapeMesh
+{
+	ax::gpu::TrackedBuffer buffer;
+	struct Part
+	{
+		std::uint64_t vertexOffset{}, vertexBytes{}, indexOffset{}, indexBytes{};
+		std::uint32_t indexCount{};
+	};
+	Part opaque{}, translucent{};
+};
+
+std::shared_ptr<const ax::StaticShapeMesh> ax::ShapeRenderer::build_static(const ShapeList& shapes, float pixelScale)
+{
+	ZoneScopedN("Shapes build static mesh");
+	if (!s_state || shapes.empty() || !std::isfinite(pixelScale) || pixelScale <= 0.0f)
+		return nullptr;
+	auto& state{ *s_state };
+	// Back to front as draw() orders them; ties keep their order.
+	std::vector<std::size_t> order(shapes.size());
+	std::iota(order.begin(), order.end(), std::size_t{ 0 });
+	std::stable_sort(order.begin(), order.end(), [&shapes](std::size_t a, std::size_t b)
+		{
+			return std::visit([](const auto& s) { return s.z; }, shapes[a]) < std::visit([](const auto& s) { return s.z; }, shapes[b]);
+		});
+	// Tessellated into the renderer's own meshes (as draw() does) at the zoom asked for, which are then put back.
+	const auto view{ state.view };
+	auto frameOpaque{ std::move(state.opaque) }, frameTranslucent{ std::move(state.translucent) };
+	state.opaque.clear();
+	state.translucent.clear();
+	state.view.zoom = pixelScale;
+	for (const auto i : order)
+		if (!ax::shape_screen_space(shapes[i]))
+			tessellate(state, shapes[i]);
+	const auto opaque{ std::move(state.opaque) }, translucent{ std::move(state.translucent) };
+	state.opaque = std::move(frameOpaque);
+	state.translucent = std::move(frameTranslucent);
+	state.view = view;
+
+	auto mesh{ std::make_shared<StaticShapeMesh>() };
+	std::uint64_t size{};
+	const auto place = [&size](const Mesh& from, StaticShapeMesh::Part& part)
+	{
+		part.vertexOffset = size;
+		part.vertexBytes = from.vertices.size() * sizeof(ShapeVertex);
+		part.indexOffset = part.vertexOffset + part.vertexBytes;
+		part.indexBytes = from.indices.size() * sizeof(std::uint32_t);
+		part.indexCount = static_cast<std::uint32_t>(from.indices.size());
+		size = part.indexOffset + part.indexBytes;
+	};
+	place(opaque, mesh->opaque);
+	place(translucent, mesh->translucent);
+	if (size == 0)
+		return nullptr;
+	wgpu::BufferDescriptor desc{};
+	desc.label = "StaticShapes";
+	desc.size = size;
+	desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Vertex | wgpu::BufferUsage::Index;
+	mesh->buffer = ax::gpu::create_buffer(state.device, desc, "Shapes");
+	const auto upload = [&](const Mesh& from, const StaticShapeMesh::Part& part)
+	{
+		if (part.vertexBytes > 0)
+			state.queue.WriteBuffer(mesh->buffer, part.vertexOffset, from.vertices.data(), part.vertexBytes);
+		if (part.indexBytes > 0)
+			state.queue.WriteBuffer(mesh->buffer, part.indexOffset, from.indices.data(), part.indexBytes);
+	};
+	upload(opaque, mesh->opaque);
+	upload(translucent, mesh->translucent);
+	return mesh;
+}
+
+void ax::ShapeRenderer::draw_static(wgpu::RenderPassEncoder& pass, const StaticShapeMesh& mesh)
+{
+	if (!s_state)
+		return;
+	auto& state{ *s_state };
+	const auto drawPart = [&](const StaticShapeMesh::Part& part, const wgpu::RenderPipeline& pipeline)
+	{
+		if (part.indexCount == 0)
+			return;
+		pass.SetPipeline(pipeline);
+		pass.SetBindGroup(0, state.viewBindGroup);
+		pass.SetVertexBuffer(0, mesh.buffer, part.vertexOffset, part.vertexBytes);
+		pass.SetIndexBuffer(mesh.buffer, wgpu::IndexFormat::Uint32, part.indexOffset, part.indexBytes);
+		pass.DrawIndexed(part.indexCount);
+	};
+	drawPart(mesh.opaque, state.opaquePipeline);
+	drawPart(mesh.translucent, state.translucentPipeline);
 }
 
 ax::ShapeDrawStats ax::ShapeRenderer::last_draw_stats()

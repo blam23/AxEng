@@ -5,6 +5,7 @@
 namespace
 {
 	ax::ShapeList s_shapes;
+	std::vector<std::shared_ptr<const ax::StaticShapeMesh>> s_static;
 	std::mutex s_shapes_mutex;
 }
 
@@ -54,6 +55,23 @@ void ax::DebugShapes::clear()
 {
 	std::lock_guard lock{ s_shapes_mutex };
 	s_shapes.clear();
+	s_static.clear();
+}
+
+void ax::DebugShapes::add_static(std::shared_ptr<const StaticShapeMesh> mesh)
+{
+	if (!mesh)
+		return;
+	std::lock_guard lock{ s_shapes_mutex };
+	s_static.push_back(std::move(mesh));
+}
+
+std::vector<std::shared_ptr<const ax::StaticShapeMesh>> ax::DebugShapes::take_queued_static()
+{
+	std::lock_guard lock{ s_shapes_mutex };
+	auto meshes{ std::move(s_static) };
+	s_static.clear();
+	return meshes;
 }
 
 ax::ShapeList ax::DebugShapes::take_queued()

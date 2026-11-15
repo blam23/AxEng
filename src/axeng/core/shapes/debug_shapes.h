@@ -25,5 +25,8 @@ namespace ax
 		static void clear();
 		static ShapeList take_queued();
 		static ShapeList queued();
+		// Static meshes (ShapeRenderer::build_static) to draw this frame with the world space shapes, under them.
+		static void add_static(std::shared_ptr<const StaticShapeMesh> mesh);
+		static std::vector<std::shared_ptr<const StaticShapeMesh>> take_queued_static();
 	};
 }

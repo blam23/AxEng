@@ -1591,3 +1591,32 @@ TEST_F(ShapeRendererTest, UnlitCaptureHoldsBackUnlitAndScreenSpaceShapes)
 	ASSERT_EQ(captured.calls().size(), 1u);
 	EXPECT_EQ(captured.calls()[0].data(), storage);
 }
+
+//
+// Static meshes
+//
+
+TEST_F(ShapeRendererTest, StaticMeshDrawsWhatTheShapesWould)
+{
+	// World space, opaque and translucent, in z order: the same pixels from the mesh as from draw().
+	const ax::ShapeView view{ .viewport = { static_cast<float>(s_size), static_cast<float>(s_size) } };
+	const ax::ShapeList shapes{
+		ax::Circle{ .position = { 50, 54 }, .radius = 18, .fill = s_red, .z = 1.0f },
+		ax::Rectangle{ .position = { 60, 60 }, .size = { 30, 20 }, .fill = { 0.0f, 1.0f, 0.0f, 0.5f },
+			.outline = { .colour = { 0.0f, 0.0f, 1.0f, 1.0f }, .thickness = 2.0f }, .z = 2.0f },
+		ax::Line{ .start = { 20, 100 }, .end = { 110, 100 }, .thickness = 3.0f, .fill = s_red, .z = 3.0f },
+	};
+	const auto expected{ render(shapes, view) };
+	const auto mesh{ ax::ShapeRenderer::build_static(shapes, 1.0f) };
+	ASSERT_NE(mesh, nullptr);
+	const auto actual{ render_pass([&mesh](wgpu::RenderPassEncoder& pass) { ax::ShapeRenderer::draw_static(pass, *mesh); }, view) };
+	EXPECT_EQ(actual.rgba, expected.rgba);
+}
+
+TEST_F(ShapeRendererTest, StaticMeshOfNothingIsNull)
+{
+	EXPECT_EQ(ax::ShapeRenderer::build_static({}, 1.0f), nullptr);
+	// Screen space shapes are left out of static meshes.
+	EXPECT_EQ(ax::ShapeRenderer::build_static({ ax::Circle{ .position = { 10, 10 }, .radius = 5, .fill = s_red,
+		.screenSpace = true } }, 1.0f), nullptr);
+}
