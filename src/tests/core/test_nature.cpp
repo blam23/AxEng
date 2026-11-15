@@ -4,7 +4,9 @@
 #include "axeng/core/audio/nature.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <cstdlib>
 #include <string>
@@ -202,5 +204,21 @@ TEST(Nature, DISABLED_WriteWavs)
 			for (std::uint64_t seed{ 1 }; seed <= 3; ++seed)
 				write(std::string{ nature_kind_name(kind) } + (species > 1 ? "_" + std::to_string(s) : "") + "_" + std::to_string(seed),
 					render(kind, seed, nature_kind_is_bed(kind), static_cast<std::uint8_t>(s)));
+	}
+}
+
+TEST(Nature, DISABLED_RenderCost)
+{
+	// Prints how long each kind takes to render, per second of sound, for the plan's numbers.
+	for (std::size_t index{}; index < static_cast<std::size_t>(NatureKind::count); ++index)
+	{
+		const auto kind{ static_cast<NatureKind>(index) };
+		const auto started{ std::chrono::steady_clock::now() };
+		std::size_t samples{};
+		for (std::uint64_t seed{ 1 }; seed <= 4; ++seed)
+			samples += render_nature({ .kind = kind, .reverb = 0.15f }, { .loop = nature_kind_is_bed(kind), .seed = seed }).size();
+		const auto ms{ std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() };
+		std::printf("%-12s %6.2f ms per second of sound%c", std::string{ nature_kind_name(kind) }.c_str(),
+			ms / (static_cast<double>(samples) / sfx_sample_rate), 10);
 	}
 }
