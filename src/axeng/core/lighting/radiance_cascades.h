@@ -6,8 +6,10 @@
 #include <glm/glm.hpp>
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -97,6 +99,13 @@ namespace ax
 	// texelsPerPixel above 0 uses that density instead of the one the view's zoom picks (still coarsened if too many).
 	RadianceGrid radiance_grid(const LightView&, const RadianceSettings&, float reach, float texelsPerPixel = 0.0f) noexcept;
 
+	// The most texels (width * height) a grid may have before radiance_grid coarsens it. Starts at a per-platform cap
+	// (lower on the web) and is lowered for the rest of the run when the GPU runs out of memory for the targets.
+	std::uint64_t radiance_texel_budget() noexcept;
+	void set_radiance_texel_budget(std::uint64_t texels) noexcept;
+	// Back to the platform's cap.
+	void reset_radiance_texel_budget() noexcept;
+
 	// Whether the light goes through the cascades on this grid: one that casts shadows, is positive, omni or a cone (not
 	// a beam), large enough and inside the grid.
 	bool radiance_traces(const Light2D&, const RadianceGrid&, const RadianceSettings&) noexcept;
@@ -173,6 +182,8 @@ namespace ax
 			wgpu::TextureView view{};
 		};
 		bool ensure_targets(const wgpu::Device&, std::uint32_t width, std::uint32_t height, std::uint32_t probeSpacing);
+		// Destroys the targets at once (not waiting for gpu::destroy_released) so their memory is free for new ones.
+		void release_targets();
 		void ensure_storage(const wgpu::Device&, gpu::TrackedBuffer&, std::size_t& capacity, std::size_t bytes, const char* label);
 		enum class Bodies { none, write, read };
 		wgpu::BindGroup bind(const wgpu::Device&, const wgpu::TextureView& a, const wgpu::TextureView& b,
@@ -190,6 +201,8 @@ namespace ax
 		// Occluders and lights' discs are drawn apart and combined into the scene.
 		Target m_occluders{}, m_discs{}, m_scene{}, m_jump[2]{}, m_distance{}, m_cascade[2]{};
 		Target m_dummyFloat{}, m_dummyUint{};
+		// Set (from an error scope's callback, maybe a frame or two later) when the GPU had no memory for the targets.
+		std::shared_ptr<std::atomic<bool>> m_outOfMemory{ std::make_shared<std::atomic<bool>>(false) };
 		std::uint32_t m_width{}, m_height{}, m_probeSpacing{};
 		wgpu::BindGroup m_resolveGroup{};
 		std::uint32_t m_resolveOffset{};

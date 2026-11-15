@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -55,14 +56,16 @@ namespace ax::gpu
 
 	namespace detail
 	{
-		// Unregisters the allocation when the last copy of the owning handle is destroyed.
+		// Unregisters the allocation when the last copy of the owning handle is destroyed, and queues the object to be
+		// destroyed after the frame's submit (see destroy_released).
 		struct Token
 		{
-			explicit Token(std::uint64_t id) : id(id) {}
+			Token(std::uint64_t id, std::function<void()> destroy) : id(id), destroy(std::move(destroy)) {}
 			~Token();
 			Token(const Token&) = delete;
 			Token& operator=(const Token&) = delete;
 			std::uint64_t id;
+			std::function<void()> destroy;
 		};
 	}
 
@@ -86,6 +89,8 @@ namespace ax::gpu
 
 		Tracked& operator=(const Handle& handle)
 		{
+			if (handle.Get() == Handle::Get())
+				return *this;
 			Handle::operator=(handle);
 			m_token.reset();
 			return *this;
@@ -101,4 +106,11 @@ namespace ax::gpu
 	// The descriptor's label is the displayed name; always set one.
 	TrackedBuffer create_buffer(const wgpu::Device& device, const wgpu::BufferDescriptor& descriptor, std::string_view category);
 	TrackedTexture create_texture(const wgpu::Device& device, const wgpu::TextureDescriptor& descriptor, std::string_view category);
+
+	// Destroys the textures whose last tracked handle went since the last call. Call after the frame's submits: released
+	// objects are otherwise freed only when their last reference goes, which on the web waits on the JS garbage
+	// collector, so resizing targets (fullscreen, zooming) can run the GPU out of memory before it runs.
+	void destroy_released();
+	// Released textures waiting for destroy_released.
+	std::size_t pending_destroys();
 }

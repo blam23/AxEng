@@ -3,6 +3,7 @@
 #include "axeng/core/windows_include.h"
 
 #include "axeng/core/lighting/light_renderer.h"
+#include "axeng/debug/gpu_memory.h"
 #include "axeng/core/particles/particle_system.h"
 #include "axeng/core/texture.h"
 
@@ -319,6 +320,31 @@ TEST(LightingActive, RunsForATonemapThatChangesFullLight)
 	EXPECT_FALSE(ax::lighting_active(lighting, 0, 0));
 	lighting.tonemap.white = 3.0f;
 	EXPECT_TRUE(ax::lighting_active(lighting, 0, 0));
+}
+
+TEST_F(LightRendererTest, ReleasedTexturesAreDestroyedAfterTheFrame)
+{
+	// On the web a released texture's memory waits on the garbage collector unless it is destroyed.
+	ax::gpu::destroy_released();
+	wgpu::TextureDescriptor desc{};
+	desc.label = "Destroy test";
+	desc.size = { 4, 4 };
+	desc.format = wgpu::TextureFormat::RGBA8Unorm;
+	desc.usage = wgpu::TextureUsage::TextureBinding;
+	auto texture{ ax::gpu::create_texture(s_device, desc, "Test") };
+	auto copy{ texture };
+	texture = nullptr;
+	EXPECT_EQ(ax::gpu::pending_destroys(), 0u);
+	copy = nullptr;
+	EXPECT_EQ(ax::gpu::pending_destroys(), 1u);
+	s_device.PushErrorScope(wgpu::ErrorFilter::Validation);
+	ax::gpu::destroy_released();
+	EXPECT_EQ(ax::gpu::pending_destroys(), 0u);
+	bool failed{};
+	s_instance.WaitAny(s_device.PopErrorScope(wgpu::CallbackMode::WaitAnyOnly,
+		[&failed](wgpu::PopErrorScopeStatus, wgpu::ErrorType type, wgpu::StringView) { failed = type != wgpu::ErrorType::NoError; }),
+		UINT64_MAX);
+	EXPECT_FALSE(failed);
 }
 
 TEST_F(LightRendererTest, ReinhardTonemapRollsOffABrightLight)
@@ -714,6 +740,24 @@ TEST(RadianceGrid, CoversTheViewAndMarginSnappedToTheCoarsestProbes)
 	auto moved{ view };
 	moved.cameraPosition.x += 0.25f;
 	EXPECT_EQ(ax::radiance_grid(moved, radiance, 100.0f).origin, grid.origin);
+}
+
+TEST(RadianceGrid, CoarsensToStayWithinTheTexelBudget)
+{
+	// A large high-DPI fullscreen view with its margin: too many texels at the zoom's density.
+	const ax::LightView view{ .viewport = { 3840.0f, 2160.0f }, .zoom = 2.0f };
+	const ax::RadianceSettings radiance{ .enabled = true, .divisor = 1, .probeSpacing = 1, .margin = 320.0f };
+	ax::reset_radiance_texel_budget();
+	const auto full{ ax::radiance_grid(view, radiance, 100.0f) };
+	EXPECT_LE(static_cast<std::uint64_t>(full.width) * full.height, ax::radiance_texel_budget());
+	// After running out of memory the budget is lower and so is the grid, coarser but still covering the view.
+	ax::set_radiance_texel_budget(ax::radiance_texel_budget() / 4);
+	const auto low{ ax::radiance_grid(view, radiance, 100.0f) };
+	EXPECT_LE(static_cast<std::uint64_t>(low.width) * low.height, ax::radiance_texel_budget());
+	EXPECT_LT(low.texelsPerPixel, full.texelsPerPixel);
+	EXPECT_LE(low.world_min().x, -960.0f);
+	EXPECT_GE(low.world_max().x, 960.0f);
+	ax::reset_radiance_texel_budget();
 }
 
 TEST(RadianceGrid, TexelsStayFixedInTheWorldWhileZooming)

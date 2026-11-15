@@ -3087,6 +3087,9 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				frameImageCopyQueued = true;
 			}
 
+			// Every submit of the frame is in: what was released during it can be destroyed now.
+			gpu::destroy_released();
+
 			{
 				ZoneScopedN("Window::present");
 #ifndef __EMSCRIPTEN__

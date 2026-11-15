@@ -23,6 +23,16 @@ namespace
 	constexpr auto s_cascade_format{ wgpu::TextureFormat::RGBA16Float };
 	constexpr std::uint32_t s_max_cascades{ 7 };
 	constexpr std::uint32_t s_max_texels{ 4096 };
+	// The most texels in a grid, about 45 bytes each over the targets (and a second set while the density fades): the
+	// browser's GPU process gives far less memory than native.
+#ifdef __EMSCRIPTEN__
+	constexpr std::uint64_t s_max_area{ 2560ull * 1600ull };
+#else
+	constexpr std::uint64_t s_max_area{ 4096ull * 2304ull };
+#endif
+	// Out of memory never lowers the budget below this.
+	constexpr std::uint64_t s_min_area{ 512ull * 512ull };
+	std::atomic<std::uint64_t> s_area_budget{ s_max_area };
 	// Uniform slots, one per pass, at the minimum dynamic offset alignment.
 	constexpr std::uint32_t s_slot_stride{ 256 };
 	constexpr std::uint32_t s_slots{ 32 };
@@ -57,6 +67,21 @@ namespace
 	}
 }
 
+std::uint64_t ax::radiance_texel_budget() noexcept
+{
+	return s_area_budget.load(std::memory_order_relaxed);
+}
+
+void ax::set_radiance_texel_budget(std::uint64_t texels) noexcept
+{
+	s_area_budget.store(std::clamp(texels, s_min_area, s_max_area), std::memory_order_relaxed);
+}
+
+void ax::reset_radiance_texel_budget() noexcept
+{
+	s_area_budget.store(s_max_area, std::memory_order_relaxed);
+}
+
 ax::LightView ax::RadianceGrid::view() const noexcept
 {
 	const glm::vec2 size{ static_cast<float>(width), static_cast<float>(height) };
@@ -83,7 +108,9 @@ ax::RadianceGrid ax::radiance_grid(const LightView& view, const RadianceSettings
 	auto high{ view.cameraPosition + halfView + margin };
 	// Too many texels: coarsen the grid rather than drop the margin.
 	const auto texels{ (high - low) * grid.texelsPerPixel };
-	const auto over{ std::max(texels.x, texels.y) / static_cast<float>(s_max_texels - 128) };
+	// (Within a side or the area, less a little for the snapping's padding.)
+	const auto areaOver{ std::sqrt(texels.x * texels.y / static_cast<float>(radiance_texel_budget())) * 1.05f };
+	const auto over{ std::max(std::max(texels.x, texels.y) / static_cast<float>(s_max_texels - 128), areaOver) };
 	if (over > 1.0f)
 		grid.texelsPerPixel /= std::exp2(std::ceil(std::log2(over) * 2.0f) * 0.5f);
 
@@ -295,6 +322,17 @@ void ax::RadianceCascades::ensure_storage(const wgpu::Device& device, gpu::Track
 	buffer = gpu::create_buffer(device, desc, "Lighting");
 }
 
+void ax::RadianceCascades::release_targets()
+{
+	for (auto* target : { &m_occluders, &m_discs, &m_scene, &m_jump[0], &m_jump[1], &m_distance, &m_cascade[0], &m_cascade[1] })
+	{
+		if (target->texture)
+			target->texture.Destroy();
+		*target = {};
+	}
+	m_resolveGroup = {};
+}
+
 bool ax::RadianceCascades::ensure_targets(const wgpu::Device& device, std::uint32_t width, std::uint32_t height,
 	std::uint32_t probeSpacing)
 {
@@ -312,6 +350,10 @@ bool ax::RadianceCascades::ensure_targets(const wgpu::Device& device, std::uint3
 			target.view = target.texture.CreateView();
 		return target;
 	} };
+	// The old targets go first, so the new ones need not fit beside them (nothing this frame has used them yet).
+	release_targets();
+	// Out of memory makes valid looking but unusable textures: caught here, acted on in encode when it is reported.
+	device.PushErrorScope(wgpu::ErrorFilter::OutOfMemory);
 	m_occluders = make(width, height, radiance_scene_format, "Radiance occluders");
 	m_discs = make(width, height, radiance_scene_format, "Radiance light discs");
 	m_scene = make(width, height, radiance_scene_format, "Radiance scene");
@@ -320,6 +362,12 @@ bool ax::RadianceCascades::ensure_targets(const wgpu::Device& device, std::uint3
 	m_distance = make(width, height, s_distance_format, "Radiance distance");
 	m_cascade[0] = make(width / probeSpacing, height / probeSpacing, s_cascade_format, "Radiance cascade A");
 	m_cascade[1] = make(width / probeSpacing, height / probeSpacing, s_cascade_format, "Radiance cascade B");
+	device.PopErrorScope(wgpu::CallbackMode::AllowSpontaneous,
+		[flag = m_outOfMemory](wgpu::PopErrorScopeStatus status, wgpu::ErrorType type, wgpu::StringView)
+		{
+			if (status == wgpu::PopErrorScopeStatus::Success && type == wgpu::ErrorType::OutOfMemory)
+				flag->store(true);
+		});
 	const bool ok{ m_occluders.view && m_discs.view && m_scene.view && m_jump[0].view && m_jump[1].view && m_distance.view
 		&& m_cascade[0].view && m_cascade[1].view };
 	m_width = ok ? width : 0;
@@ -397,6 +445,19 @@ void ax::RadianceCascades::encode(const wgpu::Device& device, const wgpu::Queue&
 	mix(circles.data(), circles.size_bytes());
 	mix(&occluderSignature, sizeof(occluderSignature));
 	// Sprite occluders drawn without a signature could be anything: never reused.
+	// The targets did not fit: drop them and coarsen every later grid. Skipped this frame (lit analytically).
+	if (m_outOfMemory->exchange(false))
+	{
+		const auto area{ static_cast<std::uint64_t>(m_width) * m_height };
+		set_radiance_texel_budget(std::min(radiance_texel_budget(), (area > 0 ? area : radiance_texel_budget()) / 2));
+		spdlog::warn("Radiance cascades: out of GPU memory at {}x{}, texel budget now {}.", m_width, m_height,
+			radiance_texel_budget());
+		release_targets();
+		m_width = m_height = m_probeSpacing = 0;
+		m_ready = false;
+		m_stats = {};
+		return;
+	}
 	const bool knowable{ !occluders || occluderSignature != 0 };
 	if (knowable && m_ready && signature == m_signature && m_width == grid.width && m_height == grid.height)
 	{

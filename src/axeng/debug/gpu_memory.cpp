@@ -18,6 +18,7 @@ namespace
 	std::uint64_t s_nextId{ 1 };
 	std::uint64_t s_created{ 0 };
 	std::uint64_t s_released{ 0 };
+	std::vector<std::function<void()>> s_pendingDestroys;
 
 	template <class T>
 	std::string to_text(const T& value)
@@ -59,14 +60,15 @@ namespace
 			++s_released;
 	}
 
-	std::shared_ptr<ax::gpu::detail::Token> register_allocation(ax::gpu::Allocation allocation)
+	std::shared_ptr<ax::gpu::detail::Token> register_allocation(ax::gpu::Allocation allocation,
+		std::function<void()> destroy = {})
 	{
 		std::lock_guard lock{ s_mutex };
 		allocation.id = s_nextId++;
 		const auto id{ allocation.id };
 		s_live.emplace(id, std::move(allocation));
 		++s_created;
-		return std::make_shared<ax::gpu::detail::Token>(id);
+		return std::make_shared<ax::gpu::detail::Token>(id, std::move(destroy));
 	}
 
 	std::string label_or_default(const wgpu::StringView& label, const char* fallback)
@@ -80,6 +82,28 @@ namespace
 ax::gpu::detail::Token::~Token()
 {
 	unregister_allocation(id);
+	if (destroy)
+	{
+		std::lock_guard lock{ s_mutex };
+		s_pendingDestroys.push_back(std::move(destroy));
+	}
+}
+
+void ax::gpu::destroy_released()
+{
+	std::vector<std::function<void()>> pending;
+	{
+		std::lock_guard lock{ s_mutex };
+		pending.swap(s_pendingDestroys);
+	}
+	for (auto& destroy : pending)
+		destroy();
+}
+
+std::size_t ax::gpu::pending_destroys()
+{
+	std::lock_guard lock{ s_mutex };
+	return s_pendingDestroys.size();
 }
 
 std::string ax::gpu::format_bytes(std::uint64_t bytes)
@@ -216,5 +240,7 @@ ax::gpu::TrackedTexture ax::gpu::create_texture(const wgpu::Device& device, cons
 	allocation.details = std::to_string(descriptor.size.width) + "x" + std::to_string(descriptor.size.height) + "x"
 		+ std::to_string(descriptor.size.depthOrArrayLayers) + " " + to_text(descriptor.format)
 		+ " mips=" + std::to_string(mips) + " samples=" + std::to_string(samples);
-	return { std::move(texture), register_allocation(std::move(allocation)) };
+	// The destroyer holds its own reference, so the texture outlives every handle until destroy_released.
+	auto destroy{ [texture]() mutable { texture.Destroy(); } };
+	return { std::move(texture), register_allocation(std::move(allocation), std::move(destroy)) };
 }
