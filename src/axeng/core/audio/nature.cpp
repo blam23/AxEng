@@ -56,37 +56,43 @@ namespace
 
 	std::vector<float> surf_wave(const NatureParams& p, float length, std::size_t count, SfxRng& rng)
 	{
+		// Mostly low: a swell rising, the boom of the crash, a roar that sinks as the water runs up and back, and only a
+		// little hiss and fizz on top (a wave made of hiss sounds like wind in leaves).
 		std::vector<float> out(count);
-		dsp::PinkNoise pink{ rng.next() };
-		dsp::BrownNoise brown{ rng.next() };
+		dsp::PinkNoise pink{ rng.next() }, hissNoise{ rng.next() };
+		dsp::BrownNoise brown{ rng.next() }, boomNoise{ rng.next() };
 		dsp::WhiteNoise white{ rng.next() };
-		dsp::Svf body{}, rumble{}, foam{};
-		rumble.set(220.0f * p.brightness, 0.7f, s_rate);
+		dsp::Svf rumble{}, boom{}, roar{}, hiss{}, foam{};
+		rumble.set(240.0f * p.brightness, 0.7f, s_rate);
+		boom.set(520.0f * p.brightness, 0.7f, s_rate);
 		const auto crash{ rng.range(0.9f, 1.5f) * std::min(1.0f, length / 6.0f) };
-		const auto washDecay{ rng.range(1.2f, 2.2f) * std::clamp(p.intensity, 0.4f, 1.6f) };
-		// Foam fizz: a steady hiss that flutters (countless tiny bubbles, not separate crackles, which would sound like
-		// leaves), fading faster than the wash.
+		const auto washDecay{ rng.range(1.2f, 2.0f) * std::clamp(p.intensity, 0.4f, 1.6f) };
 		dsp::OnePole flutter{};
-		flutter.set_cutoff(18.0f, s_rate);
+		flutter.set_cutoff(12.0f, s_rate);
 		float flutterTarget{ 1.0f };
 		for (std::size_t i{}; i < out.size(); ++i)
 		{
 			const auto t{ static_cast<float>(i) / s_rate };
-			// Swelling: a low rumble rising towards the crash.
-			const auto rise{ std::clamp(t / crash, 0.0f, 1.0f) };
-			const auto swellLevel{ rise * rise * (t < crash ? 1.0f : std::exp(-(t - crash) / 0.6f)) * 0.6f };
-			// The crash and the wash: bright at first, darker as it runs back.
 			const auto after{ std::max(0.0f, t - crash) };
-			const auto washLevel{ dsp::attack_decay(t, crash - 0.12f, 0.3f, washDecay) * p.intensity };
-			const auto cutoff{ (350.0f + 2300.0f * std::exp(-after / (washDecay * 0.4f))) * p.brightness };
-			body.set(cutoff, 0.6f, s_rate);
-			if (i % 1470 == 0) flutterTarget = rng.range(0.55f, 1.0f);
-			const auto fizz{ dsp::attack_decay(t, crash, 0.15f, washDecay * 0.45f) * p.intensity * flutter.process(flutterTarget)
-				* std::clamp(p.density, 0.0f, 2.0f) };
-			if (i % 32 == 0) foam.set(4800.0f * p.brightness, 0.45f, s_rate);
-			out[i] = rumble.process(brown.next()).low * swellLevel * p.intensity
-				+ body.process(pink.next()).low * washLevel
-				+ foam.process(white.next()).band * 0.35f * fizz;
+			const auto rise{ std::clamp(t / crash, 0.0f, 1.0f) };
+			const auto swellLevel{ rise * rise * (t < crash ? 1.0f : std::exp(-after / 0.5f)) };
+			const auto boomLevel{ dsp::attack_decay(t, crash - 0.25f, 0.3f, 0.7f) };
+			const auto roarLevel{ dsp::attack_decay(t, crash - 0.2f, 0.4f, washDecay) };
+			const auto hissLevel{ dsp::attack_decay(t, crash, 0.3f, washDecay * 0.6f) };
+			if (i % 32 == 0)
+			{
+				// The roar sinks from about 800 Hz to 250 Hz as the wash runs back; the hiss darkens with it.
+				const auto sink{ std::exp(-after / (washDecay * 0.5f)) };
+				roar.set((250.0f + 550.0f * sink) * p.brightness, 0.8f, s_rate);
+				hiss.set((900.0f + 1100.0f * sink) * p.brightness, 0.6f, s_rate);
+				foam.set(3200.0f * p.brightness, 0.6f, s_rate);
+			}
+			if (i % 2205 == 0) flutterTarget = rng.range(0.5f, 1.0f);
+			out[i] = (rumble.process(brown.next()).low * 2.2f * swellLevel
+				+ boom.process(boomNoise.next()).low * 3.0f * boomLevel
+				+ roar.process(pink.next()).band * 1.4f * roarLevel
+				+ hiss.process(hissNoise.next()).low * 0.25f * hissLevel
+				+ foam.process(white.next()).band * 0.04f * hissLevel * flutter.process(flutterTarget)) * p.intensity;
 		}
 		return out;
 	}
@@ -302,23 +308,34 @@ namespace
 
 	std::vector<float> splash(const NatureParams& p, float length, std::size_t count, SfxRng& rng)
 	{
+		// A bright spray thrown up, a small "plop" under it, a few smaller sprays as it falls back, then droplets: no low
+		// thud (that is a drum).
 		std::vector<float> out(count);
-		dsp::PinkNoise noise{ rng.next() };
-		dsp::Svf band{};
+		dsp::WhiteNoise spray{ rng.next() };
+		dsp::PinkNoise plop{ rng.next() };
+		dsp::Svf high{}, body{};
+		high.set(2200.0f * p.brightness, 0.6f, s_rate);
+		body.set(950.0f * p.pitch, 1.5f, s_rate);
+		struct Burst { float start, gain, decay; };
+		std::vector<Burst> bursts{ { 0.0f, 1.0f, rng.range(0.07f, 0.11f) } };
+		for (int b{}, n{ rng.between(2, 4) }; b < n; ++b)
+			bursts.push_back({ rng.range(0.05f, 0.35f), rng.range(0.2f, 0.5f), rng.range(0.03f, 0.06f) });
 		for (std::size_t i{}; i < out.size(); ++i)
 		{
 			const auto t{ static_cast<float>(i) / s_rate };
-			if (i % 32 == 0) band.set((400.0f + 1800.0f * std::exp(-t / 0.08f)) * p.brightness, 1.2f, s_rate);
-			out[i] = band.process(noise.next()).band * dsp::attack_decay(t, 0.0f, 0.003f, 0.11f) * p.intensity * 1.6f;
+			float level{};
+			for (const auto& burst : bursts) level += dsp::attack_decay(t, burst.start, 0.004f, burst.decay) * burst.gain;
+			out[i] = (high.process(spray.next()).high * level
+				+ body.process(plop.next()).band * 1.6f * dsp::attack_decay(t, 0.0f, 0.002f, 0.045f)) * p.intensity;
 		}
 		// Droplets: bubbles whose pitch rises as they close.
-		const auto drops{ std::clamp(static_cast<int>(rng.range(4.0f, 10.0f) * p.density), 0, 30) };
+		const auto drops{ std::clamp(static_cast<int>(rng.range(6.0f, 14.0f) * p.density), 0, 40) };
 		for (int d{}; d < drops; ++d)
 		{
-			const auto start{ rng.range(0.08f, std::max(0.1f, length - 0.1f)) };
-			const auto hz{ rng.range(1500.0f, 3800.0f) * p.pitch };
-			const auto drop{ rng.range(0.02f, 0.045f) };
-			add_note(out, start, drop, rng.range(0.15f, 0.4f), [hz](float v) { return hz * (1.0f + 0.6f * v); });
+			const auto start{ rng.range(0.06f, std::max(0.1f, length - 0.1f)) };
+			const auto hz{ rng.range(1800.0f, 4500.0f) * p.pitch };
+			const auto drop{ rng.range(0.015f, 0.035f) };
+			add_note(out, start, drop, rng.range(0.08f, 0.25f), [hz](float v) { return hz * (1.0f + 0.7f * v); });
 		}
 		return out;
 	}
