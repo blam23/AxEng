@@ -27,6 +27,7 @@ namespace
 		"sfx",
 		"ui",
 		"music",
+		"ambience",
 	};
 
 	constexpr std::size_t s_max_voices{ 64 };
@@ -589,6 +590,12 @@ struct ax::audio::AudioSystem::Impl
 		{
 			const auto params{ index == 0 ? *def.fm : mutate_fm(*def.fm, def.mutation, mix_seed(def.seed, index)) };
 			slot = std::make_shared<const std::vector<float>>(render_fm_sfx(params, options));
+			return slot;
+		}
+		if (def.nature)
+		{
+			const auto params{ index == 0 ? *def.nature : mutate_nature(*def.nature, def.mutation, mix_seed(def.seed, index)) };
+			slot = std::make_shared<const std::vector<float>>(render_nature(params, options));
 			return slot;
 		}
 		const auto params{ index == 0 ? def.params : mutate(def.params, def.mutation, mix_seed(def.seed, index)) };
@@ -1200,6 +1207,8 @@ bool ax::audio::AudioSystem::define_sound(const std::string& name, const SoundDe
 	clamp_params(def.params);
 	if (def.fm)
 		clamp_fm_sfx(*def.fm);
+	if (def.nature)
+		clamp_nature(*def.nature);
 	def.variants = std::clamp<std::uint32_t>(def.variants, 1, s_max_variants);
 	def.mutation = sanitise(def.mutation, 0.0f, 1.0f, 0.0f);
 	def.pitchVariation = sanitise(def.pitchVariation, 0.0f, 24.0f, 0.0f);
@@ -1284,6 +1293,7 @@ std::optional<ax::audio::SoundInfo> ax::audio::AudioSystem::sound_info(const std
 	if (info.loop)
 		info.seam = loop_seam(*first);
 	info.fm = entry.definition.fm.has_value();
+	info.nature = entry.definition.nature.has_value();
 	info.bus = entry.definition.bus;
 	return info;
 }
@@ -1346,6 +1356,14 @@ namespace
 			const auto& fm{ *def.fm };
 			hash_fm_patch(hash, fm.patch);
 			hash.add(fm.note).add(fm.velocity).add(fm.hold).add(fm.loopLength);
+			return;
+		}
+		hash.add(def.nature.has_value());
+		if (def.nature)
+		{
+			const auto& n{ *def.nature };
+			hash.add(static_cast<std::uint32_t>(n.kind)).add(n.length).add(n.pitch).add(n.brightness).add(n.intensity)
+				.add(n.density).add(static_cast<std::uint32_t>(n.species)).add(n.reverb).add(n.volume);
 			return;
 		}
 		const auto& p{ def.params };

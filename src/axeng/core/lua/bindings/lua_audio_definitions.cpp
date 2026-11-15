@@ -276,7 +276,30 @@ std::optional<ax::audio::SoundDefinition> ax::lua::bindings::sound_definition_fr
 
 	const sol::optional<std::string> fmPreset{ table["fm_preset"] };
 	const sol::optional<sol::table> fm{ table["fm"] };
-	if (fmPreset || fm)
+	const sol::optional<sol::table> nature{ table["nature"] };
+	if (nature && !fmPreset && !fm)
+	{
+		ax::audio::NatureParams params{};
+		const auto kind{ nature->get_or<std::string>("kind", "") };
+		const auto parsed{ ax::audio::nature_kind_from_name(kind) };
+		if (!parsed)
+		{
+			spdlog::error("<Audio> Sound '{}' uses unknown nature kind '{}'", name, kind);
+			return std::nullopt;
+		}
+		params.kind = *parsed;
+		params.length = nature->get_or("length", params.length);
+		params.pitch = nature->get_or("pitch", params.pitch);
+		params.brightness = nature->get_or("brightness", params.brightness);
+		params.intensity = nature->get_or("intensity", params.intensity);
+		params.density = nature->get_or("density", params.density);
+		params.species = static_cast<std::uint8_t>(std::clamp(nature->get_or("species", 0), 0, 3));
+		params.reverb = nature->get_or("reverb", params.reverb);
+		params.volume = nature->get_or("volume", params.volume);
+		ax::audio::clamp_nature(params);
+		def.nature = params;
+	}
+	else if (fmPreset || fm)
 	{
 		ax::audio::FmSfxParams params{};
 		if (fmPreset)
@@ -346,7 +369,7 @@ std::optional<ax::audio::SoundDefinition> ax::lua::bindings::sound_definition_fr
 		const auto parsed{ ax::audio::bus_from_name(*bus) };
 		if (!parsed || *parsed == ax::audio::Bus::Master || *parsed == ax::audio::Bus::Music)
 		{
-			spdlog::error("<Audio> Sound '{}' uses invalid bus '{}' (use 'sfx' or 'ui')", name, *bus);
+			spdlog::error("<Audio> Sound '{}' uses invalid bus '{}' (use 'sfx', 'ui' or 'ambience')", name, *bus);
 			return std::nullopt;
 		}
 		def.bus = *parsed;

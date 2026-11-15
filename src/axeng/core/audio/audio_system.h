@@ -12,6 +12,7 @@
 #include "axeng/core/audio/arrangement.h"
 #include "axeng/core/audio/instrument.h"
 #include "axeng/core/audio/fm_sfx.h"
+#include "axeng/core/audio/nature.h"
 #include "axeng/core/audio/sfx_synth.h"
 #include "axeng/core/helpers.h"
 
@@ -28,6 +29,8 @@ namespace ax::audio
 		Sfx,
 		Ui,
 		Music,
+		// Nature and other surroundings (audio::nature), with a volume of their own.
+		Ambience,
 		Count,
 	};
 
@@ -42,6 +45,8 @@ namespace ax::audio
 		SfxParams params{};
 		// When set, the sound is played on the FM voice instead of the sfxr-style synth, and `params` is unused.
 		std::optional<FmSfxParams> fm{};
+		// When set (and fm is not), the sound is a generated nature sound and `params` is unused.
+		std::optional<NatureParams> nature{};
 		std::uint64_t seed{ 0 };
 		// How far each variant's parameters may drift from `params` (see audio::mutate).
 		float mutation{ 0.0f };
@@ -100,6 +105,7 @@ namespace ax::audio
 		float seam{};
 		bool loop{};
 		bool fm{};
+		bool nature{};
 		Bus bus{};
 	};
 

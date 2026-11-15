@@ -295,6 +295,7 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 				"rms", info->rms,
 				"seam", info->seam,
 				"fm", info->fm,
+				"nature", info->nature,
 				"loop", info->loop,
 				"bus", std::string{ ax::audio::bus_name(info->bus) });
 		};

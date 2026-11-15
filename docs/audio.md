@@ -370,9 +370,26 @@ C++ code parses these tables with `ax::lua::bindings::sound_definition_from_tabl
 Use `info(name).peak` and `rms` when tuning levels. A peak of exactly 1 means the synth clipped; lower the
 params `volume` and raise the playback `volume` instead.
 
+### Nature sounds
+
+A definition with a `nature` table is a generated nature sound (`audio/nature.h`, building blocks in `audio/dsp.h`:
+white, pink and brown noise, a state variable filter, a small Freeverb), rendered into variants like sfx; each variant's
+seed is a different take (a new bird phrase, other wave timings), and `mutation` nudges the numbers too.
+
+```lua
+audio.define_sound("surf", { nature = { kind = "surf_wave", intensity = 1.2 }, variants = 8, bus = "ambience" })
+audio.define_sound("wind", { nature = { kind = "wind" }, loop = true, bus = "ambience" })
+```
+
+Kinds: beds (meant to loop) `swell`, `wind`, `crickets`; one-shots `surf_wave`, `lapping`, `rustle`, `bird_phrase`
+(`species` 0 warbler, 1 whistler, 2 chirper, 3 dove), `gull`, `scuttle`, `splash`, `creak` (a hull) and `rope`. Numbers:
+`length` (seconds, 0 the kind's own, at most 8), `pitch` and `brightness` (scales), `intensity`, `density` (how many
+events), `reverb` (0 to 1) and `volume` (the peak). Beds' modulation runs a whole number of cycles over the loop, so they
+wrap without a jump. `Nature.DISABLED_WriteWavs` writes every kind to WAV (to `AXENG_NATURE_WAV_DIR`) for listening.
+
 ### Buses
 
-`master`, `sfx`, `ui` and `music`. A voice's level is `voice volume × bus × master`; changes glide over ~30 ms.
+`master`, `sfx`, `ui`, `music` and `ambience` (surroundings: nature sounds). A voice's level is `voice volume × bus × master`; changes glide over ~30 ms.
 
 ```lua
 audio.set_volume("music", 0.6)     -- returns false for an unknown bus
