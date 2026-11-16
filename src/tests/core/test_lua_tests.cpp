@@ -7,7 +7,9 @@
 
 #include <dawn/native/DawnNative.h>
 #include <filesystem>
+#include <fstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include "axeng/core/windows_include.h"
 
@@ -67,6 +69,38 @@ TEST(LuaTests, RunLuaTestSuite)
         ax::Error::Success,
         ax::run_from_directory({}, {}, "compiled_lua_tests")
     );
+}
+
+TEST(LuaTests, CompilesScriptsOutsideTheProjectFolder)
+{
+	const auto root
+	{
+		std::filesystem::temp_directory_path() / ("AxEngSharedScripts_" + std::to_string(::GetCurrentProcessId()))
+	};
+	std::filesystem::remove_all(root);
+	std::filesystem::create_directories(root / "project" / "scripts");
+	std::filesystem::create_directories(root / "shared" / "lib");
+
+	const auto write{ [](const std::filesystem::path& path, std::string_view text)
+	{
+		std::ofstream file{ path, std::ios::binary };
+		file << text;
+	} };
+	write(root / "project" / "project.json",
+		R"({ "name": "Shared", "entry_point": "main", "headless": true,
+			"scripts": { "main": "scripts/main.lua", "shared": "../shared/lib/shared.lua" } })");
+	write(root / "shared" / "lib" / "shared.lua", "return { value = 42 }\n");
+	write(root / "project" / "scripts" / "main.lua",
+		"local shared = ax.import(\"shared\")\n"
+		"return shared.value == 42 and error_code.Success or error_code.GenericFailure\n");
+
+	const auto out{ root / "out" };
+	ASSERT_EQ(ax::Error::Success, ax::comp::compile((root / "project").string(), out.string(), false));
+	EXPECT_TRUE(std::filesystem::exists(out / "_up_shared_lib_shared.luac"));
+	EXPECT_FALSE(std::filesystem::exists(root / "shared" / "lib" / "shared.luac"));
+	EXPECT_EQ(ax::Error::Success, ax::run_from_directory({}, {}, out.string()));
+
+	std::filesystem::remove_all(root);
 }
 
 TEST(LuaTests, RunLuaRenderToSuite)

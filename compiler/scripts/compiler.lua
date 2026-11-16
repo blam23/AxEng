@@ -37,6 +37,32 @@ local function check_and_copy_script(script_in, script_out, source_scripts)
     return true
 end
 
+-- Where a project file lands in the output folder. Paths inside the project keep their place (the output folder mirrors
+-- the project's folders). Paths that leave it ("../shared/scripts/ui.lua", for code shared by several projects) are
+-- flattened into one file name at the top of the output folder ("_up_shared_scripts_ui.lua"), so the compiler never
+-- needs a folder the project does not have and nothing is written outside the output folder.
+local function output_path(path)
+    local normalised = path:gsub("\\", "/")
+    local parts = {}
+    local leaves = false
+    for part in normalised:gmatch("[^/]+") do
+        if part == ".." then
+            if #parts > 0 then
+                table.remove(parts)
+            else
+                leaves = true
+                table.insert(parts, "_up")
+            end
+        elseif part ~= "." then
+            table.insert(parts, part)
+        end
+    end
+    if leaves then
+        return table.concat(parts, "_")
+    end
+    return path
+end
+
 local built_scripts = {}
 local function check_and_copy_scripts(project, in_directory, out_directory, source_scripts)
     for script_name, script_path in pairs(project.scripts) do
@@ -46,7 +72,8 @@ local function check_and_copy_scripts(project, in_directory, out_directory, sour
         end
 
         local in_path = in_directory .. "/" .. script_path
-        local out_script_path = source_scripts and script_path or (script_path .. "c")
+        local out_script_path = output_path(script_path)
+        out_script_path = source_scripts and out_script_path or (out_script_path .. "c")
         local out_path = out_directory .. "/" .. out_script_path
 
         if not check_and_copy_script(in_path, out_path, source_scripts) then
@@ -149,13 +176,14 @@ local function check_and_copy_textures(project, in_directory, out_directory)
             else
 
                 local in_path = in_directory .. "/" .. texture_path
-                local out_path = out_directory .. "/" .. texture_path
+                local out_texture_path = output_path(texture_path)
+                local out_path = out_directory .. "/" .. out_texture_path
 
                 if not check_and_copy_texture(in_path, out_path) then
                     return false
                 end
 
-                copied_textures[texture_name] = texture_path
+                copied_textures[texture_name] = out_texture_path
                 log.debug("Compiled texture: " .. texture_name)
             end
         end
@@ -165,11 +193,14 @@ local function check_and_copy_textures(project, in_directory, out_directory)
     end
 
     if copy_icon then
-        local in_path = in_directory .. "/" .. project.textures[project.icon]
-        local out_path = out_directory .. "/" .. project.textures[project.icon]
+        local icon_path = project.textures[project.icon]
+        local in_path = in_directory .. "/" .. icon_path
+        local out_icon_path = output_path(icon_path)
+        local out_path = out_directory .. "/" .. out_icon_path
         if not check_and_copy_texture(in_path, out_path) then
             return false
         end
+        project.textures[project.icon] = out_icon_path
 
         log.debug("Compiled texture: " .. project.icon)
     end
@@ -194,7 +225,8 @@ local function check_and_copy_music(project, in_directory, out_directory)
         end
 
         local in_path = in_directory .. "/" .. music_path
-        local out_path = out_directory .. "/" .. music_path
+        local out_music_path = output_path(music_path)
+        local out_path = out_directory .. "/" .. out_music_path
         local sfile = io.open(in_path, "rb")
         if sfile == nil then
             log.error("Cannot open music file '" .. in_path .. "'.")
@@ -206,6 +238,7 @@ local function check_and_copy_music(project, in_directory, out_directory)
             return false
         end
 
+        project.music[music_name] = out_music_path
         log.debug("Compiled music: " .. music_name)
     end
 
@@ -229,7 +262,8 @@ local function check_and_copy_audio_samples(project, in_directory, out_directory
         end
 
         local in_path = in_directory .. "/" .. sample_path
-        local out_path = out_directory .. "/" .. sample_path
+        local out_sample_path = output_path(sample_path)
+        local out_path = out_directory .. "/" .. out_sample_path
         local sfile = io.open(in_path, "rb")
         if sfile == nil then
             log.error("Cannot open audio sample file '" .. in_path .. "'.")
@@ -241,6 +275,7 @@ local function check_and_copy_audio_samples(project, in_directory, out_directory
             return false
         end
 
+        project.audio_samples[sample_name] = out_sample_path
         log.debug("Compiled audio sample: " .. sample_name)
     end
 
@@ -255,7 +290,7 @@ local function copy_custom_resources(project, in_directory, out_directory)
 
     for i, res_path in pairs(project.custom_resources) do
         local in_path = in_directory .. "/" .. res_path
-        local out_path = out_directory .. "/" .. res_path
+        local out_path = out_directory .. "/" .. output_path(res_path)
         log.debug("Copying Resource: '" .. in_path .. "' -> '" .. out_path .. "'..")
 
         if not copy_file(in_path, out_path) then
