@@ -39,6 +39,12 @@ namespace ax
 			m_subscriptions.clear();
 		}
 		
+		bool has_subscribers() const
+		{
+			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };
+			return !m_subscriptions.empty();
+		}
+
 		void fire(T_EVENT&& eventData) const
 		{
 			std::unique_lock<std::mutex> lock{ m_subscriptionMutex };

@@ -70,7 +70,8 @@ void ax::GpuPassTimer::begin_frame()
 				if (found == m_last.end()) m_last.push_back({ slot.categories[index], milliseconds });
 				else found->milliseconds += milliseconds;
 			}
-			double total{};
+			// Only Tracy reads these (its macros expand to nothing in builds without it).
+			[[maybe_unused]] double total{};
 			for (const auto& timing : m_last)
 			{
 				total += timing.milliseconds;

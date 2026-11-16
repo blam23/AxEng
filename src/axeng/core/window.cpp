@@ -777,6 +777,20 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 		.maxBufferSize = 150000 * sizeof(wgpu::VertexAttribute),
 		.maxVertexAttributes = 5,
 	};
+	// Compute-heavy modules (GPU simulations) may use as much storage as the adapter offers. Stay within the WebGPU
+	// defaults (8 storage buffers a stage, 128 MiB a binding) to run everywhere; these only raise what is allowed.
+	{
+		wgpu::Limits supported{};
+		if (m_adapter.GetLimits(&supported) == wgpu::Status::Success)
+		{
+			constexpr std::uint64_t s_storage_cap{ 1ull << 30 };
+			limits.maxStorageBufferBindingSize = std::min<std::uint64_t>(supported.maxStorageBufferBindingSize, s_storage_cap);
+			limits.maxBufferSize = std::max<std::uint64_t>(limits.maxBufferSize,
+				std::min<std::uint64_t>(supported.maxBufferSize, s_storage_cap));
+			limits.maxStorageBuffersPerShaderStage = std::min<std::uint32_t>(supported.maxStorageBuffersPerShaderStage, 16u);
+			limits.maxComputeWorkgroupStorageSize = supported.maxComputeWorkgroupStorageSize;
+		}
+	}
 
 	wgpu::DeviceDescriptor deviceDescriptor{};
 	deviceDescriptor.requiredLimits = &limits;
@@ -2815,6 +2829,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		handle_render_pass(scenePass, delta, lightingActive);
 		drawMaterials(scenePass, MaterialPass::Scene);
 		m_postSceneRenderEventHandler.fire({ .delta = delta, .pass = scenePass });
+		if (!lightingActive)
+			m_postUnlitRenderEventHandler.fire({ .delta = delta, .pass = scenePass });
 		scenePass.End();
 		}
 
@@ -2962,8 +2978,12 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				{ .viewport = { static_cast<float>(m_width), static_cast<float>(m_height) },
 					.cameraPosition = cameraPosition, .zoom = zoom },
 				lightingSettings, m_frameLights, m_frameGlows,
-				[this, &lightingSettings, &occluded](wgpu::RenderPassEncoder& pass, std::uint32_t layer)
+				[this, &lightingSettings, &occluded, &cameraPosition, zoom](wgpu::RenderPassEncoder& pass, std::uint32_t layer)
 				{
+					if (layer == 0)
+						m_lightMapDrawEventHandler.fire({ .pass = pass, .viewportX = static_cast<float>(m_width),
+							.viewportY = static_cast<float>(m_height), .cameraX = cameraPosition.x,
+							.cameraY = cameraPosition.y, .zoom = zoom, .slot = 0 });
 					if (!lightingSettings.particleLights) return;
 					if (layer == 0)
 						m_particleSystem.draw_lights(pass, [&](std::uint32_t emitter) { return !occluded(emitter); });
@@ -2972,6 +2992,9 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				}, frameNoiseShadow ? &*frameNoiseShadow : nullptr, m_frameOccluders, m_frameRadianceCircles,
 				[this](wgpu::RenderPassEncoder& pass, const LightView& gridView)
 				{
+					m_radianceOccluderDrawEventHandler.fire({ .pass = pass, .viewportX = gridView.viewport.x,
+						.viewportY = gridView.viewport.y, .cameraX = gridView.cameraPosition.x,
+						.cameraY = gridView.cameraPosition.y, .zoom = gridView.zoom, .slot = 0 });
 					if (m_occluderSpriteGroupRanges.empty()) return;
 					const float vp[8]{ gridView.viewport.x, gridView.viewport.y, 0.0f, 0.0f,
 						gridView.cameraPosition.x, gridView.cameraPosition.y, gridView.zoom, 0.0f };
@@ -2983,12 +3006,17 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 						pass.SetBindGroup(0, get_texture_bind_group(range.tex));
 						pass.Draw(6, range.count, 0, range.start);
 					}
-				}, m_occluderSignature, frameAmbientOcclusion ? &*frameAmbientOcclusion : nullptr,
+				}, m_radianceOccluderDrawEventHandler.has_subscribers() ? 0ull : m_occluderSignature,
+				frameAmbientOcclusion ? &*frameAmbientOcclusion : nullptr,
 				[this, &frameAmbientOcclusion](wgpu::RenderPassEncoder& pass, const LightView& aoView, std::uint32_t slot)
 				{
 					// Sprites cast and mark where they stand; stand-ins cast (slot 2) apart from their silhouettes (3).
 					constexpr std::array<std::size_t, 4> lists{ 0, 0, 1, 2 };
 					if (slot >= m_aoViewportBuffers.size()) return;
+					if (slot < 2)
+						m_aoCasterDrawEventHandler.fire({ .pass = pass, .viewportX = aoView.viewport.x,
+							.viewportY = aoView.viewport.y, .cameraX = aoView.cameraPosition.x,
+							.cameraY = aoView.cameraPosition.y, .zoom = aoView.zoom, .slot = slot });
 					if (!m_aoSpriteGroupRanges[lists[slot]].empty())
 					{
 						const float vp[8]{ aoView.viewport.x, aoView.viewport.y, 0.0f, 0.0f,
@@ -3027,6 +3055,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				ShapeRenderer::draw(unlitPass, call);
 			draw_sprite_batches(unlitPass, m_pipeline, m_sdfPipeline, SpriteLayer::Unlit);
 			drawMaterials(unlitPass, MaterialPass::Unlit);
+			m_postUnlitRenderEventHandler.fire({ .delta = delta, .pass = unlitPass });
 			unlitPass.End();
 			MaterialRenderer::set_light_map({});
 			}
