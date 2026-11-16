@@ -303,8 +303,8 @@ ax::audio::FmInstrumentVoice::FmInstrumentVoice(const FmInstrumentDefinition& de
 	m_lfoWave = lfo.wave;
 	m_lfoSeed = note;
 	m_lfoCycleStep = lfo_hz(lfo.speed) * m_blockSeconds;
-	const auto delay{ static_cast<float>(lfo.delay) / 99.0f };
-	m_lfoDelaySeconds = delay * delay * s_lfo_max_delay_seconds;
+	const auto delay{ static_cast<double>(lfo.delay) / 99.0 };
+	m_lfoDelaySeconds = delay * delay * static_cast<double>(s_lfo_max_delay_seconds);
 	m_lfoFadeSeconds = m_lfoDelaySeconds * 0.5;
 	m_lfoPitchSemitones = 12.0f * static_cast<float>(lfo.pitchModDepth) / 99.0f
 		* static_cast<float>(s_pitch_mod_sensitivity[lfo.pitchModSensitivity]) / 255.0f;
