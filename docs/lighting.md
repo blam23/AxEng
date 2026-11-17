@@ -108,7 +108,7 @@ least `minLightTexels` GI texels in radius, inside the grid, and before the firs
 lights stay analytic and its occluder still hides what is beneath). At most 2046 are traced. The rest are drawn as
 before. Light leaves a disc of `Light2D::sourceRadius` world pixels round the light (never smaller than 2.5 probe
 spacings, below which sources fall between the rays): give a light on a solid thing a source radius inside it: what blocks
-within 1.75 times the source is taken as its body and lets its light out. Close to its source the cascades' few nearby rays cannot resolve a light and it would flicker
+within 1.75 times the source (the one given, not the wider one drawn on a coarse grid, which would take in whatever stands near) is taken as its body and lets its light out. Close to its source the cascades' few nearby rays cannot resolve a light and it would flicker
 as it moves, so a traced light's near part (out to four times its source plus four probe spacings,
 `radiance_near_scale` and `radiance_near_spacings`) is drawn plainly with marched shadows, fading out as the cascades
 fade in (`radiance_near_part`, `Light2D::nearReach`). The cascades take that fade, like any shape, at their probes, so
@@ -142,7 +142,9 @@ renderer does on Dawn or in a browser:
    lamp's head or a machine, corners and all) alpha -(2 + index). A body glows with its light and blocks all others,
    shaped as drawn. Where nothing covers a source (a light with no body) it is see-through; give a light on a solid
    thing a source inside its body, so its body is all the cascades (and marched shadows) see of it. How far each light's body reaches from it is gathered (an atomic max) and stamped into its disc's
-   texels, so a ray crossing a disc walks a texel at a time only where it could meet the body. Consecutive lights
+   texels, so a ray crossing a disc walks a texel at a time only where it could meet the body. So is the box that holds
+   the body: the disc is in the distance field and the body inside it is not, so marched lights shade by the distance to
+   that box (a circle out to the body's corners is far wider than a small body on a coarse grid). Consecutive lights
    with the same position and source radius (a lamp and its cone) share a disc and add together (up to four).
 3. Jump flood from the occluders' edge texels, then a distance field (packed with the offset to the nearest surface).
 4. Cascades from the top down, pre-averaged and direction-first, each texel tracing four rays (sixteen with the

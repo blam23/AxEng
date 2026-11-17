@@ -1689,6 +1689,40 @@ TEST_F(LightRendererTest, RadianceMarchedShadowOfALampIsSoft)
 	EXPECT_GE(partial, 3);
 }
 
+TEST_F(LightRendererTest, RadianceMarchedShadowOfALampOnACoarseGridIsAsWideAsItsBody)
+{
+	// Zoomed out on a coarse grid a lamp's disc is drawn far wider than its body (sources are never smaller than 2.5
+	// probe spacings). A marched light's shadow of it is still only as wide as the body.
+	auto lighting{ radiance_settings() };
+	lighting.radiance.divisor = 4.0f;
+	lighting.radiance.probeSpacing = 2;
+	ax::LightView view{ centred_view() };
+	view.zoom = 0.83f;
+	const std::array lights{
+		ax::Light2D{ .position = { -75.0f, 0.0f }, .radius = 260.0f, .intensity = 1.0f, .colour = { 0.0f, 1.0f, 0.0f },
+			.falloff = 1.0f, .sourceRadius = 4.0f, .shadows = ax::Light2D::marched_shadows },
+		ax::Light2D{ .position = { 20.0f, 0.0f }, .radius = 150.0f, .intensity = 0.3f, .colour = { 1.0f, 0.0f, 0.0f },
+			.falloff = 1.0f, .sourceRadius = 11.0f } };
+	// Its body, and something else standing within the wide disc's reach (as a player walking by), which is not its
+	// body: taken as one, the whole disc would shade.
+	const std::array body{ ax::RadianceCircle{ .centre = { 20.0f, 0.0f }, .radius = 6.0f },
+		ax::RadianceCircle{ .centre = { 20.0f, -45.0f }, .radius = 5.0f } };
+	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, lighting, lights, {}, 1, view, {}, {}, nullptr, {}, body) };
+	auto open{ lighting };
+	open.radiance.enabled = false;
+	const auto plain{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, open, lights, {}, 1, view) };
+	const auto green{ [&](const Image& from, float x, float y)
+	{
+		return static_cast<int>(from.at(static_cast<std::uint32_t>(64.0f + x * view.zoom),
+			static_cast<std::uint32_t>(64.0f + y * view.zoom))[1]);
+	} };
+	// Straight behind the body, 145 from the light, it is dark. The body's shadow there reaches under 20 to each side;
+	// the disc's would reach 50.
+	EXPECT_LT(green(image, 70.0f, 0.0f), green(plain, 70.0f, 0.0f) / 3);
+	for (const auto y : { 26.0f, -26.0f, 36.0f, -36.0f })
+		EXPECT_GT(green(image, 70.0f, y), green(plain, 70.0f, y) * 4 / 5) << y;
+}
+
 TEST_F(LightRendererTest, RadianceReusesUnchangedCascades)
 {
 	// Frames where nothing the cascades read changes reuse their last result; a lamp moving, an occluder appearing or

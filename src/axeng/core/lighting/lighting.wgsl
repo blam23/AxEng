@@ -119,10 +119,11 @@ fn fs_light(in_: InstanceOut) -> @location(0) vec4<f32> {
 	return vec4<f32>(in_.colour.rgb * attenuation, 0.0);
 }
 
-// The distance field at a texel: x signed texels to the nearest surface, safe to step by; y the distance that shades,
-// to an occluder or a light's own body; z 1 inside a light's see-through disc. A see-through disc does not block, but
-// the body inside it does: its texels hold how far in from the disc's edge the body begins (radiance.wgsl, fs_stamp),
-// so y is the distance to the body, as if round.
+// The distance field at a texel: x texels that are safe to step by; y the distance that shades, to an occluder or a
+// light's own body; z 1 inside a light's see-through disc. A see-through disc does not block, but the body inside it
+// does: its texels hold how far in from the disc's edge the body may begin (radiance.wgsl, fs_stamp), which x steps
+// by there, and how far they lie outside the box that holds the body, so y is the distance to the body, as if a
+// box (a round one out to its corners would be far wider than a small body on a coarse grid).
 fn march_texel(p: vec2<i32>) -> vec3<f32> {
 	let size = vec2<i32>(march.size.xy);
 	if (any(p < vec2<i32>(0)) || any(p >= size)) {
@@ -134,7 +135,9 @@ fn march_texel(p: vec2<i32>) -> vec3<f32> {
 	let surface = select(clamp(p + offset, vec2<i32>(0), size - vec2<i32>(1)), p, d < 0.0);
 	let scene = textureLoad(marchScene, surface, 0);
 	if (scene.a > 1.5) {
-		return vec3<f32>(d, d + scene.g, select(0.0, 1.0, d < 0.0));
+		let outside = scene.gb + abs(vec2<f32>(surface - p));
+		let box = length(max(outside, vec2<f32>(0.0))) + min(max(outside.x, outside.y), 0.0);
+		return vec3<f32>(select(d, d + scene.r, d < 0.0), max(d, box), select(0.0, 1.0, d < 0.0));
 	}
 	return vec3<f32>(d, d, 0.0);
 }
@@ -211,8 +214,8 @@ fn marched_visibility(world: vec2<f32>, light: vec2<f32>, source: f32) -> f32 {
 		if (seen <= -1.0) {
 			break;
 		}
-		// Inside a see-through disc only the body inside it can block, so on by the distance to that.
-		t += clamp(select(s.x, s.y, s.z > 0.5), 0.5, 64.0);
+		// Inside a see-through disc only the body inside it can block, so on by the distance to where that may begin.
+		t += clamp(s.x, 0.5, 64.0);
 	}
 	seen = max(seen, -1.0);
 	return inside * 0.25 * (1.0 + seen) * (1.0 + seen) * (2.0 - seen);

@@ -25,8 +25,9 @@ struct Rc {
 // (colour * intensity, falloff), (direction, cone inner, cone outer). All in world pixels.
 @group(0) @binding(6) var<storage, read> items: array<vec4<f32>>;
 @group(0) @binding(7) var texE: texture_2d<f32>;
-// Per traced light, 16 times how far (texels) its own body reaches from it (see fs_combine); 0 for none. Written by the
-// combine pass, read (without atomics, which cost the cascades dearly) through bodyReach.
+// Per traced light, BODY_VALUES values (see fs_combine), 0 for none: 16 times how far (texels) its own body reaches
+// from it, then how far the body near its source reaches along +x, -x, +y and -y (body_side). Written by the combine
+// pass, read (without atomics, which cost the cascades dearly) through bodyReach.
 @group(0) @binding(8) var<storage, read_write> bodies: array<atomic<u32>>;
 @group(0) @binding(9) var<storage, read> bodyReach: array<u32>;
 
@@ -49,6 +50,13 @@ const NEAR_SPACINGS: f32 = 4.0;
 const INTERIOR_FALLOFF: f32 = 2.0;
 // Lights sharing one emitter disc that are added together, besides the one drawn last.
 const MAX_COINCIDENT: u32 = 3u;
+
+const BODY_VALUES: u32 = 5u;
+// A body texel's far edge along one way from its light (texels, negative when the texel lies the other way), as stored.
+const BODY_SIDE_BIAS: f32 = 1024.0;
+fn body_side(along: f32) -> u32 {
+	return u32((clamp(along, -1000.0, 1000.0) + 0.5 + BODY_SIDE_BIAS) * 16.0);
+}
 
 // Sources smaller than a few probe spacings fall between the rays, so none is smaller than this (texels).
 fn source_radius(worldRadius: f32) -> f32 {
@@ -153,22 +161,35 @@ fn solid(p: vec2<i32>) -> bool {
 	return abs(scene_alpha(p)) > 0.5;
 }
 
-// The scene from the occluders (texA) and lights' discs (texB). An occluder inside a disc is that light's own body; how
-// far the farthest of its texels lies from the light goes in bodies, so rays crossing the disc know where to look
-// for it.
+// The scene from the occluders (texA) and lights' discs (texB). An occluder within OWN_SCALE of a light's true source
+// (not the wider one drawn when the grid is coarse, which would take in whatever stands near: the neighbours, a player
+// walking by) is that light's own body; any other inside the disc stays an occluder. How far the farthest of either lies
+// from the light goes in bodies, so rays crossing the disc know where to look for them, and so does the box that holds
+// the body: marched lights shade by it (fs_stamp).
 @fragment
 fn fs_combine(in_: FullscreenOut) -> @location(0) vec4<f32> {
 	let p = vec2<i32>(in_.pos.xy);
 	let occluder = textureLoad(texA, p, 0);
 	let disc = textureLoad(texB, p, 0);
 	if (disc.a > 1.5) {
-		// What blocks within the light's reach is its own body, corners and all: it glows with the light and blocks
-		// every other, shaped as drawn.
+		// What blocks close round the light's source is its own body, corners and all: it glows with the light and
+		// blocks every other, shaped as drawn.
 		if (occluder.a > 0.5) {
 			let index = u32(disc.a - 1.5);
-			let centre = (items[index * 3u].xy - rc.grid.zw) * rc.probes.w;
-			let reach = length(vec2<f32>(p) + vec2<f32>(0.5) - centre) + 1.0;
-			atomicMax(&bodies[index], u32(reach * 16.0));
+			let light = items[index * 3u];
+			let local = vec2<f32>(p) + vec2<f32>(0.5) - (light.xy - rc.grid.zw) * rc.probes.w;
+			let reach = length(local);
+			let first = index * BODY_VALUES;
+			atomicMax(&bodies[first], u32((reach + 1.0) * 16.0));
+			// A source with no size is as large as the grid resolves.
+			let source = select(source_radius(light.w), light.w * rc.probes.w, light.w > 0.0);
+			if (reach > source * OWN_SCALE + DISC_MARGIN) {
+				return occluder;
+			}
+			atomicMax(&bodies[first + 1u], body_side(local.x));
+			atomicMax(&bodies[first + 2u], body_side(-local.x));
+			atomicMax(&bodies[first + 3u], body_side(local.y));
+			atomicMax(&bodies[first + 4u], body_side(-local.y));
 			return vec4<f32>(occluder.rgb, -disc.a);
 		}
 		// The source is see-through where nothing covers it (a light with no body); the ring beyond is empty.
@@ -179,18 +200,24 @@ fn fs_combine(in_: FullscreenOut) -> @location(0) vec4<f32> {
 	return occluder;
 }
 
-// Then each see-through disc texel takes its light's body reach in red and, in green, how far inside the disc's edge the
-// body begins (huge with no body): rays crossing it have them with the alpha they load anyway, and marched lights
-// (lighting.wgsl) soften their shadows by the distance to the body rather than to the see-through disc round it. Its
-// colour is not needed there.
+// Then each see-through disc texel takes, in red, how far inside the disc's edge its light's body reach begins (huge with
+// no body) and, in green and blue, how far it lies outside the body's box along x and y (negative within, huge with
+// no body): rays crossing it have the first with the alpha they load anyway, and marched lights (lighting.wgsl) shade by
+// the distance to the box rather than to the see-through disc round it. Its colour is not needed there.
 @fragment
 fn fs_stamp(in_: FullscreenOut) -> @location(0) vec4<f32> {
 	let scene = textureLoad(texA, vec2<i32>(in_.pos.xy), 0);
 	if (scene.a > 1.5) {
 		let index = u32(scene.a - 1.5);
-		let reach = f32(bodyReach[index]) / 16.0;
-		let drawn = source_radius(items[index * 3u].w) + DISC_MARGIN;
-		return vec4<f32>(reach, select(10000.0, max(drawn - reach, 0.0), reach > 0.0), scene.b, scene.a);
+		let light = items[index * 3u];
+		let first = index * BODY_VALUES;
+		let reach = f32(bodyReach[first]) / 16.0;
+		let high = vec2<f32>(f32(bodyReach[first + 1u]), f32(bodyReach[first + 3u])) / 16.0 - vec2<f32>(BODY_SIDE_BIAS);
+		let low = vec2<f32>(f32(bodyReach[first + 2u]), f32(bodyReach[first + 4u])) / 16.0 - vec2<f32>(BODY_SIDE_BIAS);
+		let drawn = source_radius(light.w) + DISC_MARGIN;
+		let local = in_.pos.xy - (light.xy - rc.grid.zw) * rc.probes.w;
+		let outside = select(vec2<f32>(10000.0), max(local - high, -local - low), bodyReach[first + 1u] > 0u);
+		return vec4<f32>(select(10000.0, max(drawn - reach, 0.0), reach > 0.0), outside, scene.a);
 	}
 	return scene;
 }
@@ -339,17 +366,19 @@ fn hit_radiance(p: vec2<i32>, at: vec2<f32>, origin: vec2<f32>, dir: vec2<f32>) 
 }
 
 // How far a ray inside a see-through disc may step: to the disc's far side, unless its way passes within the reach of
-// the light's own body (body, see fs_combine), where it walks a texel at a time so as not to step over the body.
-fn disc_step(kind: f32, body: f32, at: vec2<f32>, dir: vec2<f32>) -> f32 {
+// the light's own body (which begins inset from the disc's edge, see fs_stamp), where it walks a texel at a time so as
+// not to step over the body.
+fn disc_step(kind: f32, inset: f32, at: vec2<f32>, dir: vec2<f32>) -> f32 {
 	let index = u32(kind - 1.5);
 	let disc = items[index * 3u];
 	let local = at - (disc.xy - rc.grid.zw) * rc.probes.w;
 	let drawn = source_radius(disc.w) + DISC_MARGIN;
 	let b = dot(local, dir);
 	let leave = max(-b + sqrt(max(b * b - dot(local, local) + drawn * drawn, 0.0)) + 0.5, 0.5);
-	if (body <= 0.0) {
+	if (inset > 5000.0) {
 		return leave;
 	}
+	let body = drawn - inset;
 	let c = dot(local, local) - body * body;
 	if (c <= 0.0) {
 		return min(1.0, leave);

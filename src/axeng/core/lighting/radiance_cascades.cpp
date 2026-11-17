@@ -36,6 +36,8 @@ namespace
 	// Uniform slots, one per pass, at the minimum dynamic offset alignment.
 	constexpr std::uint32_t s_slot_stride{ 256 };
 	constexpr std::uint32_t s_slots{ 32 };
+	// Values gathered per traced light about its own body: as BODY_VALUES in radiance.wgsl.
+	constexpr std::size_t s_body_values{ 5 };
 	// Cascade 0's interval, in probe spacings.
 	constexpr float s_interval0{ 0.5f };
 
@@ -262,7 +264,7 @@ bool ax::RadianceCascades::init(const wgpu::Device& device, wgpu::TextureFormat 
 	uniformDesc.label = "Radiance cascades uniforms";
 	m_uniforms = gpu::create_buffer(device, uniformDesc, "Lighting");
 	wgpu::BufferDescriptor bodiesDesc{};
-	bodiesDesc.size = radiance_max_lights * sizeof(std::uint32_t);
+	bodiesDesc.size = radiance_max_lights * s_body_values * sizeof(std::uint32_t);
 	bodiesDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
 	bodiesDesc.label = "Radiance light bodies";
 	m_bodies = gpu::create_buffer(device, bodiesDesc, "Lighting");
@@ -478,7 +480,7 @@ void ax::RadianceCascades::encode(const wgpu::Device& device, const wgpu::Queue&
 	if (!m_lightScratch.empty())
 		queue.WriteBuffer(m_lights, 0, m_lightScratch.data(), m_lightScratch.size() * sizeof(float));
 	// The combine pass finds each light's body afresh.
-	m_bodyScratch.assign(std::max<std::size_t>(lights.size(), 1), 0u);
+	m_bodyScratch.assign(std::max<std::size_t>(lights.size(), 1) * s_body_values, 0u);
 	queue.WriteBuffer(m_bodies, 0, m_bodyScratch.data(), m_bodyScratch.size() * sizeof(std::uint32_t));
 	if (!circles.empty())
 	{
