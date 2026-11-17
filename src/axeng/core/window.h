@@ -155,6 +155,26 @@ namespace ax
 			return m_postSceneRenderEventHandler;
 		}
 
+		// Fires in the pass that draws unlit world content after lighting has been applied (or, without lighting, at the
+		// end of the scene pass). Draws here are not darkened by the light map: additive effects and emissive particles.
+		// The pass has the surface format, sample_count() samples and depth_format() depth, like the scene pass.
+		RenderEventHandler& get_post_unlit_render_event_handler()
+		{
+			return m_postUnlitRenderEventHandler;
+		}
+
+		// Draws a native module adds to the lighting passes, for content that only exists on the GPU (no sprites or
+		// Light2D to submit). Each fires on the window thread with the pass open; see docs/lighting.md.
+		using LightingDrawEventHandler = EventHandler<WindowLightingDrawEvent>;
+		// Into the light map (light_map_format, 1 sample, no depth), with layer 0 lights: draw additively.
+		LightingDrawEventHandler& get_light_map_draw_event_handler() { return m_lightMapDrawEventHandler; }
+		// Into the radiance cascades' scene (radiance_scene_format, 1 sample, no depth): write albedo with alpha 1
+		// where something blocks light. Only fires while radiance cascades run.
+		LightingDrawEventHandler& get_radiance_occluder_draw_event_handler() { return m_radianceOccluderDrawEventHandler; }
+		// Into the ambient occlusion masks (ao_mask_format, 1 sample, no depth): write coverage in red. Fires for slot 0
+		// (casters, drawn with the shadow offset in the view) and slot 1 (silhouettes). Only while occlusion runs.
+		LightingDrawEventHandler& get_ao_caster_draw_event_handler() { return m_aoCasterDrawEventHandler; }
+
 		using UIEventHandler = EventHandler<WindowUIEvent>;
 		UIEventHandler& get_ui_event_handler()
 		{
@@ -187,6 +207,7 @@ namespace ax
 		wgpu::Queue& queue() noexcept { return m_queue; }
 		const wgpu::Queue& queue() const noexcept { return m_queue; }
 		wgpu::TextureFormat surface_format() const noexcept { return m_surfaceFormat; }
+		wgpu::TextureFormat depth_format() const noexcept { return m_depthTextureFormat; }
 		std::uint32_t sample_count() const noexcept { return m_sampleCount; }
 		ParticleSystem& particle_system() noexcept { return m_particleSystem; }
 
@@ -368,6 +389,10 @@ namespace ax
 		PreRenderEventHandler m_prepareFrameEventHandler;
 		RenderEventHandler m_renderEventHandler;
 		RenderEventHandler m_postSceneRenderEventHandler;
+		RenderEventHandler m_postUnlitRenderEventHandler;
+		LightingDrawEventHandler m_lightMapDrawEventHandler;
+		LightingDrawEventHandler m_radianceOccluderDrawEventHandler;
+		LightingDrawEventHandler m_aoCasterDrawEventHandler;
 		UIEventHandler m_uiEventHandler;
 		RequestCloseEventHandler m_requestCloseEventHandler;
 		ResizeEventHandler m_resizeEventHandler;

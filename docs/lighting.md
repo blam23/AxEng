@@ -194,3 +194,29 @@ analytic light near a source.
 
 Gaps between occluders narrower than a few probe spacings let little light through further away, where coarse probes
 carry it.
+
+## Drawing into the lighting passes
+
+Content that exists only on the GPU, such as compute-simulated enemies, projectiles or particles, has no sprites or
+`Light2D`s to submit. A native module can instead draw it straight into the lighting passes by subscribing to these
+`Window` events. All of them fire on the window thread while the pass is open. Each event carries the view as
+`viewportX`/`viewportY`, `cameraX`/`cameraY` and `zoom`. Map world pixels to clip space with it the way the sprite
+shader does:
+
+```wgsl
+let clip = (world - camera) * zoom / (viewport * 0.5) * vec2(1.0, -1.0);
+```
+
+| Event | Target | Draw |
+|---|---|---|
+| `get_light_map_draw_event_handler()` | `light_map_format` (RGBA16F), 1 sample, no depth | Light, additively (`One` + `One`). Drawn with the first layer of lights, so `LightOccluder2D`s with a layer hide it. |
+| `get_radiance_occluder_draw_event_handler()` | `radiance_scene_format` (RGBA16F), 1 sample, no depth | Albedo with alpha 1 where something blocks light, no blending. Fires only while radiance cascades run. Its view is the cascade grid's, not the screen's. |
+| `get_ao_caster_draw_event_handler()` | `ao_mask_format` (R8), 1 sample, no depth | Coverage in red, no blending. `slot` 0 draws the shadow casters: the view is already moved along the shadow offset, so draw at the content's own position. `slot` 1 draws the silhouettes that mark where casters stand. Fires only while ambient occlusion runs. |
+
+While the radiance occluder event has a subscriber, the cascades never reuse last frame's scene. Drawn content may move
+every frame, so it is retraced each frame.
+
+`Window::get_post_unlit_render_event_handler()` fires in the pass that draws unlit world content after lighting has
+been applied, or at the end of the scene pass when lighting is off. The light map does not darken draws there, which
+suits additive effects and glowing particles. That pass matches the scene pass: `surface_format()`, `sample_count()`
+samples and `depth_format()` depth (reverse Z).

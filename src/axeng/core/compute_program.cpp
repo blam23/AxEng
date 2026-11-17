@@ -76,20 +76,32 @@ bool ax::ComputeProgram::encode(wgpu::CommandEncoder& encoder, std::string_view 
 	return encode_many(encoder, dispatches);
 }
 
+bool ax::ComputeProgram::encode_indirect(wgpu::CommandEncoder& encoder, std::string_view entryPoint,
+	const wgpu::BindGroup& bindGroup, const wgpu::Buffer& indirect, std::uint64_t indirectOffset) const
+{
+	if (!indirect) return false;
+	const std::array<ComputeDispatch, 1> dispatches{ ComputeDispatch{ .entryPoint = entryPoint, .bindGroup = bindGroup,
+		.indirect = indirect, .indirectOffset = indirectOffset } };
+	return encode_many(encoder, dispatches);
+}
+
 bool ax::ComputeProgram::encode_many(wgpu::CommandEncoder& encoder,
 	std::span<const ComputeDispatch> dispatches) const
 {
 	if (dispatches.empty()) return false;
 	for (const auto& dispatch : dispatches)
 		if (!m_pipelines.contains(std::string{ dispatch.entryPoint }) || !dispatch.bindGroup
-			|| dispatch.x == 0 || dispatch.y == 0 || dispatch.z == 0) return false;
+			|| (!dispatch.indirect && (dispatch.x == 0 || dispatch.y == 0 || dispatch.z == 0))) return false;
 	wgpu::ComputePassDescriptor descriptor{};
 	auto pass{ encoder.BeginComputePass(&descriptor) };
 	for (const auto& dispatch : dispatches)
 	{
 		pass.SetPipeline(m_pipelines.at(std::string{ dispatch.entryPoint }));
 		pass.SetBindGroup(0, dispatch.bindGroup);
-		pass.DispatchWorkgroups(dispatch.x, dispatch.y, dispatch.z);
+		if (dispatch.indirect)
+			pass.DispatchWorkgroupsIndirect(dispatch.indirect, dispatch.indirectOffset);
+		else
+			pass.DispatchWorkgroups(dispatch.x, dispatch.y, dispatch.z);
 	}
 	pass.End();
 	return true;
