@@ -89,6 +89,8 @@ namespace
 		std::vector<std::uint32_t> rebased;
 		Loop outer;
 		Loop inner;
+		// The region an outline leaves inside a convex shape when inset_loop cannot follow it (see clamp_inset).
+		Loop innerFill;
 		std::vector<std::uint32_t> triangulation;
 		// Unit circles by segment count, the points append_arc would compute for a full turn from angle 0.
 		std::array<std::vector<glm::vec2>, s_max_circle_segments + 1> unitCircles;
@@ -256,6 +258,93 @@ namespace
 				return false;
 		}
 		return signed_area(out) > 0.0f;
+	}
+
+	// For a convex loop whose outline is thicker than inset_loop can follow (a rounded rectangle whose outline is wider
+	// than its corner radius: the corners' points would cross over): the region left inside is where every edge, moved
+	// inwards by thickness, keeps it (fill, clipped edge by edge), and each outer point pairs with its inset point
+	// pulled back onto that region (inner, as many points as loop, for the ring). False when the outline covers the
+	// whole shape.
+	bool clamp_inset(const Loop& loop, float thickness, Loop& inner, Loop& fill)
+	{
+		const auto count{ loop.size() };
+		struct Edge { glm::vec2 point; glm::vec2 normal; };
+		std::vector<Edge> edges{};
+		edges.reserve(count);
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			const auto& a{ loop[i] };
+			const auto& b{ loop[(i + 1) % count] };
+			const auto d{ b - a };
+			const float length{ glm::length(d) };
+			if (length <= 1e-6f)
+				continue;
+			edges.push_back({ a, glm::vec2{ -d.y, d.x } / length });
+		}
+
+		fill = loop;
+		Loop clipped{};
+		for (const auto& edge : edges)
+		{
+			clipped.clear();
+			const auto inside = [&edge, thickness](const glm::vec2& p) { return glm::dot(p - edge.point, edge.normal) - thickness; };
+			for (std::size_t i = 0; i < fill.size(); ++i)
+			{
+				const auto& p{ fill[i] };
+				const auto& q{ fill[(i + 1) % fill.size()] };
+				const float dp{ inside(p) }, dq{ inside(q) };
+				if (dp >= 0.0f)
+					clipped.push_back(p);
+				if ((dp >= 0.0f) != (dq >= 0.0f))
+					clipped.push_back(p + (q - p) * (dp / (dp - dq)));
+			}
+			fill.swap(clipped);
+			if (fill.size() < 3)
+				return false;
+		}
+		if (!normalise_loop(fill))
+			return false;
+
+		inner.resize(count);
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			const auto& prev{ loop[(i + count - 1) % count] };
+			const auto& cur{ loop[i] };
+			const auto& next{ loop[(i + 1) % count] };
+			const auto d0{ glm::normalize(cur - prev) };
+			const auto d1{ glm::normalize(next - cur) };
+			const glm::vec2 n0{ -d0.y, d0.x };
+			const glm::vec2 n1{ -d1.y, d1.x };
+			auto miter{ n0 + n1 };
+			const float len{ glm::length(miter) };
+			miter = len > 1e-4f ? miter / len : n0;
+			const float denom{ std::max(glm::dot(miter, n0), 1e-4f) };
+			const auto candidate{ cur + miter * (thickness / denom) };
+			// Inside the region: keep it. Outside: the nearest point of the region's edge.
+			bool within{ true };
+			for (std::size_t k = 0; k < fill.size() && within; ++k)
+				within = cross(fill[(k + 1) % fill.size()] - fill[k], candidate - fill[k]) >= 0.0f;
+			if (within)
+			{
+				inner[i] = candidate;
+				continue;
+			}
+			float best{ std::numeric_limits<float>::max() };
+			for (std::size_t k = 0; k < fill.size(); ++k)
+			{
+				const auto& a{ fill[k] };
+				const auto ab{ fill[(k + 1) % fill.size()] - a };
+				const float t{ std::clamp(glm::dot(candidate - a, ab) / std::max(glm::dot(ab, ab), 1e-12f), 0.0f, 1.0f) };
+				const auto point{ a + ab * t };
+				const auto offset{ candidate - point };
+				if (const float distance{ glm::dot(offset, offset) }; distance < best)
+				{
+					best = distance;
+					inner[i] = point;
+				}
+			}
+		}
+		return true;
 	}
 
 	bool point_in_triangle(const glm::vec2& p, const glm::vec2& a, const glm::vec2& b, const glm::vec2& c)
@@ -579,17 +668,25 @@ namespace
 			return;
 		}
 
+		// The fill goes inside the outline: where inset_loop puts it, or for a convex shape whose outline is thicker
+		// than inset_loop can follow (its corners would cross over), what clamp_inset leaves. Only an outline that
+		// covers the whole shape draws it all in the outline colour.
+		const Loop* fillLoop{ &state.inner };
 		if (!inset_loop(state.outer, params.outline.thickness, state.inner))
 		{
-			triangulate(state.outer, convex, state.triangulation);
-			emit_fill(mesh_for(state, outlineColour), state.outer, state.triangulation, params, outlineColour);
-			return;
+			if (!convex || !clamp_inset(state.outer, params.outline.thickness, state.inner, state.innerFill))
+			{
+				triangulate(state.outer, convex, state.triangulation);
+				emit_fill(mesh_for(state, outlineColour), state.outer, state.triangulation, params, outlineColour);
+				return;
+			}
+			fillLoop = &state.innerFill;
 		}
 
 		if (alpha_of(fillColour) > 0)
 		{
-			triangulate(state.inner, convex, state.triangulation);
-			emit_fill(mesh_for(state, fillColour), state.inner, state.triangulation, params, fillColour);
+			triangulate(*fillLoop, convex, state.triangulation);
+			emit_fill(mesh_for(state, fillColour), *fillLoop, state.triangulation, params, fillColour);
 		}
 		emit_ring(mesh_for(state, outlineColour), state.outer, state.inner, params, outlineColour);
 	}
@@ -951,6 +1048,27 @@ struct ax::StaticShapeMesh
 	};
 	Part opaque{}, translucent{};
 };
+
+ax::OutlineFit ax::ShapeRenderer::outline_fit(const Shape& shape, float pixelScale)
+{
+	// The same steps tessellate() takes, up to the outline: its own scratch state, so it works without a device.
+	thread_local auto scratch{ std::make_unique<State>() };
+	auto& state{ *scratch };
+	const auto params{ params_of(shape) };
+	const float scale{ params.screenSpace ? 1.0f : std::max(pixelScale, 1e-3f) };
+	state.outer.clear();
+	std::visit(LoopBuilder{ scale, state.outer, state }, shape);
+	if (!normalise_loop(state.outer))
+		return OutlineFit::None;
+	const bool hasOutline{ params.outline.thickness > 0.0f && alpha_of(pack_colour(params.outline.colour)) > 0 };
+	if (!hasOutline)
+		return OutlineFit::None;
+	if (inset_loop(state.outer, params.outline.thickness, state.inner))
+		return OutlineFit::Ring;
+	if (is_convex(state.outer) && clamp_inset(state.outer, params.outline.thickness, state.inner, state.innerFill))
+		return OutlineFit::Clamped;
+	return OutlineFit::Covers;
+}
 
 std::shared_ptr<const ax::StaticShapeMesh> ax::ShapeRenderer::build_static(const ShapeList& shapes, float pixelScale)
 {

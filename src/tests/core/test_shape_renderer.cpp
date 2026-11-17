@@ -472,6 +472,55 @@ TEST_F(ShapeRendererTest, RoundedRectangleCutsCorners)
 	EXPECT_PIXEL(image, 40, 40, s_red); // inside the corner arc
 }
 
+TEST_F(ShapeRendererTest, OutlineThickerThanCornerRadiusKeepsTheFill)
+{
+	// The corners' inset points would cross over (thickness 8 > radius 3); the fill still shows inside a ring.
+	const ax::Rectangle rect{ .position = { 32, 32 }, .size = { 64, 64 }, .cornerRadius = 3, .fill = s_red,
+		.outline = { .colour = s_blue, .thickness = 8 }, .screenSpace = true };
+	const auto image{ render({ rect }) };
+	EXPECT_PIXEL(image, 64, 64, s_red);
+	EXPECT_PIXEL(image, 41, 41, s_red);
+	EXPECT_PIXEL(image, 86, 86, s_red);
+	EXPECT_PIXEL(image, 34, 64, s_blue);
+	EXPECT_PIXEL(image, 64, 34, s_blue);
+	EXPECT_PIXEL(image, 36, 36, s_blue);
+	EXPECT_PIXEL(image, 92, 92, s_blue);
+	EXPECT_PIXEL(image, 32, 32, s_black);
+	EXPECT_PIXEL(image, 31, 64, s_black);
+
+	auto rotated{ rect };
+	rotated.rotation = 0.4f;
+	const auto turned{ render({ rotated }) };
+	EXPECT_PIXEL(turned, 64, 64, s_red);
+}
+
+TEST(ShapeOutlineFit, SaysHowEachOutlineIsDrawnWithoutADevice)
+{
+	ax::Rectangle rect{ .position = { 32, 32 }, .size = { 64, 64 }, .cornerRadius = 3, .fill = s_red,
+		.outline = { .colour = s_blue, .thickness = 2 }, .screenSpace = true };
+	EXPECT_EQ(ax::ShapeRenderer::outline_fit(rect, 1.0f), ax::OutlineFit::Ring);
+	rect.outline.thickness = 8;
+	EXPECT_EQ(ax::ShapeRenderer::outline_fit(rect, 1.0f), ax::OutlineFit::Clamped);
+	rect.outline.thickness = 40;
+	EXPECT_EQ(ax::ShapeRenderer::outline_fit(rect, 1.0f), ax::OutlineFit::Covers);
+	rect.outline.thickness = 0;
+	EXPECT_EQ(ax::ShapeRenderer::outline_fit(rect, 1.0f), ax::OutlineFit::None);
+	// World space outlines follow the zoom they are drawn at.
+	const ax::Circle circle{ .position = { 0, 0 }, .radius = 10, .fill = s_red, .outline = { .colour = s_blue, .thickness = 15 } };
+	EXPECT_EQ(ax::ShapeRenderer::outline_fit(circle, 1.0f), ax::OutlineFit::Covers);
+}
+
+TEST_F(ShapeRendererTest, OutlineCoveringARoundedRectangleFillsWithOutlineColour)
+{
+	const auto image{ render({ ax::Rectangle{
+		.position = { 48, 48 }, .size = { 32, 32 }, .cornerRadius = 3, .fill = s_red,
+		.outline = { .colour = s_blue, .thickness = 20 }, .screenSpace = true } }) };
+
+	EXPECT_PIXEL(image, 64, 64, s_blue);
+	EXPECT_PIXEL(image, 50, 64, s_blue);
+	EXPECT_PIXEL(image, 46, 64, s_black);
+}
+
 //
 // Circles and ellipses
 //

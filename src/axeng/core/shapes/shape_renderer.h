@@ -31,6 +31,15 @@ namespace ax
         std::uint32_t indices{ 0 };
     };
 
+    // How draw() fits a shape's outline (see ShapeRenderer::outline_fit).
+    enum class OutlineFit
+    {
+        None,    // No outline (or nothing drawn at all).
+        Ring,    // A ring inside the shape's edge, the fill inside it.
+        Clamped, // A convex shape whose outline is thicker than its corners: the ring's inner corners are clamped.
+        Covers,  // The outline covers the whole shape, which is drawn in the outline colour.
+    };
+
     // Shapes tessellated once and kept on the GPU (ShapeRenderer::build_static): world space, lit shapes that stay
     // the same from frame to frame.
     struct StaticShapeMesh;
@@ -65,5 +74,8 @@ namespace ax
         static std::shared_ptr<const StaticShapeMesh> build_static(const ShapeList& shapes, float pixelScale);
         // Draws a static mesh with this frame's view: its opaque parts, then its translucent ones.
         static void draw_static(wgpu::RenderPassEncoder& pass, const StaticShapeMesh& mesh);
+        // How draw() fits the shape's outline at pixelScale screen pixels per unit (1 for screen space shapes, whose
+        // outlines are in pixels). Needs no device: tools can ask which shapes an outline covers or clamps.
+        static OutlineFit outline_fit(const Shape& shape, float pixelScale);
     };
 }
