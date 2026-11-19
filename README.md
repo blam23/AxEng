@@ -1,7 +1,9 @@
 # AxEng
 
-Very WIP test of using webgpu and Dawn.
-Currently only Windows is supported.
+A Windows and Web game engine, built using Dawn (WebGPU), C++, and Lua.
+
+Currently being used to create \<Untitled Factory Simulation Game>
+<img width="1627" height="1020" alt="image" src="https://github.com/user-attachments/assets/e7847de9-7a09-4ca7-9174-d6d2ae599cac" />
 
 ## Building on Windows
 
