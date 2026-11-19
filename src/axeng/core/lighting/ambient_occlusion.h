@@ -7,6 +7,8 @@
 #include <webgpu/webgpu_cpp.h>
 #include <glm/glm.hpp>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 
@@ -31,6 +33,17 @@ namespace ax
 
 		bool operator==(const AmbientOcclusion2D&) const = default;
 	};
+
+	// Something standing over the ground at height z, its corners in world pixels in order round it:
+	// casters lower than z (sprite z, the stand-in discs at 0) cast no shadow inside it, nor mark where they stand,
+	// being hidden beneath it, as a LightOccluder2D hides the lights before it. Casters at z or above are untouched.
+	struct AmbientOcclusionCut2D
+	{
+		std::array<glm::vec2, 4> corners{};
+		float z{};
+	};
+	// The cuts a frame takes (Window::submit_ao_cuts); any more are ignored.
+	inline constexpr std::size_t max_ao_cuts{ 16 };
 
 	class AmbientOcclusion
 	{

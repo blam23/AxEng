@@ -66,7 +66,7 @@ namespace ax
 	};
 
 	// A convex quad in world pixels that resets the light map to ambient, hiding every light drawn before it. Lights
-	// from firstLight on are drawn after it. Used for things standing over the world, such as moving decks, so the
+	// from firstLight on are drawn after it. Used for things standing over the world, so the
 	// lights beneath them stay hidden. Corners go round the quad in order. A non-zero layer names the occluder, so
 	// lights drawn elsewhere (particles) can be placed just after it.
 	struct LightOccluder2D

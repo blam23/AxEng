@@ -9,6 +9,43 @@ struct View {
 };
 @group(0) @binding(0) var<uniform> view: View;
 
+// The ambient occlusion cuts, as basic_shader.wgsl reads them. The discs stand on the ground, at depth 0.5 (z 0).
+struct AoCut {
+	ab: vec4<f32>,
+	cd: vec4<f32>,
+	depth: vec4<f32>,
+};
+struct AoCuts {
+	shift: vec4<f32>,
+	cuts: array<AoCut, 16>,
+};
+@group(0) @binding(1) var<uniform> aoCuts: AoCuts;
+
+fn ao_cut_side(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+	let edge = b - a;
+	let to = p - a;
+	return edge.x * to.y - edge.y * to.x;
+}
+
+fn ao_cut(viewWorld: vec2<f32>) -> bool {
+	let p = viewWorld + aoCuts.shift.xy;
+	let count = min(u32(aoCuts.shift.z), 16u);
+	for (var i = 0u; i < count; i = i + 1u) {
+		let cut = aoCuts.cuts[i];
+		if (0.5 >= cut.depth.x) {
+			continue;
+		}
+		let s0 = ao_cut_side(p, cut.ab.xy, cut.ab.zw);
+		let s1 = ao_cut_side(p, cut.ab.zw, cut.cd.xy);
+		let s2 = ao_cut_side(p, cut.cd.xy, cut.cd.zw);
+		let s3 = ao_cut_side(p, cut.cd.zw, cut.ab.xy);
+		if ((s0 >= 0.0 && s1 >= 0.0 && s2 >= 0.0 && s3 >= 0.0) || (s0 <= 0.0 && s1 <= 0.0 && s2 <= 0.0 && s3 <= 0.0)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 struct VSOut {
 	@builtin(position) pos: vec4<f32>,
 	@location(0) world: vec2<f32>,
@@ -40,7 +77,7 @@ fn fs_main(in_: VSOut) -> @location(0) vec4<f32> {
 	let a = in_.disc.xy;
 	let along = -view.sweep.xy;
 	let t = clamp(dot(in_.world - a, along) / max(dot(along, along), 1e-6), 0.0, 1.0);
-	if (distance(in_.world, a + along * t) > in_.disc.z) {
+	if (distance(in_.world, a + along * t) > in_.disc.z || ao_cut(in_.world)) {
 		discard;
 	}
 	return vec4<f32>(1.0);

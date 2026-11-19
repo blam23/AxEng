@@ -409,7 +409,7 @@ TEST_F(LightRendererTest, LightBrightensOnlyWithinItsRadius)
 
 TEST_F(LightRendererTest, OccluderHidesOnlyTheLightsBeforeIt)
 {
-	// A red light at the centre, then a deck over the left half (turned a little), then a green light on the deck.
+	// A red light at the centre, then an occluder over the left half (turned a little), then a green light on it.
 	const std::array lights{
 		ax::Light2D{ .position = { 0.0f, 0.0f }, .radius = 48.0f, .intensity = 2.0f, .colour = { 1.0f, 0.0f, 0.0f },
 			.falloff = 1.0f },
@@ -421,7 +421,7 @@ TEST_F(LightRendererTest, OccluderHidesOnlyTheLightsBeforeIt)
 		.firstLight = 1 } };
 	const auto image{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, settings({ 0.1f, 0.1f, 0.1f }), lights, {}, 1, centred_view(),
 		{}, {}, nullptr, occluders) };
-	// Beside the deck the red light shines; on it there is only ambient and the green light.
+	// Beside the occluder the red light shines; on it there is only ambient and the green light.
 	EXPECT_GT(image.at(64 + 12, 64)[0], 200);
 	EXPECT_TRUE(close_to(image.at(64 - 20, 64 - 30), { 26, 26, 26, 255 }, 3));
 	EXPECT_TRUE(close_to(image.at(64 - 30, 64), { 26, 255, 26, 255 }, 3));
@@ -568,7 +568,7 @@ TEST_F(LightRendererTest, ParticlesLightTheSceneAroundThem)
 
 TEST_F(LightRendererTest, ParticleLightsGoBeneathOccluders)
 {
-	// A deck over a glowing particle hides its light; a light added after the deck still shows.
+	// An occluder over a glowing particle hides its light; a light added after the occluder still shows.
 	ax::ParticleSystem particles;
 	ax::ParticleConfig config{};
 	config.capacity = 4;
@@ -602,14 +602,14 @@ TEST_F(LightRendererTest, ParticleLightsGoBeneathOccluders)
 			particles.draw_lights(pass, [layer](std::uint32_t emitter) { return emitter == layer; });
 		}, nullptr, occluders) };
 	EXPECT_EQ(particles.emission_light_emitters(), 1u);
-	EXPECT_EQ(image.at(64, 64)[1], 0) << "the particle's light is hidden beneath the deck";
-	EXPECT_GT(image.at(64 + 30, 64 + 30)[0], 200) << "a light added after the deck shows on it";
+	EXPECT_EQ(image.at(64, 64)[1], 0) << "the particle's light is hidden beneath the occluder";
+	EXPECT_GT(image.at(64 + 30, 64 + 30)[0], 200) << "a light added after the occluder shows on it";
 	particles.shutdown();
 }
 
 TEST_F(LightRendererTest, ParticleLightsInAnOccludersLayerShowOnIt)
 {
-	// A particle on the deck (in the deck's light layer) lights the deck; one in layer 0 beside it, under the deck, does not.
+	// A particle in the occluder's light layer lights the occluded area; one in layer 0 beside it, under the occluder, does not.
 	ax::ParticleSystem particles;
 	ax::ParticleConfig config{};
 	config.capacity = 4;
@@ -625,13 +625,13 @@ TEST_F(LightRendererTest, ParticleLightsInAnOccludersLayerShowOnIt)
 	config.particleLight = { .enabled = true, .radiusScale = 4.0f, .intensity = 1.0f, .falloff = 1.0f };
 	config.position = { -20.0f, 0.0f };
 	config.lightLayer = 7;
-	const auto onDeck{ particles.create(config) };
-	onDeck->play();
+	const auto inLayer{ particles.create(config) };
+	inLayer->play();
 	auto beneath{ config };
 	beneath.position = { 20.0f, 0.0f };
 	beneath.lightLayer = 0;
-	const auto underDeck{ particles.create(beneath) };
-	underDeck->play();
+	const auto beneath0{ particles.create(beneath) };
+	beneath0->play();
 	const std::array occluders{ ax::LightOccluder2D{
 		.corners = { glm::vec2{ -40.0f, -40.0f }, glm::vec2{ 40.0f, -40.0f }, glm::vec2{ 40.0f, 40.0f },
 			glm::vec2{ -40.0f, 40.0f } },
@@ -650,8 +650,8 @@ TEST_F(LightRendererTest, ParticleLightsInAnOccludersLayerShowOnIt)
 			particles.draw_lights(pass, [layer](std::uint32_t emitter) { return emitter == layer; });
 		}, nullptr, occluders) };
 	EXPECT_EQ(calls, (std::vector<std::uint32_t>{ 0, 7 }));
-	EXPECT_GT(image.at(64 - 20, 64)[1], 200) << "the deck's own particle lights it";
-	EXPECT_EQ(image.at(64 + 20, 64)[1], 0) << "a particle beneath the deck does not";
+	EXPECT_GT(image.at(64 - 20, 64)[1], 200) << "the occluder's own particle lights it";
+	EXPECT_EQ(image.at(64 + 20, 64)[1], 0) << "a particle beneath the occluder does not";
 	particles.shutdown();
 }
 

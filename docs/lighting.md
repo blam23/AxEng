@@ -40,10 +40,10 @@ Particle emitters add lights of their own, which are included automatically: see
 
 `LightOccluder2D` is a convex quad (four world-pixel corners) that resets the light map to ambient beneath it, hiding
 every light before `firstLight`; lights from `firstLight` on are drawn after it. Pass them, in `firstLight` order, with
-`window.submit_lights(lights, glows, occluders)`. Use them for things standing over the world, such as moving decks.
+`window.submit_lights(lights, glows, occluders)`. Use them for things standing over the world.
 An occluder with a non-zero `layer` names a light layer. A particle emitter's lights go in its
 `ParticleConfig::lightLayer`: layer 0 (the default), or a layer with no occluder this frame, goes beneath every occluder;
-any other layer is drawn just after the occluder of that layer, so a deck's own effects light the deck.
+any other layer is drawn just after the occluder of that layer, so effects standing on the occluder light it.
 `LightRenderer::encode` calls `extraLights(pass, layer)` once with layer 0 and once after each layered occluder. Glows are
 not occluded: drop glows beneath an occluder on the CPU.
 
@@ -104,8 +104,8 @@ radiance cascades (`RadianceCascades`, `radiance_cascades.h`, `radiance.wgsl`). 
 lights there are.
 
 **Which lights.** A light is traced when `Light2D::shadows` is above 0, it is positive, omni or a cone (not a beam), at
-least `minLightTexels` GI texels in radius, inside the grid, and before the first `LightOccluder2D` (so a deck's own
-lights stay analytic and its occluder still hides what is beneath). At most 2046 are traced. The rest are drawn as
+least `minLightTexels` GI texels in radius, inside the grid, and before the first `LightOccluder2D` (so the lights after an occluder
+stay analytic and it still hides what is beneath). At most 2046 are traced. The rest are drawn as
 before. Light leaves a disc of `Light2D::sourceRadius` world pixels round the light (never smaller than 2.5 probe
 spacings, below which sources fall between the rays): give a light on a solid thing a source radius inside it: what blocks
 within 1.75 times the source (the one given, not the wider one drawn on a coarse grid, which would take in whatever stands near) is taken as its body and lets its light out. Close to its source the cascades' few nearby rays cannot resolve a light and it would flicker

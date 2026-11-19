@@ -27,7 +27,50 @@ struct VSOut {
 	@location(1) tint : vec4<f32>,
 	@location(2) @interpolate(flat) texelBounds : vec4<f32>,
 	@location(3) @interpolate(flat) clip_rect : vec4<f32>,
+	// Where it is in the world, in pixels (in the view's world: the ambient occlusion masks' may be shifted).
+	@location(4) world : vec2<f32>,
 };
+
+// Ambient occlusion cuts (AmbientOcclusionCut2D): areas hiding the casters beneath them. Only the ambient occlusion
+// caster pipeline binds group 2.
+struct AoCut {
+	ab: vec4<f32>,
+	cd: vec4<f32>,
+	// x: the depth a caster must reach to stand above it.
+	depth: vec4<f32>,
+};
+struct AoCuts {
+	// xy: added to a position in the view's world to give where it lies in the world; z: the count.
+	shift: vec4<f32>,
+	cuts: array<AoCut, 16>,
+};
+@group(2) @binding(0) var<uniform> aoCuts : AoCuts;
+
+fn ao_cut_side(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>) -> f32 {
+	let edge = b - a;
+	let to = p - a;
+	return edge.x * to.y - edge.y * to.x;
+}
+
+// Whether a caster at this depth, at this place in the view's world, lies hidden beneath a cut.
+fn ao_cut(viewWorld: vec2<f32>, depth: f32) -> bool {
+	let p = viewWorld + aoCuts.shift.xy;
+	let count = min(u32(aoCuts.shift.z), 16u);
+	for (var i = 0u; i < count; i = i + 1u) {
+		let cut = aoCuts.cuts[i];
+		if (depth >= cut.depth.x) {
+			continue;
+		}
+		let s0 = ao_cut_side(p, cut.ab.xy, cut.ab.zw);
+		let s1 = ao_cut_side(p, cut.ab.zw, cut.cd.xy);
+		let s2 = ao_cut_side(p, cut.cd.xy, cut.cd.zw);
+		let s3 = ao_cut_side(p, cut.cd.zw, cut.ab.xy);
+		if ((s0 >= 0.0 && s1 >= 0.0 && s2 >= 0.0 && s3 >= 0.0) || (s0 <= 0.0 && s1 <= 0.0 && s2 <= 0.0 && s3 <= 0.0)) {
+			return true;
+		}
+	}
+	return false;
+}
 
 @vertex
 fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance: u32) -> VSOut {
@@ -79,6 +122,7 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	let depth = 0.5 + atan(u.z_idx) / 3.141592653589793;
 	out.pos = vec4<f32>(ndcX, ndcY, depth, 1.0);
 	out.uv = uv;
+	out.world = worldPos;
 	out.tint = vec4<f32>(unpack2x16float(u.tint.x), unpack2x16float(u.tint.y));
 	out.clip_rect = vec4<f32>(
 		f32(u.clip.x & 0xFFFFu), f32(u.clip.x >> 16u), f32(u.clip.y & 0xFFFFu), f32(u.clip.y >> 16u));
@@ -151,10 +195,10 @@ fn fs_radiance_occluder(in_: VSOut) -> @location(0) vec4<f32> {
 }
 
 // The silhouette of an ambient occlusion caster: full coverage where it is at least half opaque (red, for a single
-// channel mask).
+// channel mask), and none where a cut hides it.
 @fragment
 fn fs_ao_silhouette(in_: VSOut) -> @location(0) vec4<f32> {
-	if (sprite_color(in_).a < 0.5) {
+	if (sprite_color(in_).a < 0.5 || ao_cut(in_.world, in_.pos.z)) {
 		discard;
 	}
 	return vec4<f32>(1.0);

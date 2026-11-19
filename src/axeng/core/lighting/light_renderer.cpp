@@ -398,7 +398,7 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 	if (!ensure_light_map(device, mapWidth, mapHeight))
 		return;
 
-	// Radiance cascades: lights that may cast shadows, before the first occluder (so deck layering still works), are
+	// Radiance cascades: lights that may cast shadows, before the first occluder (so occluder layering still works), are
 	// traced and resolved into the light map instead of drawn.
 	const auto& radiance{ settings.radiance };
 	bool traced{}, radianceRan{};

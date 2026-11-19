@@ -187,7 +187,10 @@ protected:
 		layoutDesc.entryCount = 1;
 		layoutDesc.entries = &cameraLayoutEntry;
 		const auto cameraLayout{ s_device.CreateBindGroupLayout(&layoutDesc) };
-		const std::array<wgpu::BindGroupLayout, 2> layouts{ spriteLayout, cameraLayout };
+		// The ambient occlusion cuts (none here), which fs_ao_silhouette reads.
+		cameraLayoutEntry.visibility = wgpu::ShaderStage::Fragment;
+		const auto cutLayout{ s_device.CreateBindGroupLayout(&layoutDesc) };
+		const std::array<wgpu::BindGroupLayout, 3> layouts{ spriteLayout, cameraLayout, cutLayout };
 		wgpu::PipelineLayoutDescriptor pipelineLayoutDesc{};
 		pipelineLayoutDesc.bindGroupLayoutCount = layouts.size();
 		pipelineLayoutDesc.bindGroupLayouts = layouts.data();
@@ -276,6 +279,17 @@ protected:
 		groupDesc.entryCount = 1;
 		groupDesc.entries = &cameraEntry;
 		const auto cameraGroup{ s_device.CreateBindGroup(&groupDesc) };
+		const std::array<float, 4 + 12 * 16> noCuts{};
+		bufferDesc.size = sizeof(noCuts);
+		const auto cutBuffer{ s_device.CreateBuffer(&bufferDesc) };
+		s_device.GetQueue().WriteBuffer(cutBuffer, 0, noCuts.data(), sizeof(noCuts));
+		wgpu::BindGroupEntry cutEntry{};
+		cutEntry.binding = 0;
+		cutEntry.buffer = cutBuffer;
+		cutEntry.size = sizeof(noCuts);
+		groupDesc.layout = pipeline.GetBindGroupLayout(2);
+		groupDesc.entries = &cutEntry;
+		const auto cutGroup{ s_device.CreateBindGroup(&groupDesc) };
 
 		textureDesc.size = { outputWidth, outputHeight };
 		textureDesc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::CopySrc;
@@ -298,6 +312,7 @@ protected:
 		pass.SetPipeline(pipeline);
 		pass.SetBindGroup(0, spriteGroup);
 		pass.SetBindGroup(1, cameraGroup);
+		pass.SetBindGroup(2, cutGroup);
 		pass.Draw(6, static_cast<std::uint32_t>(recordCount));
 		pass.End();
 

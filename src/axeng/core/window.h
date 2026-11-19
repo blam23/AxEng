@@ -258,6 +258,9 @@ namespace ax
 		};
 		std::shared_ptr<const AoDiscBatch> create_ao_disc_batch(std::span<const glm::vec3> discs);
 		void submit_ao_discs(std::shared_ptr<const AoDiscBatch> batch);
+		// Areas hiding the shadow casters beneath them for the next frame (AmbientOcclusionCut2D), swapped
+		// in like submit_lights; the first max_ao_cuts count.
+		void submit_ao_cuts(std::vector<AmbientOcclusionCut2D>& cuts);
 		// Round occluders for the next frame's radiance cascades, swapped in like submit_lights. Sprites with
 		// sprite_flag_occluder occlude too.
 		void submit_radiance_circles(std::vector<RadianceCircle>& circles);
@@ -459,6 +462,11 @@ namespace ax
 		wgpu::RenderPipeline m_aoDiscPipeline;
 		std::array<gpu::TrackedBuffer, 2> m_aoDiscViewBuffers;
 		std::array<wgpu::BindGroup, 2> m_aoDiscViewBindGroups;
+		// The frame's cuts (submit_ao_cuts) as the caster shaders read them: for the shifted shadows (slots 0 and 2), then
+		// for where casters stand (1 and 3); the casters' group 2 binds them.
+		wgpu::BindGroupLayout m_aoCutLayout;
+		std::array<gpu::TrackedBuffer, 2> m_aoCutBuffers;
+		std::array<wgpu::BindGroup, 2> m_aoCutBindGroups;
 		std::vector<std::shared_ptr<const AoDiscBatch>> m_queuedAoDiscs;
 		std::vector<std::shared_ptr<const AoDiscBatch>> m_frameAoDiscs;
 		// Keyed by address, with the texture's serial: a texture freed without invalidating its entry may have its
@@ -552,6 +560,7 @@ namespace ax
 		std::vector<Light2D> m_mergedLights;
 		std::optional<NoiseShadow2D> m_queuedNoiseShadow{};
 		std::optional<AmbientOcclusion2D> m_queuedAmbientOcclusion{};
+		std::vector<AmbientOcclusionCut2D> m_queuedAoCuts, m_frameAoCuts;
 		std::optional<Mist2D> m_queuedMist{};
 		std::vector<MistMover> m_queuedMistMovers{}, m_frameMistMovers{};
 		std::shared_ptr<const MistMask> m_mistMask{};

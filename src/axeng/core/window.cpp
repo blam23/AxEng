@@ -49,6 +49,7 @@ EM_ASYNC_JS(void, ax_wait_animation_frame, (), {
 #include <format>
 #include <iostream>
 #include <limits>
+#include <numbers>
 #include <span>
 #include <thread>
 
@@ -64,6 +65,37 @@ namespace
 	constexpr unsigned char s_ao_discs_shader[] = {
 #embed "../../../shaders/ao_discs.wgsl"
 	};
+	// The ambient occlusion cuts as the caster shaders read them (AoCuts in basic_shader.wgsl and ao_discs.wgsl).
+	struct AoCutGpu
+	{
+		glm::vec4 ab{}, cd{};
+		// x: the depth a caster must reach to stand above the cut.
+		glm::vec4 depth{};
+	};
+	struct AoCutsGpu
+	{
+		// xy: what moves a mask's view of the world to where its shadows fall; z: the count.
+		glm::vec4 shift{};
+		std::array<AoCutGpu, ax::max_ao_cuts> cuts{};
+	};
+	constexpr std::uint64_t s_ao_cuts_bytes{ sizeof(AoCutsGpu) };
+	static_assert(sizeof(AoCutsGpu) == 16 + 48 * ax::max_ao_cuts);
+
+	AoCutsGpu ao_cuts_gpu(std::span<const ax::AmbientOcclusionCut2D> cuts, glm::vec2 shift)
+	{
+		AoCutsGpu gpu{};
+		const auto count{ std::min(cuts.size(), ax::max_ao_cuts) };
+		gpu.shift = { shift, static_cast<float>(count), 0.0f };
+		for (std::size_t index{}; index < count; ++index)
+		{
+			const auto& cut{ cuts[index] };
+			// As basic_shader.wgsl turns a sprite's z into depth; a hair lower, so casters at the cut's own z stand above it.
+			const auto depth{ 0.5f + std::atan(cut.z) / std::numbers::pi_v<float> - 1e-5f };
+			gpu.cuts[index] = { { cut.corners[0], cut.corners[1] }, { cut.corners[2], cut.corners[3] }, { depth, 0.0f, 0.0f, 0.0f } };
+		}
+		return gpu;
+	}
+
 	constexpr unsigned char s_composite_shader[] = {
 #embed "../../../shaders/composite_shader.wgsl"
 	};
@@ -1064,7 +1096,38 @@ void ax::Window::reload_pipeline()
 		occluderDesc.multisample.count = 1;
 		occluderDesc.label = "Radiance occluder sprites";
 		m_radianceOccluderPipeline = m_device.CreateRenderPipeline(&occluderDesc);
-		// And for ambient occlusion: coverage only, into its single channel masks.
+		// And for ambient occlusion: coverage only, into its single channel masks, with the cuts in group 2.
+		wgpu::BindGroupLayoutEntry cutEntry{};
+		cutEntry.binding = 0;
+		cutEntry.visibility = wgpu::ShaderStage::Fragment;
+		cutEntry.buffer.type = wgpu::BufferBindingType::Uniform;
+		cutEntry.buffer.minBindingSize = s_ao_cuts_bytes;
+		wgpu::BindGroupLayoutDescriptor cutLayoutDesc{};
+		cutLayoutDesc.entryCount = 1;
+		cutLayoutDesc.entries = &cutEntry;
+		m_aoCutLayout = m_device.CreateBindGroupLayout(&cutLayoutDesc);
+		for (std::size_t set{}; set < m_aoCutBuffers.size(); ++set)
+		{
+			wgpu::BufferDescriptor cutDesc{};
+			cutDesc.label = "AmbientOcclusionCutsUBO";
+			cutDesc.size = s_ao_cuts_bytes;
+			cutDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+			m_aoCutBuffers[set] = gpu::create_buffer(m_device, cutDesc, "Window");
+			wgpu::BindGroupEntry entry{};
+			entry.binding = 0;
+			entry.buffer = m_aoCutBuffers[set];
+			entry.size = s_ao_cuts_bytes;
+			wgpu::BindGroupDescriptor bindDesc{};
+			bindDesc.layout = m_aoCutLayout;
+			bindDesc.entryCount = 1;
+			bindDesc.entries = &entry;
+			m_aoCutBindGroups[set] = m_device.CreateBindGroup(&bindDesc);
+		}
+		const wgpu::BindGroupLayout aoLayouts[3]{ m_groupLayout, m_globalLayout, m_aoCutLayout };
+		wgpu::PipelineLayoutDescriptor aoLayoutDesc{};
+		aoLayoutDesc.bindGroupLayoutCount = 3;
+		aoLayoutDesc.bindGroupLayouts = aoLayouts;
+		occluderDesc.layout = m_device.CreatePipelineLayout(&aoLayoutDesc);
 		occluderTarget.format = ao_mask_format;
 		occluderFragment.entryPoint = "fs_ao_silhouette";
 		occluderDesc.label = "Ambient occlusion caster sprites";
@@ -1094,13 +1157,18 @@ void ax::Window::reload_pipeline()
 		discShaderCode.code = embedded_text(s_ao_discs_shader);
 		discShaderDesc.nextInChain = &discShaderCode;
 		const auto discShader{ m_device.CreateShaderModule(&discShaderDesc) };
-		wgpu::BindGroupLayoutEntry viewEntry{};
-		viewEntry.binding = 0;
-		viewEntry.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
-		viewEntry.buffer.type = wgpu::BufferBindingType::Uniform;
+		std::array<wgpu::BindGroupLayoutEntry, 2> viewEntries{};
+		viewEntries[0].binding = 0;
+		viewEntries[0].visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
+		viewEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
+		// The cuts, as the sprites' group 2.
+		viewEntries[1].binding = 1;
+		viewEntries[1].visibility = wgpu::ShaderStage::Fragment;
+		viewEntries[1].buffer.type = wgpu::BufferBindingType::Uniform;
+		viewEntries[1].buffer.minBindingSize = s_ao_cuts_bytes;
 		wgpu::BindGroupLayoutDescriptor viewLayoutDesc{};
-		viewLayoutDesc.entryCount = 1;
-		viewLayoutDesc.entries = &viewEntry;
+		viewLayoutDesc.entryCount = viewEntries.size();
+		viewLayoutDesc.entries = viewEntries.data();
 		const auto viewLayout{ m_device.CreateBindGroupLayout(&viewLayoutDesc) };
 		wgpu::PipelineLayoutDescriptor discLayoutDesc{};
 		discLayoutDesc.bindGroupLayoutCount = 1;
@@ -1137,14 +1205,18 @@ void ax::Window::reload_pipeline()
 			viewDesc.size = 12 * sizeof(float);
 			viewDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
 			m_aoDiscViewBuffers[slot] = gpu::create_buffer(m_device, viewDesc, "Window");
-			wgpu::BindGroupEntry entry{};
-			entry.binding = 0;
-			entry.buffer = m_aoDiscViewBuffers[slot];
-			entry.size = viewDesc.size;
+			std::array<wgpu::BindGroupEntry, 2> entries{};
+			entries[0].binding = 0;
+			entries[0].buffer = m_aoDiscViewBuffers[slot];
+			entries[0].size = viewDesc.size;
+			// Slot 2 sweeps the shadows, slot 3 marks where the discs stand.
+			entries[1].binding = 1;
+			entries[1].buffer = m_aoCutBuffers[slot];
+			entries[1].size = s_ao_cuts_bytes;
 			wgpu::BindGroupDescriptor bindDesc{};
 			bindDesc.layout = viewLayout;
-			bindDesc.entryCount = 1;
-			bindDesc.entries = &entry;
+			bindDesc.entryCount = entries.size();
+			bindDesc.entries = entries.data();
 			m_aoDiscViewBindGroups[slot] = m_device.CreateBindGroup(&bindDesc);
 		}
 	}
@@ -2927,6 +2999,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			frameAmbientOcclusion = std::exchange(m_queuedAmbientOcclusion, std::nullopt);
 			m_frameAoDiscs.swap(m_queuedAoDiscs);
 			m_queuedAoDiscs.clear();
+			m_frameAoCuts.swap(m_queuedAoCuts);
+			m_queuedAoCuts.clear();
 			m_frameMistMovers.swap(m_queuedMistMovers);
 			m_queuedMistMovers.clear();
 			frameMistMask = m_mistMask;
@@ -2937,6 +3011,14 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			m_queuedGlows.clear();
 			m_queuedOccluders.clear();
 			m_queuedRadianceCircles.clear();
+		}
+		if (m_aoCutBuffers[0] && m_aoCutBuffers[1])
+		{
+			// The shifted masks see the world moved back along the offset, so their shadows fall the offset on from it.
+			const auto shifted{ ao_cuts_gpu(m_frameAoCuts, frameAmbientOcclusion ? frameAmbientOcclusion->offset : glm::vec2{}) };
+			const auto standing{ ao_cuts_gpu(m_frameAoCuts, {}) };
+			m_queue.WriteBuffer(m_aoCutBuffers[0], 0, &shifted, sizeof(shifted));
+			m_queue.WriteBuffer(m_aoCutBuffers[1], 0, &standing, sizeof(standing));
 		}
 		if (lightingActive)
 		{
@@ -3024,6 +3106,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 						m_queue.WriteBuffer(m_aoViewportBuffers[slot], 0, vp, sizeof(vp));
 						pass.SetPipeline(m_aoCasterPipeline);
 						pass.SetBindGroup(1, m_aoViewportBindGroups[slot]);
+						pass.SetBindGroup(2, m_aoCutBindGroups[slot % 2]);
 						for (const auto& range : m_aoSpriteGroupRanges[lists[slot]])
 						{
 							pass.SetBindGroup(0, get_texture_bind_group(range.tex));
@@ -3577,6 +3660,13 @@ void ax::Window::submit_ao_discs(std::shared_ptr<const AoDiscBatch> batch)
 	if (!batch || batch->count == 0) return;
 	std::lock_guard lock{ m_lightingMutex };
 	m_queuedAoDiscs.push_back(std::move(batch));
+}
+
+void ax::Window::submit_ao_cuts(std::vector<AmbientOcclusionCut2D>& cuts)
+{
+	std::lock_guard lock{ m_lightingMutex };
+	m_queuedAoCuts.swap(cuts);
+	cuts.clear();
 }
 
 void ax::Window::render_gui(wgpu::RenderPassEncoder& pass, double delta)
