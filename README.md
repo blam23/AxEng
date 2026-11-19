@@ -5,6 +5,10 @@ A Windows and Web game engine, built using Dawn (WebGPU), C++, and Lua.
 Currently being used to create \<Untitled Factory Simulation Game>
 <img width="1627" height="1020" alt="image" src="https://github.com/user-attachments/assets/e7847de9-7a09-4ca7-9174-d6d2ae599cac" />
 
+And \<Untitled Survivor-like> (this will be open sourced at some point)
+<img width="1919" height="1079" alt="image" src="https://github.com/user-attachments/assets/c7a3d8b3-d1e7-4f34-ac55-110a317ade57" />
+
+
 ## Building on Windows
 
 Install xmake, LLVM Clang, Visual Studio C++ build tools, and a Windows SDK.
