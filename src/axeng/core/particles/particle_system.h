@@ -6,12 +6,14 @@
 #include <webgpu/webgpu_cpp.h>
 #include <glm/glm.hpp>
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <string>
 #include <thread>
 #include <vector>
@@ -93,6 +95,11 @@ namespace ax
 		glm::vec4 colorStart{ 1.0f };
 		glm::vec4 colorEnd{ 1.0f, 1.0f, 1.0f, 0.0f };
 		glm::vec2 gravity{};
+		// An ambient flow in world units per second (wind, a current). Each particle takes the flow as it is when it
+		// spawns and is carried toward moving with it over flowResponse seconds, so changing the flow bends what is
+		// emitted from then on without moving particles already in the air.
+		glm::vec2 flow{};
+		float flowResponse{ 1.0f };
 		float z{};
 		// The light layer the emitter's lights go in: 0 is beneath every LightOccluder2D, any other value is drawn just
 		// after the occluder of that layer (see Window::submit_lights).
@@ -101,6 +108,17 @@ namespace ax
 		ParticleEmissionLightConfig particleLight{};
 	};
 
+	// How far the flow a particle spawned in has carried it at an age (seconds): it starts at rest and is drawn toward
+	// moving with the flow over `response` seconds. particles.wgsl's flow_offset works out the same.
+	inline glm::vec2 particle_flow_offset(glm::vec2 flow, float response, float age) noexcept
+	{
+		const auto r{ response > 0.001f ? response : 0.001f };
+		return flow * (age - r * (1.0f - std::exp(-age / r)));
+	}
+
+	// The particle shader's source (particles.wgsl).
+	std::string_view particle_shader_source() noexcept;
+
 	class ParticleEmitter
 	{
 	public:
@@ -108,6 +126,8 @@ namespace ax
 		void set_config(const ParticleConfig& config);
 		void set_position(glm::vec2 position);
 		void set_rotation(float rotation);
+		// Changes the flow alone (ParticleConfig::flow), for an emitter whose flow follows something each frame.
+		void set_flow(glm::vec2 flow);
 		// Recolours the emitter, its live particles included (colours are applied as particles are drawn).
 		void set_colors(glm::vec4 start, glm::vec4 end);
 		void play();

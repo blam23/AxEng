@@ -17,9 +17,10 @@ struct Parameters
 	rotationRange: vec4<f32>,
 	colorStart: vec4<f32>,
 	colorEnd: vec4<f32>,
+	// Gravity (xy) and the ambient flow (zw).
 	gravity: vec4<f32>,
 	misc: vec4<u32>,
-	// Per-particle light: radius scale, intensity, falloff.
+	// Per-particle light: radius scale, intensity, falloff; w the flow's response time.
 	light: vec4<f32>,
 };
 
@@ -64,6 +65,15 @@ fn particle_age(particle: Particle, currentTime: f32) -> f32
 	return select(elapsed, elapsed + 4096.0, elapsed < 0.0);
 }
 
+// How far the flow a particle spawned in (randomState.yz) has carried it: it starts at rest and is drawn toward
+// moving with the flow over the response time, like drag.
+fn flow_offset(particle: Particle, age: f32, parameters: Parameters) -> vec2<f32>
+{
+	let flow = vec2<f32>(bitcast<f32>(particle.randomState.y), bitcast<f32>(particle.randomState.z));
+	let response = max(parameters.light.w, 0.001);
+	return flow * (age - response * (1.0 - exp(-age / response)));
+}
+
 fn particle_position(particle: Particle, age: f32, parameters: Parameters) -> vec2<f32>
 {
 	var localPosition = particle.originVelocity.xy + particle.originVelocity.zw * age
@@ -72,7 +82,7 @@ fn particle_position(particle: Particle, age: f32, parameters: Parameters) -> ve
 	{
 		localPosition = parameters.transform.xy + rotate(localPosition, parameters.transform.z);
 	}
-	return localPosition;
+	return localPosition + flow_offset(particle, age, parameters);
 }
 
 @compute @workgroup_size(64)
@@ -133,7 +143,7 @@ fn update_particles(@builtin(global_invocation_id) id: vec3<u32>)
 		let angularVelocity = mix(parameters.rotationRange.z, parameters.rotationRange.w, random01(&seed));
 		particle.originVelocity = vec4<f32>(origin, velocity);
 		particle.ageLifeRotationAngular = vec4<f32>(parameters.time.x, lifetime, initialRotation, angularVelocity);
-		particle.randomState = vec4<u32>(seed, 0u, 0u, 0u);
+		particle.randomState = vec4<u32>(seed, bitcast<u32>(parameters.gravity.z), bitcast<u32>(parameters.gravity.w), 0u);
 		age = 0.0;
 	}
 	else if (particle.ageLifeRotationAngular.y > 0.0)

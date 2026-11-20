@@ -176,6 +176,8 @@ namespace
 		config.angularVelocityMax = number_field(table, "angular_velocity_max", config.angularVelocityMax);
 		vector2_field(table, "position", config.position);
 		vector2_field(table, "gravity", config.gravity);
+		vector2_field(table, "flow", config.flow);
+		config.flowResponse = number_field(table, "flow_response", config.flowResponse);
 		vector2_field(table, "spawn_size", config.spawnSize);
 		range_field(table, "lifetime", config.lifetimeMin, config.lifetimeMax);
 		range_field(table, "speed", config.speedMin, config.speedMax);

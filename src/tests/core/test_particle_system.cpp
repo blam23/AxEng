@@ -105,6 +105,35 @@ TEST(ParticleSystemTests, ValidatesEmitterParameters)
 	config.spread = 6.2831853f;
 	config.capacity = 0;
 	EXPECT_TRUE(ax::validate_particle_config(config));
+	config.capacity = 1024;
+	config.flow = { 12.0f, -3.0f };
+	EXPECT_FALSE(ax::validate_particle_config(config));
+	config.flowResponse = 0.0f;
+	EXPECT_TRUE(ax::validate_particle_config(config));
+	config.flowResponse = 1.0f;
+	config.flow.x = std::numeric_limits<float>::quiet_NaN();
+	EXPECT_TRUE(ax::validate_particle_config(config));
+}
+
+// A particle takes the flow it spawned in: at rest at first, it is carried along with the flow once older than its
+// response time, so it ends up lagging where moving with the flow from the start would have put it by flow * response.
+TEST(ParticleSystemTests, FlowCarriesParticlesAlongOnceTheyAreOlderThanTheResponse)
+{
+	const glm::vec2 flow{ 30.0f, -12.0f };
+	constexpr float response{ 0.8f };
+	EXPECT_EQ(ax::particle_flow_offset(flow, response, 0.0f), glm::vec2{});
+	// Young: barely moved (the offset grows as age squared over twice the response).
+	const auto young{ ax::particle_flow_offset(flow, response, 0.05f) };
+	EXPECT_NEAR(young.x, flow.x * 0.05f * 0.05f / (2.0f * response), 0.01f);
+	// Old: moving with the flow, flow * response behind.
+	const auto old{ ax::particle_flow_offset(flow, response, 10.0f) };
+	EXPECT_NEAR(old.x, flow.x * (10.0f - response), 0.01f);
+	EXPECT_NEAR(old.y, flow.y * (10.0f - response), 0.01f);
+	const auto speed{ (ax::particle_flow_offset(flow, response, 10.01f) - old) / 0.01f };
+	EXPECT_NEAR(speed.x, flow.x, 0.05f);
+	EXPECT_NEAR(speed.y, flow.y, 0.05f);
+	// The shader works out the same.
+	EXPECT_NE(ax::particle_shader_source().find("flow * (age - response * (1.0 - exp(-age / response)))"), std::string_view::npos);
 }
 
 TEST(ParticleSystemTests, ComputesAndDrawsWithGpuResidentState)

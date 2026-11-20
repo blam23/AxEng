@@ -139,8 +139,11 @@ std::optional<std::string> ax::validate_particle_config(const ParticleConfig& co
 		|| !finite(config.lifetimeMin) || !finite(config.lifetimeMax)
 		|| !finite(config.speedMin) || !finite(config.speedMax)
 		|| !finite(config.sizeStart) || !finite(config.sizeEnd)
-		|| !finite(config.gravity.x) || !finite(config.gravity.y) || !finite(config.z))
+		|| !finite(config.gravity.x) || !finite(config.gravity.y) || !finite(config.z)
+		|| !finite(config.flow.x) || !finite(config.flow.y) || !finite(config.flowResponse))
 		return "particle parameters must be finite numbers";
+	if (config.flowResponse <= 0.0f)
+		return "flow_response must be positive";
 	if (config.lifetimeMin <= 0.0f || config.lifetimeMax < config.lifetimeMin)
 		return "lifetime must have positive min and max >= min";
 	if (config.speedMin < 0.0f || config.speedMax < config.speedMin)
@@ -215,6 +218,20 @@ void ax::ParticleEmitter::set_rotation(float rotation)
 {
 	check_thread();
 	m_config.rotation = rotation;
+}
+
+std::string_view ax::particle_shader_source() noexcept
+{
+	static constexpr unsigned char s_shader[] = {
+#embed "particles.wgsl"
+	};
+	return { reinterpret_cast<const char*>(s_shader), sizeof(s_shader) };
+}
+
+void ax::ParticleEmitter::set_flow(glm::vec2 flow)
+{
+	check_thread();
+	if (std::isfinite(flow.x) && std::isfinite(flow.y)) m_config.flow = flow;
 }
 
 void ax::ParticleEmitter::play()
@@ -298,10 +315,11 @@ void ax::ParticleEmitter::update_world_bounds()
 	const auto spawnExtent{ config.spawnShape == ParticleSpawnShape::Rectangle
 		? std::sqrt(config.spawnSize.x * config.spawnSize.x + config.spawnSize.y * config.spawnSize.y) * 0.5f
 		: config.spawnRadius };
-	const auto extentX{ spawnExtent + config.speedMax * lifetime
+	// The flow carries a particle at most |flow| per second.
+	const auto extentX{ spawnExtent + config.speedMax * lifetime + std::abs(config.flow.x) * lifetime
 		+ 0.5f * std::abs(config.gravity.x) * lifetime * lifetime
 		+ (std::max)(config.sizeStart, config.sizeEnd) * 0.5f };
-	const auto extentY{ spawnExtent + config.speedMax * lifetime
+	const auto extentY{ spawnExtent + config.speedMax * lifetime + std::abs(config.flow.y) * lifetime
 		+ 0.5f * std::abs(config.gravity.y) * lifetime * lifetime
 		+ (std::max)(config.sizeStart, config.sizeEnd) * 0.5f };
 	const glm::vec4 reach{
@@ -457,11 +475,9 @@ void ax::ParticleSystem::initialise(wgpu::Device& device, wgpu::TextureFormat co
 	m_colourFormat = colourFormat;
 	m_sampleCount = sampleCount;
 
-	constexpr unsigned char s_shader[] = {
-#embed "particles.wgsl"
-	};
+	const auto code{ particle_shader_source() };
 	wgpu::ShaderSourceWGSL source{};
-	source.code = { reinterpret_cast<const char*>(s_shader), sizeof(s_shader) };
+	source.code = { code.data(), code.size() };
 	wgpu::ShaderModuleDescriptor shaderDesc{};
 	shaderDesc.nextInChain = &source;
 	shaderDesc.label = "ParticleShader";
@@ -723,13 +739,13 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 			config.angularVelocityMin, config.angularVelocityMax };
 		params.colorStart = { config.colorStart.r, config.colorStart.g, config.colorStart.b, config.colorStart.a };
 		params.colorEnd = { config.colorEnd.r, config.colorEnd.g, config.colorEnd.b, config.colorEnd.a };
-		params.gravity = { config.gravity.x, config.gravity.y, 0.0f, 0.0f };
+		params.gravity = { config.gravity.x, config.gravity.y, config.flow.x, config.flow.y };
 		const auto flags{ (emitter->m_clearRequested ? 1u : 0u)
 			| (config.localSpace ? 2u : 0u)
 			| (static_cast<std::uint32_t>(config.spawnShape) << 2u) };
 		params.misc = { config.capacity, config.seed, emitter->m_frame++, flags };
 		params.light = { config.particleLight.radiusScale, config.particleLight.intensity,
-			config.particleLight.falloff, 0.0f };
+			config.particleLight.falloff, config.flowResponse };
 		if (config.particleLight.enabled)
 			++m_emissionLightEmitters;
 

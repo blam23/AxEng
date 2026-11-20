@@ -75,6 +75,7 @@ including its estimated particle reach. It does not alter visibility or simulati
 | `size_start`, `size_end` | Particle size interpolated over its lifetime |
 | `start_color`, `end_color` | RGBA colors interpolated over its lifetime |
 | `gravity` | Constant world-space acceleration |
+| `flow`, `flow_response` | An ambient flow (world units per second) each particle takes as it spawns, and the seconds it takes to be carried along with it (default 1). `ParticleEmitter::set_flow` changes it each frame; only particles spawned after a change follow it |
 
 ## Lights
 
@@ -120,7 +121,7 @@ live particles.
 Particle records store their spawn origin, initial velocity, birth time, lifetime, and rotation data. Position,
 rotation, size, and color are derived analytically on the GPU from age and the emitter parameters. This avoids
 CPU particle updates and lets the compute pass skip an emitter while its conservative reachable AABB is
-outside the camera. The bound covers recorded spawn origins, maximum speed and lifetime, gravity, spawn
+outside the camera. The bound covers recorded spawn origins, maximum speed and lifetime, gravity, flow, spawn
 area, and particle size. Its origin history is retained conservatively, so moving emitters can make the
 bound larger but cannot cause visible particles to be wrongly dropped.
 
@@ -135,6 +136,7 @@ particle age from GPU birth timestamps when it becomes visible again. If it has 
 make the wrapped GPU clock ambiguous, stale slots are cleared. Emission timing continues while culled; births
 that would have happened off-screen are not accumulated as a backlog.
 
-Particle movement currently uses constant gravity and no collision or drag. The render shape is a soft-edged
+Particle movement uses constant gravity and the flow captured at spawn, eased in as
+`flow * (age - response * (1 - exp(-age / response)))`, and no collision. The render shape is a soft-edged
 circle with alpha transparency. Texture particles, curves beyond start/end interpolation, collision,
 trails, and additive rendering are not part of this first implementation.
