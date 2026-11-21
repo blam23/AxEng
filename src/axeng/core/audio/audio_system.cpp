@@ -1594,6 +1594,30 @@ ax::audio::VoiceId ax::audio::AudioSystem::play(const std::string& name, const P
 	return impl.voices.back().id;
 }
 
+ax::audio::VoiceId ax::audio::AudioSystem::play_buffer(std::shared_ptr<const std::vector<float>> samples, Bus bus,
+	const PlayOptions& options)
+{
+	m_impl->pump();
+	if (!samples || samples->empty() || !valid_bus(bus))
+		return 0;
+	auto& impl{ *m_impl };
+	const auto volume{ sanitise(options.volume, 0.0f, 4.0f, 1.0f) };
+
+	std::lock_guard lock{ impl.mutex };
+	impl.make_voice_room();
+	Voice voice{};
+	voice.id = impl.nextVoiceId++;
+	voice.buffer = std::move(samples);
+	voice.pitch = sanitise(options.pitch, 0.01f, 16.0f, 1.0f);
+	voice.volume = volume;
+	voice.loop = options.loop.value_or(false);
+	voice.bus = bus;
+	voice.pan.set(sanitise(options.pan, -1.0f, 1.0f, 0.0f), 0);
+	voice.gain.set(volume, options.fadeIn > 0.0f ? impl.frames_for(options.fadeIn) : 0);
+	impl.voices.push_back(std::move(voice));
+	return impl.voices.back().id;
+}
+
 ax::audio::VoiceId ax::audio::AudioSystem::play_synth(const SynthInstrumentDefinition& definition,
 	std::uint8_t note, float velocity, const InstrumentPlayOptions& options)
 {

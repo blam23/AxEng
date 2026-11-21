@@ -167,6 +167,44 @@ LFO waves are `triangle`, `saw_down`, `saw_up`, `square`, `sine` and `sample_hol
 peak below full scale, so `gain` can still mean its peak level. `app.audio.fm_algorithm(n)` returns `modulators` (for
 each operator, the list that modulates it), `carriers`, `feedback_target` and `feedback_source`, for editors to draw.
 
+## Formant voices
+
+`audio::render_voice` (`voice_synth.h`) renders a voice-like sound from timed segments: a Rosenberg glottal pulse
+train with breath noise through three band-pass resonances (formants). It knows nothing about text: callers decide
+what each segment is.
+
+- `Voiced` segments glide pitch and loudness from start to end, and the formants glide toward their targets
+  (`VoiceTimbre::glide`), so consecutive vowels slur rather than click.
+- `Noise` segments are band-passed hiss (no glottal source).
+- `Gap` segments are silence: the filters ring out through them.
+- The timbre adds breath, per-cycle jitter and shimmer (seeded), vibrato and a source low pass (`brightness`).
+  Loudness changes are smoothed over `smoothing` seconds. Output is soft clipped, never above 1.
+- `RenderedVoice::starts` gives each segment's start in seconds, rounded to samples exactly as rendered, so text or
+  animation can follow the sound.
+
+`AudioSystem::play_buffer(samples, bus, options)` plays mono samples at `sfx_sample_rate` that belong to no sound. The
+voice holds the buffer and frees it once it ends.
+
+```lua
+local buffer, starts = app.audio.render_voice({
+    seed = 7,
+    timbre = { breath = 0.2, jitter = 0.015, shimmer = 0.06, brightness = 3000 },
+    segments = {
+        { kind = "voiced", dur = 0.12, f0 = { 180, 170 }, amp = 1, formants = { { 730, 90 }, { 1090, 110 }, { 2440, 160 } } },
+        { kind = "gap", dur = 0.03 },
+        { kind = "noise", dur = 0.05, amp = 0.2, band = { 4500, 1.5 } },
+    },
+})
+local id = app.audio.play_buffer(buffer, { bus = "ui", volume = 0.8 })
+```
+
+`render_voice` returns the buffer (`seconds`, `peak`, `frames`) and the list of segment starts (one more than the
+segments: the last is the end), or nil for no segments or more than 60 seconds. The buffer is freed with its Lua
+handle; a playing voice keeps its own reference. Timbre keys: `breath`, `jitter`, `shimmer`, `brightness`,
+`vibrato_depth`, `vibrato_rate`, `glide`, `smoothing`, `gain`, `tail`. Segment keys: `kind` (`voiced`, `noise`,
+`gap`), `dur`, `f0` and `amp` (a number or `{ start, end }`), `formants` (up to three `{ hz, bandwidth }`), `breath`
+(added to the timbre's), `band` (`{ hz, q }`, noise only).
+
 ## Sequence arrangements
 
 `audio.sequence` accepts and prepares immutable note arrangements on the Lua/main thread. Notes use beat positions;

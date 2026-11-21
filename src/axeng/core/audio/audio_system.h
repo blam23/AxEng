@@ -187,6 +187,9 @@ namespace ax::audio
 
 		// Returns 0 if the sound doesn't exist, is cooling down, or has no audio.
 		VoiceId play(const std::string& name, const PlayOptions& options = {});
+		// Plays mono samples at sfx_sample_rate that belong to no sound: rendered on the fly and played once. The voice
+		// keeps the buffer alive while it plays. Returns 0 for an empty buffer or the master bus.
+		VoiceId play_buffer(std::shared_ptr<const std::vector<float>> samples, Bus bus, const PlayOptions& options = {});
 		// Pitched voices use the music bus by default. Sample PCM must outlive its active sampler voices.
 		VoiceId play_synth(const SynthInstrumentDefinition& definition, std::uint8_t note, float velocity = 1.0f,
 			const InstrumentPlayOptions& options = {});

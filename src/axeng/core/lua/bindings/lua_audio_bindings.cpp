@@ -6,8 +6,11 @@
 #include "axeng/core/audio/audio_system.h"
 #include "axeng/core/audio/music.h"
 #include "axeng/core/audio/sfx_synth.h"
+#include "axeng/core/audio/voice_synth.h"
 
 #include <array>
+#include <memory>
+#include <tuple>
 #include <cmath>
 #include <functional>
 #include <map>
@@ -21,6 +24,14 @@ namespace
 	using ax::lua::bindings::instrument_envelope_from_table;
 	using ax::lua::bindings::sfx_params_from_table;
 	using ax::lua::bindings::sfx_params_to_table;
+
+	// A rendered voice buffer held by Lua.
+	struct VoiceBuffer
+	{
+		std::shared_ptr<const std::vector<float>> samples{};
+		float seconds{};
+		float peak{};
+	};
 
 	std::uint64_t to_seed(double value) noexcept
 	{
@@ -315,6 +326,125 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 					play.loop = *loop;
 			}
 			const auto id{ with_audio([&](ax::audio::AudioSystem& audio) { return audio.play(name, play); }, ax::audio::VoiceId{}) };
+			return static_cast<double>(id);
+		};
+
+	// Formant voice buffers: rendered on the fly, played once, freed with their Lua handle (a playing voice keeps its own
+	// reference).
+	state.new_usertype<VoiceBuffer>("AudioBuffer", sol::no_constructor,
+		"seconds", sol::readonly(&VoiceBuffer::seconds),
+		"peak", sol::readonly(&VoiceBuffer::peak),
+		"frames", sol::property([](const VoiceBuffer& buffer) { return buffer.samples ? buffer.samples->size() : 0; }));
+
+	audio_table["render_voice"] =
+		[](sol::this_state lua, const sol::table& spec) -> std::tuple<sol::object, sol::object>
+		{
+			sol::state_view view{ lua };
+			ax::audio::VoiceTimbre timbre{};
+			const sol::optional<sol::table> timbreTable{ spec["timbre"] };
+			if (timbreTable)
+			{
+				timbre.breath = timbreTable->get_or("breath", timbre.breath);
+				timbre.jitter = timbreTable->get_or("jitter", timbre.jitter);
+				timbre.shimmer = timbreTable->get_or("shimmer", timbre.shimmer);
+				timbre.brightness = timbreTable->get_or("brightness", timbre.brightness);
+				timbre.vibratoDepth = timbreTable->get_or("vibrato_depth", timbre.vibratoDepth);
+				timbre.vibratoRate = timbreTable->get_or("vibrato_rate", timbre.vibratoRate);
+				timbre.glide = timbreTable->get_or("glide", timbre.glide);
+				timbre.smoothing = timbreTable->get_or("smoothing", timbre.smoothing);
+				timbre.gain = timbreTable->get_or("gain", timbre.gain);
+				timbre.tail = timbreTable->get_or("tail", timbre.tail);
+			}
+			const auto pair{ [](const sol::table& table, const char* key, float fallback) -> std::pair<float, float>
+			{
+				const sol::object value{ table[key] };
+				if (value.is<sol::table>())
+				{
+					const auto inner{ value.as<sol::table>() };
+					const auto a{ inner.get_or(1, fallback) };
+					return { a, inner.get_or(2, a) };
+				}
+				if (value.is<float>()) return { value.as<float>(), value.as<float>() };
+				return { fallback, fallback };
+			} };
+			std::vector<ax::audio::VoiceSegment> segments{};
+			const sol::optional<sol::table> list{ spec["segments"] };
+			if (list)
+			{
+				segments.reserve(list->size());
+				for (std::size_t i{ 1 }; i <= list->size(); ++i)
+				{
+					const sol::optional<sol::table> entry{ (*list)[i] };
+					if (!entry) continue;
+					ax::audio::VoiceSegment segment{};
+					const auto kind{ entry->get_or<std::string>("kind", "gap") };
+					segment.kind = kind == "voiced" ? ax::audio::VoiceSegmentKind::Voiced
+						: kind == "noise" ? ax::audio::VoiceSegmentKind::Noise : ax::audio::VoiceSegmentKind::Gap;
+					segment.seconds = std::clamp(entry->get_or("dur", segment.seconds), 0.0f, 10.0f);
+					std::tie(segment.pitchStart, segment.pitchEnd) = pair(*entry, "f0", segment.pitchStart);
+					std::tie(segment.ampStart, segment.ampEnd) = pair(*entry, "amp", 1.0f);
+					segment.breath = entry->get_or("breath", segment.breath);
+					const sol::optional<sol::table> formants{ (*entry)["formants"] };
+					if (formants)
+						for (std::size_t k{}; k < 3; ++k)
+						{
+							const sol::optional<sol::table> formant{ (*formants)[k + 1] };
+							if (!formant) continue;
+							segment.formants[k].hz = formant->get_or(1, segment.formants[k].hz);
+							segment.formants[k].bandwidth = formant->get_or(2, segment.formants[k].bandwidth);
+						}
+					const sol::optional<sol::table> band{ (*entry)["band"] };
+					if (band)
+					{
+						segment.noiseHz = band->get_or(1, segment.noiseHz);
+						segment.noiseQ = band->get_or(2, segment.noiseQ);
+					}
+					segments.push_back(segment);
+				}
+			}
+			constexpr std::size_t max_voice_seconds{ 60 };
+			double total{};
+			for (const auto& segment : segments) total += segment.seconds;
+			if (segments.empty() || total > max_voice_seconds) return { sol::nil, sol::nil };
+			auto rendered{ ax::audio::render_voice(timbre, segments, ax::audio::sfx_sample_rate,
+				to_seed(spec.get_or("seed", 0.0))) };
+			auto starts{ view.create_table(static_cast<int>(rendered.starts.size()), 0) };
+			for (std::size_t i{}; i < rendered.starts.size(); ++i) starts[i + 1] = rendered.starts[i];
+			auto buffer{ std::make_shared<VoiceBuffer>() };
+			buffer->seconds = rendered.seconds;
+			buffer->peak = rendered.peak;
+			buffer->samples = std::make_shared<const std::vector<float>>(std::move(rendered.samples));
+			return { sol::make_object(view, buffer), starts };
+		};
+
+	audio_table["play_buffer"] =
+		[with_audio](const std::shared_ptr<VoiceBuffer>& buffer, sol::optional<sol::table> options) -> double
+		{
+			if (!buffer) return 0.0;
+			ax::audio::PlayOptions play{};
+			auto bus{ ax::audio::Bus::Sfx };
+			if (options)
+			{
+				play.volume = options->get_or("volume", play.volume);
+				play.pitch = options->get_or("pitch", play.pitch);
+				play.pan = options->get_or("pan", play.pan);
+				play.fadeIn = options->get_or("fade_in", play.fadeIn);
+				const sol::optional<std::string> name{ (*options)["bus"] };
+				if (name)
+				{
+					const auto parsed{ ax::audio::bus_from_name(*name) };
+					if (!parsed || *parsed == ax::audio::Bus::Master)
+					{
+						spdlog::error("<Audio> Invalid buffer bus '{}'", *name);
+						return 0.0;
+					}
+					bus = *parsed;
+				}
+			}
+			const auto id{ with_audio([&](ax::audio::AudioSystem& audio)
+			{
+				return audio.play_buffer(buffer->samples, bus, play);
+			}, ax::audio::VoiceId{}) };
 			return static_cast<double>(id);
 		};
 
