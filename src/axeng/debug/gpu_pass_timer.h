@@ -59,7 +59,8 @@ namespace ax
 			std::vector<const char*> categories{};
 		};
 
-		const char* m_totalName{};
+		// Only Tracy reads it (its macros expand to nothing in builds without it).
+		[[maybe_unused]] const char* m_totalName{};
 		wgpu::QuerySet m_querySet{};
 		gpu::TrackedBuffer m_resolve{};
 		std::array<Slot, s_slots> m_slots{};
