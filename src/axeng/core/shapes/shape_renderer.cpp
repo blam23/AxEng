@@ -941,6 +941,11 @@ void ax::ShapeRenderer::begin_frame(const ShapeView& view)
 
 void ax::ShapeRenderer::draw(wgpu::RenderPassEncoder& pass, const ShapeList& shapes)
 {
+	draw(pass, shapes, -std::numeric_limits<float>::infinity(), std::numeric_limits<float>::infinity());
+}
+
+void ax::ShapeRenderer::draw(wgpu::RenderPassEncoder& pass, const ShapeList& shapes, float zMin, float zMax)
+{
 	ZoneScopedN("Shapes mesh build and draw");
 	if (!s_state)
 	{
@@ -988,6 +993,12 @@ void ax::ShapeRenderer::draw(wgpu::RenderPassEncoder& pass, const ShapeList& sha
 		hold(s_screen_capture, ax::shape_screen_space);
 		hold(s_unlit_capture, ax::shape_unlit);
 	}
+	if (zMin > -std::numeric_limits<float>::infinity() || zMax < std::numeric_limits<float>::infinity())
+		std::erase_if(state.order, [&](std::size_t i)
+			{
+				const auto z{ std::visit([](const auto& s) { return s.z; }, shapes[i]) };
+				return z < zMin || z >= zMax;
+			});
 	if (state.order.empty())
 		return;
 #ifdef TRACY_ENABLE

@@ -19,6 +19,8 @@ struct Uniforms {
 @group(0) @binding(1) var tex : texture_2d<f32>;
 @group(0) @binding(2) var samp : sampler;
 struct CameraUniforms {
+	// xy: the target's size in pixels; zw: for screen space sprites, the z window [z, w) a sprite must lie in to be
+	// drawn, when z < w (a pass that draws one layer of an interface).
 	viewport: vec4<f32>,
 	camera: vec4<f32>,
 };
@@ -85,6 +87,11 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 
 	let depth = 0.5 + atan(u.z_idx) / 3.141592653589793;
 	out.pos = vec4<f32>(ndcX, ndcY, depth, 1.0);
+	let window = cameraData.viewport.zw;
+	if (screen_space && window.x < window.y && (u.z_idx < window.x || u.z_idx >= window.y)) {
+		// Outside this pass's z window: every corner on one point, so nothing is drawn.
+		out.pos = vec4<f32>(-2.0, -2.0, 0.0, 1.0);
+	}
 	out.uv = uv;
 	out.tint = vec4<f32>(unpack2x16float(u.tint.x), unpack2x16float(u.tint.y));
 	out.msdf = u.flags & 1u;

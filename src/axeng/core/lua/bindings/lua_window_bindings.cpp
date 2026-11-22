@@ -602,6 +602,14 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 			return timings;
 		};
 
+	// The most interface layers drawn each over a fresh copy and blur of what lies beneath it (see
+	// Window::submit_material_draw); 1 draws every backdrop over one copy.
+	window_table["set_backdrop_layer_limit"] =
+		[&app](int limit) { app.window()->set_backdrop_layer_limit(static_cast<std::uint32_t>(std::max(limit, 1))); };
+	window_table["backdrop_layer_limit"] = [&app]() { return app.window()->backdrop_layer_limit(); };
+	// For the next frame: a screen space z below which everything is drawn before anything above it.
+	window_table["split_interface_at"] = [&app](float z) { app.window()->split_interface_at(z); };
+
 	window_table["compare_next_frame"] =
 		[&app](const sol::table& reference) -> bool
 		{

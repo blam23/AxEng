@@ -5,6 +5,7 @@
 #include "axeng/core/lua/bindings/lua_shape_bindings.h"
 #include "axeng/core/lua/bindings/lua_vector_bindings.h"
 #include "axeng/core/application.h"
+#include "axeng/core/materials/material_renderer.h"
 #include "axeng/core/shapes/debug_shapes.h"
 #include "axeng/core/shapes/shape_renderer.h"
 #include "axeng/core/texture.h"
@@ -22,10 +23,12 @@
 #include <filesystem>
 #include <functional>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace
@@ -162,6 +165,21 @@ namespace ax
 			wgpu::ShaderModuleDescriptor shaderDesc{};
 			shaderDesc.nextInChain = &shaderSource;
 			window.m_shader = device.CreateShaderModule(&shaderDesc);
+		}
+
+		// The interface's stretches (floor, whether a copy is made first) for a frame of these draws and splits.
+		static std::vector<std::pair<float, bool>> interface_segments(Window& window, std::vector<MaterialDraw> draws,
+			std::vector<float> splits, std::uint32_t limit)
+		{
+			window.m_frameMaterials = std::move(draws);
+			window.m_frameInterfaceSplits = std::move(splits);
+			window.set_backdrop_layer_limit(limit);
+			std::vector<std::pair<float, bool>> result{};
+			for (const auto& segment : window.interface_segments())
+				result.emplace_back(segment.floor, segment.blur);
+			window.m_frameMaterials.clear();
+			window.m_frameInterfaceSplits.clear();
+			return result;
 		}
 
 		static std::size_t batch_count(const Window& window)
@@ -423,6 +441,21 @@ TEST_F(ShapeRendererTest, RectangleFillsExactPixelArea)
 	EXPECT_PIXEL(image, 96, 48, s_black);
 	EXPECT_PIXEL(image, 64, 31, s_black);
 	EXPECT_PIXEL(image, 64, 64, s_black);
+}
+
+TEST_F(ShapeRendererTest, AZRangeDrawsOnlyTheShapesInIt)
+{
+	const ax::ShapeList shapes{
+		ax::Rectangle{ .position = { 8, 32 }, .size = { 32, 32 }, .fill = s_red, .z = 0.5f, .screenSpace = true },
+		ax::Rectangle{ .position = { 48, 32 }, .size = { 32, 32 }, .fill = s_green, .z = 1.0f, .screenSpace = true },
+		ax::Rectangle{ .position = { 88, 32 }, .size = { 32, 32 }, .fill = s_blue, .z = 2.0f, .screenSpace = true },
+	};
+	const auto image{ render_pass([&shapes](wgpu::RenderPassEncoder& pass) { ax::ShapeRenderer::draw(pass, shapes, 1.0f, 2.0f); }) };
+
+	// [1, 2): the bottom bound is in, the top one out.
+	EXPECT_PIXEL(image, 24, 48, s_black);
+	EXPECT_PIXEL(image, 64, 48, s_green);
+	EXPECT_PIXEL(image, 104, 48, s_black);
 }
 
 TEST_F(ShapeRendererTest, RectangleOutlineIsDrawnInsideBoundary)
@@ -1668,4 +1701,57 @@ TEST_F(ShapeRendererTest, StaticMeshOfNothingIsNull)
 	// Screen space shapes are left out of static meshes.
 	EXPECT_EQ(ax::ShapeRenderer::build_static({ ax::Circle{ .position = { 10, 10 }, .radius = 5, .fill = s_red,
 		.screenSpace = true } }, 1.0f), nullptr);
+}
+
+// The interface is drawn in stretches of z: what lies below every backdrop draw, then one per backdrop draw from its
+// lowest quad (each over a fresh copy of the frame), and split points with no copy of their own.
+TEST_F(WindowPendingDrawTest, InterfaceSegmentsFollowTheBackdropDrawsTheLimitAndTheSplits)
+{
+	if (!ax::setup_glfw())
+		GTEST_SKIP() << "GLFW could not create a hidden test window";
+	struct GlfwGuard
+	{
+		~GlfwGuard() { ax::teardown_glfw(); }
+	} glfwGuard;
+	glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
+	ax::Window window({ .width = s_size, .height = s_size, .title = "AxEng interface segment test" });
+	ASSERT_NE(window.glfw_handle(), nullptr);
+
+	ASSERT_TRUE(ax::MaterialRenderer::define({ .name = "segment_test_backdrop",
+		.fragment = "fn material(in : MaterialInput) -> vec4<f32> { return vec4<f32>(backdrop(in.world, 0.0), 1.0); }",
+		.backdrop = true }));
+	ASSERT_TRUE(ax::MaterialRenderer::define({ .name = "segment_test_plain",
+		.fragment = "fn material(in : MaterialInput) -> vec4<f32> { return vec4<f32>(1.0); }" }));
+	const auto backdrop{ [](std::vector<float> zs, bool screenSpace = true)
+	{
+		ax::MaterialDraw draw{ .material = "segment_test_backdrop", .screenSpace = screenSpace };
+		for (const auto z : zs) draw.quads.push_back({ .z = z });
+		return draw;
+	} };
+	const auto bottom{ -std::numeric_limits<float>::max() };
+	using Segments = std::vector<std::pair<float, bool>>;
+
+	// Three layers, each from its draw's lowest quad, below which the rest goes first with no copy.
+	const std::vector<ax::MaterialDraw> three{ backdrop({ 12.5f, 12.0f }), backdrop({ 14.0f }), backdrop({ 16.0f, 17.0f }),
+		backdrop({ 3.0f }, false), { .material = "segment_test_plain", .quads = { { .z = 1.0f } }, .screenSpace = true } };
+	EXPECT_EQ(ax::WindowTestAccess::interface_segments(window, three, {}, 4),
+		(Segments{ { bottom, false }, { 12.0f, true }, { 14.0f, true }, { 16.0f, true } }));
+	// A limit of 1: one copy for everything, before any of it.
+	EXPECT_EQ(ax::WindowTestAccess::interface_segments(window, three, {}, 1), (Segments{ { bottom, true } }));
+	// Past the limit the lowest layers share a copy.
+	EXPECT_EQ(ax::WindowTestAccess::interface_segments(window, three, {}, 2),
+		(Segments{ { bottom, false }, { 12.0f, true }, { 16.0f, true } }));
+	// A split adds a stretch with no copy, wherever it falls, and one at a floor adds nothing.
+	EXPECT_EQ(ax::WindowTestAccess::interface_segments(window, three, { 25.5f, 14.0f }, 4),
+		(Segments{ { bottom, false }, { 12.0f, true }, { 14.0f, true }, { 16.0f, true }, { 25.5f, false } }));
+	EXPECT_EQ(ax::WindowTestAccess::interface_segments(window, three, { 25.5f }, 1),
+		(Segments{ { bottom, true }, { 25.5f, false } }));
+	// Splits work without any backdrop draw.
+	EXPECT_EQ(ax::WindowTestAccess::interface_segments(window, {}, { 25.5f }, 4),
+		(Segments{ { bottom, false }, { 25.5f, false } }));
+	// The limit is kept between 1 and max_backdrop_layers.
+	window.set_backdrop_layer_limit(0);
+	EXPECT_EQ(window.backdrop_layer_limit(), 1u);
+	window.set_backdrop_layer_limit(100);
+	EXPECT_EQ(window.backdrop_layer_limit(), ax::Window::max_backdrop_layers);
 }

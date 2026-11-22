@@ -57,6 +57,8 @@ namespace ax
         static void begin_frame(const ShapeView& view);
 
         static void draw(wgpu::RenderPassEncoder& pass, const ShapeList& shapes);
+        // Draws only the shapes whose z lies in [zMin, zMax), such as one layer of a pass drawn in z ranges.
+        static void draw(wgpu::RenderPassEncoder& pass, const ShapeList& shapes, float zMin, float zMax);
 
         // While set, draw() holds unlit shapes (see shape_unlit) back in capture instead of drawing them, so they
         // can be drawn after lighting. Pass nullptr to draw everything again.

@@ -48,6 +48,7 @@ EM_ASYNC_JS(void, ax_wait_animation_frame, (), {
 #include <cstring>
 #include <format>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <numbers>
 #include <span>
@@ -1076,6 +1077,16 @@ void ax::Window::reload_pipeline()
 	vpBindDesc.entryCount = vpEntries.size();
 	vpBindDesc.entries = vpEntries.data();
 	m_viewportBindGroup = m_device.CreateBindGroup(&vpBindDesc);
+	for (std::size_t segment{}; segment < m_segmentViewportBuffers.size(); ++segment)
+	{
+		vpDesc.label = "InterfaceSegmentViewportUBO";
+		m_segmentViewportBuffers[segment] = gpu::create_buffer(m_device, vpDesc, "Window");
+		auto segmentEntries{ vpEntries };
+		segmentEntries[0].buffer = m_segmentViewportBuffers[segment];
+		auto segmentBindDesc{ vpBindDesc };
+		segmentBindDesc.entries = segmentEntries.data();
+		m_segmentViewportBindGroups[segment] = m_device.CreateBindGroup(&segmentBindDesc);
+	}
 
 	//
 	// Pipeline
@@ -2859,6 +2870,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			std::lock_guard lock{ m_materialMutex };
 			m_frameMaterials.swap(m_queuedMaterials);
 			m_queuedMaterials.clear();
+			m_frameInterfaceSplits.swap(m_queuedInterfaceSplits);
+			m_queuedInterfaceSplits.clear();
 		}
 		// Which of this frame's material draws go in a pass: world space ones that light (or all of them when
 		// there is no lighting), the unlit ones after lighting, or the screen space ones.
@@ -2879,8 +2892,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			}
 		} };
 
-		const bool interfaceActive{ std::ranges::any_of(m_frameMaterials, [](const MaterialDraw& call)
-			{ return call.screenSpace && MaterialRenderer::is_backdrop(call.material); })
+		const bool interfaceActive{ (!m_frameInterfaceSplits.empty() || std::ranges::any_of(m_frameMaterials,
+			[](const MaterialDraw& call) { return call.screenSpace && MaterialRenderer::is_backdrop(call.material); }))
 			&& (multisampled || m_surfaceSupportsCopySource)
 			&& m_backdropBlur.init(m_device, m_surfaceFormat, MaterialRenderer::backdropLevels) };
 		m_interfaceActive = interfaceActive;
@@ -3163,46 +3176,64 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		{
 			ZoneScopedN("Window::interface");
 			m_interfaceTimer.begin_frame();
-			const auto blurred{ m_backdropBlur.encode(encoder, multisampled ? targetView : wgpu::TextureView{},
-				surfaceTexture.texture, m_width, m_height, &m_interfaceTimer, "GPU ms: backdrop blur") };
-			MaterialRenderer::set_backdrop(blurred ? m_backdropBlur.view() : wgpu::TextureView{});
-
 			// Depth starts over, so the interface covers the world whatever the depths in either.
-			wgpu::RenderPassColorAttachment interfaceColour
+			bool firstPass{ true };
+			const auto beginInterfacePass{ [&]
 			{
-				.view = targetView,
-				.depthSlice = wgpu::kDepthSliceUndefined,
-				.resolveTarget = nullptr,
-				.loadOp = wgpu::LoadOp::Load,
-				.storeOp = wgpu::StoreOp::Store,
-			};
-			wgpu::RenderPassDepthStencilAttachment interfaceDepth
+				wgpu::RenderPassColorAttachment interfaceColour
+				{
+					.view = targetView,
+					.depthSlice = wgpu::kDepthSliceUndefined,
+					.resolveTarget = nullptr,
+					.loadOp = wgpu::LoadOp::Load,
+					.storeOp = wgpu::StoreOp::Store,
+				};
+				wgpu::RenderPassDepthStencilAttachment interfaceDepth
+				{
+					.view = m_depthTextureView,
+					.depthLoadOp = firstPass ? wgpu::LoadOp::Clear : wgpu::LoadOp::Load,
+					.depthStoreOp = wgpu::StoreOp::Store,
+					.depthClearValue = 0.0f,
+					.depthReadOnly = false,
+					.stencilLoadOp = wgpu::LoadOp::Undefined,
+					.stencilStoreOp = wgpu::StoreOp::Undefined,
+					.stencilClearValue = 0,
+					.stencilReadOnly = true,
+				};
+				firstPass = false;
+				wgpu::RenderPassDescriptor interfaceDesc{};
+				interfaceDesc.label = "interface pass";
+				interfaceDesc.colorAttachmentCount = 1;
+				interfaceDesc.colorAttachments = &interfaceColour;
+				interfaceDesc.depthStencilAttachment = &interfaceDepth;
+				interfaceDesc.timestampWrites = m_interfaceTimer.pass("GPU ms: interface");
+				return encoder.BeginRenderPass(&interfaceDesc);
+			} };
+			// Copies and blurs everything drawn so far for the backdrop materials drawn next.
+			const auto blurBackdrop{ [&]
 			{
-				.view = m_depthTextureView,
-				.depthLoadOp = wgpu::LoadOp::Clear,
-				.depthStoreOp = wgpu::StoreOp::Store,
-				.depthClearValue = 0.0f,
-				.depthReadOnly = false,
-				.stencilLoadOp = wgpu::LoadOp::Undefined,
-				.stencilStoreOp = wgpu::StoreOp::Undefined,
-				.stencilClearValue = 0,
-				.stencilReadOnly = true,
-			};
-			wgpu::RenderPassDescriptor interfaceDesc{};
-			interfaceDesc.label = "interface pass";
-			interfaceDesc.colorAttachmentCount = 1;
-			interfaceDesc.colorAttachments = &interfaceColour;
-			interfaceDesc.depthStencilAttachment = &interfaceDepth;
-			interfaceDesc.timestampWrites = m_interfaceTimer.pass("GPU ms: interface");
-			auto interfacePass{ encoder.BeginRenderPass(&interfaceDesc) };
-			drawMaterials(interfacePass, MaterialPass::Backdrop);
-			for (const auto& call : m_interfaceShapes.calls())
-				ShapeRenderer::draw(interfacePass, call);
-			if (!m_interfaceOverlayShapes.empty())
-				ShapeRenderer::draw(interfacePass, m_interfaceOverlayShapes);
-			draw_sprite_batches(interfacePass, m_screenSpacePipeline, m_sdfScreenSpacePipeline, SpriteLayer::ScreenSpace);
-			drawMaterials(interfacePass, MaterialPass::Screen);
-			interfacePass.End();
+				const auto blurred{ m_backdropBlur.encode(encoder, multisampled ? targetView : wgpu::TextureView{},
+					surfaceTexture.texture, m_width, m_height, &m_interfaceTimer, "GPU ms: backdrop blur") };
+				MaterialRenderer::set_backdrop(blurred ? m_backdropBlur.view() : wgpu::TextureView{});
+			} };
+
+			const auto segments{ interface_segments() };
+			if (segments.size() <= 1)
+			{
+				// One layer: every backdrop draw looks through one copy of the frame, and the interface goes over it.
+				blurBackdrop();
+				auto interfacePass{ beginInterfacePass() };
+				drawMaterials(interfacePass, MaterialPass::Backdrop);
+				for (const auto& call : m_interfaceShapes.calls())
+					ShapeRenderer::draw(interfacePass, call);
+				if (!m_interfaceOverlayShapes.empty())
+					ShapeRenderer::draw(interfacePass, m_interfaceOverlayShapes);
+				draw_sprite_batches(interfacePass, m_screenSpacePipeline, m_sdfScreenSpacePipeline, SpriteLayer::ScreenSpace);
+				drawMaterials(interfacePass, MaterialPass::Screen);
+				interfacePass.End();
+			}
+			else
+				encode_interface_layers(segments, beginInterfacePass, blurBackdrop);
 			m_interfaceTimer.end_frame(encoder);
 			MaterialRenderer::set_backdrop({});
 			m_interfaceShapes.clear();
@@ -3539,11 +3570,12 @@ void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta,
 
 
 void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline,
-	const wgpu::RenderPipeline& sdfPipeline, SpriteLayer layer)
+	const wgpu::RenderPipeline& sdfPipeline, SpriteLayer layer, const wgpu::BindGroup* viewport)
 {
 	ZoneScopedN("Window::sprite-draw");
+	const auto& viewportGroup{ viewport ? *viewport : m_viewportBindGroup };
 	pass.SetPipeline(pipeline);
-	pass.SetBindGroup(1, m_viewportBindGroup);
+	pass.SetBindGroup(1, viewportGroup);
 	// Static batches precede ordinary sprites in both passes, with stable caller-specified order.
 	for (const auto& batch : m_staticSpriteBatches)
 	{
@@ -3567,7 +3599,7 @@ void ax::Window::draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::
 			if (!pipelineSet)
 			{
 				pass.SetPipeline(distanceField ? sdfPipeline : pipeline);
-				pass.SetBindGroup(1, m_viewportBindGroup);
+				pass.SetBindGroup(1, viewportGroup);
 				pipelineSet = true;
 			}
 			pass.SetBindGroup(0, get_texture_bind_group(range.tex));
@@ -3597,6 +3629,121 @@ void ax::Window::submit_material_draw(MaterialDraw draw)
 {
 	std::lock_guard lock{ m_materialMutex };
 	m_queuedMaterials.push_back(std::move(draw));
+}
+
+void ax::Window::set_backdrop_layer_limit(std::uint32_t limit) noexcept
+{
+	m_backdropLayerLimit = std::clamp(limit, 1u, max_backdrop_layers);
+}
+
+void ax::Window::split_interface_at(float z)
+{
+	std::lock_guard lock{ m_materialMutex };
+	if (m_queuedInterfaceSplits.size() < max_interface_splits && std::isfinite(z))
+		m_queuedInterfaceSplits.push_back(z);
+}
+
+std::vector<ax::Window::InterfaceSegment> ax::Window::interface_segments() const
+{
+	// The floors of the backdrop draws, lowest first.
+	std::vector<float> floors{};
+	for (const auto& call : m_frameMaterials)
+		if (call.screenSpace && !call.quads.empty() && MaterialRenderer::is_backdrop(call.material))
+			floors.push_back(std::ranges::min(call.quads, {}, &MaterialQuad::z).z);
+	std::ranges::sort(floors);
+	floors.erase(std::unique(floors.begin(), floors.end()), floors.end());
+
+	std::vector<InterfaceSegment> segments{};
+	const auto limit{ m_backdropLayerLimit.load() };
+	if (limit <= 1 || floors.empty())
+		// Everything over one copy, made before anything of the interface is drawn.
+		segments.push_back({ -std::numeric_limits<float>::max(), !floors.empty() });
+	else
+	{
+		// What lies below every layer goes first, with no copy of its own; past the limit the lowest layers merge.
+		segments.push_back({ -std::numeric_limits<float>::max(), false });
+		const auto kept{ std::min<std::size_t>(floors.size(), limit) };
+		segments.push_back({ floors.front(), true });
+		for (auto index{ floors.size() - kept + 1 }; index < floors.size(); ++index)
+			segments.push_back({ floors[index], true });
+	}
+	for (const auto split : m_frameInterfaceSplits)
+		if (std::ranges::none_of(segments, [split](const InterfaceSegment& segment) { return segment.floor == split; }))
+			segments.push_back({ split, false });
+	std::ranges::stable_sort(segments, {}, &InterfaceSegment::floor);
+	return segments;
+}
+
+void ax::Window::encode_interface_layers(const std::vector<InterfaceSegment>& segments,
+	const std::function<wgpu::RenderPassEncoder()>& beginPass, const std::function<void()>& blurBackdrop)
+{
+	ZoneScopedN("Window::interface-layers");
+	TracyPlot("Interface segments", static_cast<std::int64_t>(segments.size()));
+	const auto count{ std::min(segments.size(), m_segmentViewportBuffers.size()) };
+	const auto top{ std::numeric_limits<float>::max() };
+	// Each stretch's z window, for the screen space sprites.
+	for (std::size_t index{}; index < count; ++index)
+	{
+		const float vp[8]{
+			static_cast<float>(m_width), static_cast<float>(m_height), segments[index].floor,
+			index + 1 < count ? segments[index + 1].floor : top,
+			m_camera.position().x, m_camera.position().y, m_camera.zoom(), 0.f,
+		};
+		m_queue.WriteBuffer(m_segmentViewportBuffers[index], 0, vp, sizeof(vp));
+	}
+	// A material draw's quads in [low, high): all of it, none, or a copy of the share.
+	const auto drawMaterialsIn{ [this](wgpu::RenderPassEncoder& pass, bool backdrop, float low, float high)
+	{
+		for (const auto& call : m_frameMaterials)
+		{
+			if (!call.screenSpace || MaterialRenderer::is_backdrop(call.material) != backdrop)
+				continue;
+			const auto inside{ [low, high](const MaterialQuad& quad) { return quad.z >= low && quad.z < high; } };
+			const auto share{ std::ranges::count_if(call.quads, inside) };
+			if (share == 0)
+				continue;
+			if (static_cast<std::size_t>(share) == call.quads.size())
+			{
+				MaterialRenderer::draw(pass, call);
+				continue;
+			}
+			m_segmentDraw.material = call.material;
+			m_segmentDraw.params = call.params;
+			m_segmentDraw.screenSpace = true;
+			m_segmentDraw.quads.clear();
+			std::ranges::copy_if(call.quads, std::back_inserter(m_segmentDraw.quads), inside);
+			MaterialRenderer::draw(pass, m_segmentDraw);
+		}
+	} };
+
+	wgpu::RenderPassEncoder pass{};
+	bool open{};
+	for (std::size_t index{}; index < count; ++index)
+	{
+		ZoneScopedN("Window::interface-layer");
+		if (segments[index].blur)
+		{
+			if (open) pass.End();
+			open = false;
+			blurBackdrop();
+		}
+		if (!open)
+		{
+			pass = beginPass();
+			open = true;
+		}
+		const auto low{ segments[index].floor };
+		const auto high{ index + 1 < count ? segments[index + 1].floor : top };
+		drawMaterialsIn(pass, true, low, high);
+		for (const auto& call : m_interfaceShapes.calls())
+			ShapeRenderer::draw(pass, call, low, high);
+		if (!m_interfaceOverlayShapes.empty())
+			ShapeRenderer::draw(pass, m_interfaceOverlayShapes, low, high);
+		draw_sprite_batches(pass, m_screenSpacePipeline, m_sdfScreenSpacePipeline, SpriteLayer::ScreenSpace,
+			&m_segmentViewportBindGroups[index]);
+		drawMaterialsIn(pass, false, low, high);
+	}
+	if (open) pass.End();
 }
 
 void ax::Window::submit_lights(std::vector<Light2D>& lights, std::vector<Glow2D>& glows)

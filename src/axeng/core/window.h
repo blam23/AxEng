@@ -275,7 +275,24 @@ namespace ax
 		// A frame with a screen space draw of a backdrop material gets an interface pass: everything else is drawn
 		// first, lighting included, and copied and blurred for the backdrop, and then all screen space shapes, sprites
 		// and materials are drawn over it with depth of their own, backdrop materials first.
+		//
+		// Each backdrop draw is a layer of the interface, from its lowest quad z (its floor) up to the next draw's
+		// floor. With a layer limit above 1 (set_backdrop_layer_limit), the interface is drawn layer by layer from the
+		// bottom: what lies below the lowest floor first, then for each layer a fresh copy and blur of everything drawn
+		// so far, the layer's backdrop quads, and the screen space shapes, sprites and materials whose z lies in it.
+		// So a backdrop draw shows the layers beneath it through itself. Past the limit, the lowest layers share one
+		// copy.
 		void submit_material_draw(MaterialDraw draw);
+		// The most interface layers with a copy and blur of their own (see submit_material_draw), up to
+		// max_backdrop_layers; 1 draws every backdrop draw over one copy of the frame, under the rest of the interface.
+		void set_backdrop_layer_limit(std::uint32_t limit) noexcept;
+		std::uint32_t backdrop_layer_limit() const noexcept { return m_backdropLayerLimit; }
+		static constexpr std::uint32_t max_backdrop_layers{ 8 };
+		// For the next frame: a screen space z below which everything is drawn before anything above it, whatever its
+		// kind (translucent shapes are otherwise drawn before sprites, so a sprite at a lower z shows over them). No
+		// copy or blur is made there. Up to max_interface_splits a frame; thread safe.
+		void split_interface_at(float z);
+		static constexpr std::size_t max_interface_splits{ 6 };
 		// Whether the most recent frame ran the lighting passes, and what they drew.
 		bool lighting_ran() const noexcept { return m_lightingRan; }
 		LightRenderer::Stats lighting_stats() const noexcept { return m_lightRenderer.last_stats(); }
@@ -349,8 +366,21 @@ namespace ax
 		void handle_render_pass(wgpu::RenderPassEncoder& pass, double delta, bool splitUnlit = false);
 		// Which sprites a draw covers: everything (no lighting), or the lit or unlit share of a lit frame.
 		enum class SpriteLayer : std::uint8_t { All, Lit, Unlit, ScreenSpace };
+		// `viewport` replaces the view's bind group (group 1), such as one carrying a z window.
 		void draw_sprite_batches(wgpu::RenderPassEncoder& pass, const wgpu::RenderPipeline& pipeline,
-			const wgpu::RenderPipeline& sdfPipeline, SpriteLayer layer = SpriteLayer::All);
+			const wgpu::RenderPipeline& sdfPipeline, SpriteLayer layer = SpriteLayer::All,
+			const wgpu::BindGroup* viewport = nullptr);
+		// One stretch of the interface's z, from `floor` up to the next one's; `blur` copies and blurs the frame first.
+		struct InterfaceSegment
+		{
+			float floor{};
+			bool blur{};
+		};
+		// The interface's stretches for this frame (see submit_material_draw): one for a single layer.
+		std::vector<InterfaceSegment> interface_segments() const;
+		// Draws the interface stretch by stretch.
+		void encode_interface_layers(const std::vector<InterfaceSegment>& segments,
+			const std::function<wgpu::RenderPassEncoder()>& beginPass, const std::function<void()>& blurBackdrop);
 		void stage_sprite_batches();
 		void draw_transparent_sprites(wgpu::RenderPassEncoder& pass, SpriteLayer layer = SpriteLayer::All);
 		void draw_pending_batch(const PendingDrawBatch& batch, const wgpu::TextureView& screenView);
@@ -545,6 +575,14 @@ namespace ax
 		ShapeList m_interfaceOverlayShapes;
 		BackdropBlur m_backdropBlur;
 		GpuPassTimer m_interfaceTimer{ "GPU ms: interface total" };
+		std::atomic<std::uint32_t> m_backdropLayerLimit{ 4 };
+		std::vector<float> m_queuedInterfaceSplits, m_frameInterfaceSplits;
+		// The view with a z window for each interface stretch (screen space sprites), and a draw for a stretch's share
+		// of a material draw's quads.
+		static constexpr std::size_t s_max_interface_segments{ max_backdrop_layers + max_interface_splits + 1 };
+		std::array<gpu::TrackedBuffer, s_max_interface_segments> m_segmentViewportBuffers{};
+		std::array<wgpu::BindGroup, s_max_interface_segments> m_segmentViewportBindGroups{};
+		MaterialDraw m_segmentDraw{};
 		// The world as drawn before refracting materials (water) go over it, for them to look through.
 		BackdropBlur m_sceneCopy;
 		bool m_interfaceActive{};
