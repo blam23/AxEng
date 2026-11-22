@@ -29,6 +29,9 @@ void ax::lua::bindings::setup_mouse_bindings(sol::state& state)
 	cursor_table["hand"] = GLFW_HAND_CURSOR;
 	cursor_table["hresize"] = GLFW_HRESIZE_CURSOR;
 	cursor_table["vresize"] = GLFW_VRESIZE_CURSOR;
+	cursor_table["nwse_resize"] = GLFW_RESIZE_NWSE_CURSOR;
+	cursor_table["nesw_resize"] = GLFW_RESIZE_NESW_CURSOR;
+	cursor_table["move"] = GLFW_RESIZE_ALL_CURSOR;
 	cursor_table["not_allowed"] = GLFW_NOT_ALLOWED_CURSOR;
 
 	mouse_table["cursors"] = cursor_table;
