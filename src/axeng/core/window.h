@@ -279,6 +279,9 @@ namespace ax
 		// Whether the most recent frame ran the lighting passes, and what they drew.
 		bool lighting_ran() const noexcept { return m_lightingRan; }
 		LightRenderer::Stats lighting_stats() const noexcept { return m_lightRenderer.last_stats(); }
+		// The GPU times of the latest frames' timed passes (GpuPassTimer), by category: the lighting's, then the
+		// interface's ("GPU ms: interface", "GPU ms: backdrop blur"). Empty where the GPU cannot time passes.
+		std::vector<GpuPassTimer::Timing> gpu_timings() const;
 		// How many sprites the latest frame drew as shadow occluders (sprite_flag_occluder), 0 when no shadows ran.
 		std::uint32_t occluder_sprites() const noexcept { return m_collectOccluders ? m_occluderSprites : 0u; }
 		// How many sprites the latest frame drew as ambient occlusion casters (sprite_flag_ao_caster), 0 without it.
@@ -541,6 +544,7 @@ namespace ax
 		UnlitShapeCapture m_interfaceShapes;
 		ShapeList m_interfaceOverlayShapes;
 		BackdropBlur m_backdropBlur;
+		GpuPassTimer m_interfaceTimer{ "GPU ms: interface total" };
 		// The world as drawn before refracting materials (water) go over it, for them to look through.
 		BackdropBlur m_sceneCopy;
 		bool m_interfaceActive{};

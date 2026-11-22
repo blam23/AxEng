@@ -26,6 +26,9 @@ namespace ax
 			double milliseconds{};
 		};
 
+		// `totalName` is the plot of the categories' sum each frame (a string literal).
+		explicit GpuPassTimer(const char* totalName = "GPU ms: lighting total") noexcept : m_totalName{ totalName } {}
+
 		// Off (pass() returns null) unless the device has the TimestampQuery feature.
 		void init(const wgpu::Device&);
 		bool enabled() const noexcept { return m_querySet != nullptr; }
@@ -56,6 +59,7 @@ namespace ax
 			std::vector<const char*> categories{};
 		};
 
+		const char* m_totalName{};
 		wgpu::QuerySet m_querySet{};
 		gpu::TrackedBuffer m_resolve{};
 		std::array<Slot, s_slots> m_slots{};

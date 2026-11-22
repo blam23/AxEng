@@ -1,6 +1,7 @@
 #pragma once
 
 #include "axeng/debug/gpu_memory.h"
+#include "axeng/debug/gpu_pass_timer.h"
 #include <webgpu/webgpu_cpp.h>
 
 #include <cstdint>
@@ -17,9 +18,11 @@ namespace ax
 		bool init(const wgpu::Device& device, wgpu::TextureFormat format, std::uint32_t levels);
 
 		// Copies the frame and builds the chain. A multisampled frame is resolved from `multisampled`; otherwise it is
-		// copied from `frame`, which must allow copying from it. Returns false if neither is possible.
+		// copied from `frame`, which must allow copying from it. Returns false if neither is possible. With a `timer`, its
+		// passes are timed as `category` (a string literal).
 		bool encode(const wgpu::CommandEncoder& encoder, const wgpu::TextureView& multisampled,
-			const wgpu::Texture& frame, std::uint32_t width, std::uint32_t height);
+			const wgpu::Texture& frame, std::uint32_t width, std::uint32_t height, GpuPassTimer* timer = nullptr,
+			const char* category = nullptr);
 
 		// The whole chain, for sampling at fractional levels. Empty until encode has succeeded.
 		const wgpu::TextureView& view() const noexcept { return m_chainView; }

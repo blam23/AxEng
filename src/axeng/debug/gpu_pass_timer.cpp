@@ -78,7 +78,7 @@ void ax::GpuPassTimer::begin_frame()
 				TracyPlotConfig(timing.category, tracy::PlotFormatType::Number, false, true, 0);
 				TracyPlot(timing.category, timing.milliseconds);
 			}
-			TracyPlot("GPU ms: lighting total", total);
+			TracyPlot(m_totalName, total);
 		}
 	}
 }

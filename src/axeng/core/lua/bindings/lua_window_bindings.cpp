@@ -591,6 +591,17 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 				"mist", stats.mist, "mist_grid_width", stats.mistGridWidth, "mist_grid_height", stats.mistGridHeight);
 		};
 
+	// The latest GPU times of the timed render passes, as { [category] = milliseconds } (empty where the GPU cannot
+	// time passes); they come back a few frames late.
+	window_table["gpu_timings"] =
+		[&app](sol::this_state lua)
+		{
+			auto timings{ sol::state_view{ lua }.create_table() };
+			for (const auto& timing : app.window()->gpu_timings())
+				timings[timing.category] = timing.milliseconds;
+			return timings;
+		};
+
 	window_table["compare_next_frame"] =
 		[&app](const sol::table& reference) -> bool
 		{

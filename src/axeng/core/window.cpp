@@ -905,6 +905,7 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 	}
 
 	m_queue = m_device.GetQueue();
+	m_interfaceTimer.init(m_device);
 
 	//
 	// Main Surface
@@ -3161,8 +3162,9 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		if (interfaceActive)
 		{
 			ZoneScopedN("Window::interface");
+			m_interfaceTimer.begin_frame();
 			const auto blurred{ m_backdropBlur.encode(encoder, multisampled ? targetView : wgpu::TextureView{},
-				surfaceTexture.texture, m_width, m_height) };
+				surfaceTexture.texture, m_width, m_height, &m_interfaceTimer, "GPU ms: backdrop blur") };
 			MaterialRenderer::set_backdrop(blurred ? m_backdropBlur.view() : wgpu::TextureView{});
 
 			// Depth starts over, so the interface covers the world whatever the depths in either.
@@ -3191,6 +3193,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			interfaceDesc.colorAttachmentCount = 1;
 			interfaceDesc.colorAttachments = &interfaceColour;
 			interfaceDesc.depthStencilAttachment = &interfaceDepth;
+			interfaceDesc.timestampWrites = m_interfaceTimer.pass("GPU ms: interface");
 			auto interfacePass{ encoder.BeginRenderPass(&interfaceDesc) };
 			drawMaterials(interfacePass, MaterialPass::Backdrop);
 			for (const auto& call : m_interfaceShapes.calls())
@@ -3200,6 +3203,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			draw_sprite_batches(interfacePass, m_screenSpacePipeline, m_sdfScreenSpacePipeline, SpriteLayer::ScreenSpace);
 			drawMaterials(interfacePass, MaterialPass::Screen);
 			interfacePass.End();
+			m_interfaceTimer.end_frame(encoder);
 			MaterialRenderer::set_backdrop({});
 			m_interfaceShapes.clear();
 		}
@@ -3252,8 +3256,9 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			{
 				ZoneScopedN("Window::queue-submit");
 				m_queue.Submit(1, &command);
-				// The lighting's GPU timings may now be read back.
+				// The GPU timings may now be read back.
 				m_lightRenderer.submitted();
+				m_interfaceTimer.submitted();
 			}
 
 			std::vector<PendingDrawBatch> pendingBatches{};
@@ -3319,6 +3324,14 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 	return true;
 }
 
+
+std::vector<ax::GpuPassTimer::Timing> ax::Window::gpu_timings() const
+{
+	auto timings{ m_lightRenderer.gpu_timings() };
+	const auto& interfaceTimings{ m_interfaceTimer.last() };
+	timings.insert(timings.end(), interfaceTimings.begin(), interfaceTimings.end());
+	return timings;
+}
 
 void ax::Window::handle_render_pass(wgpu::RenderPassEncoder& pass, double delta, bool splitUnlit)
 {

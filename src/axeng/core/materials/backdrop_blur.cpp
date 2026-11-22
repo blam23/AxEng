@@ -167,7 +167,7 @@ bool ax::BackdropBlur::resize(std::uint32_t width, std::uint32_t height)
 }
 
 bool ax::BackdropBlur::encode(const wgpu::CommandEncoder& encoder, const wgpu::TextureView& multisampled,
-	const wgpu::Texture& frame, std::uint32_t width, std::uint32_t height)
+	const wgpu::Texture& frame, std::uint32_t width, std::uint32_t height, GpuPassTimer* timer, const char* category)
 {
 	if (m_pipeline == nullptr || !resize(width, height))
 		return false;
@@ -184,6 +184,7 @@ bool ax::BackdropBlur::encode(const wgpu::CommandEncoder& encoder, const wgpu::T
 		passDesc.label = "BackdropBlur resolve";
 		passDesc.colorAttachmentCount = 1;
 		passDesc.colorAttachments = &attachment;
+		if (timer) passDesc.timestampWrites = timer->pass(category);
 		encoder.BeginRenderPass(&passDesc).End();
 	}
 	else if (frame != nullptr)
@@ -210,6 +211,7 @@ bool ax::BackdropBlur::encode(const wgpu::CommandEncoder& encoder, const wgpu::T
 		passDesc.label = "BackdropBlur downsample";
 		passDesc.colorAttachmentCount = 1;
 		passDesc.colorAttachments = &attachment;
+		if (timer) passDesc.timestampWrites = timer->pass(category);
 		auto pass{ encoder.BeginRenderPass(&passDesc) };
 		pass.SetPipeline(m_pipeline);
 		pass.SetBindGroup(0, m_downsampleGroups[level - 1]);
