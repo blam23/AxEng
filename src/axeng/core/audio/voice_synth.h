@@ -24,6 +24,9 @@ namespace ax::audio
 		Noise,
 		// Silence: the source stops and the filters ring out.
 		Gap,
+		// A pop: a short resonant blip whose pitch sweeps from pitchStart to pitchEnd, a sharp attack and a quick decay
+		// (a bubble bursting), on its own beside the voice.
+		Pop,
 	};
 
 	struct VoiceSegment
@@ -65,16 +68,39 @@ namespace ax::audio
 		float gain{ 0.7f };
 		// Seconds rendered after the last segment, for the filters to ring out.
 		float tail{ 0.12f };
+		// A slow, uneven wobble (Hz): the formants drift by wobbleDepth and the pitch by wobblePitch (fractions).
+		float wobbleRate{ 3.0f };
+		float wobbleDepth{ 0.0f };
+		float wobblePitch{ 0.0f };
+		// A hum an octave below the voice, beside it (0..1).
+		float subharmonic{ 0.0f };
+		// Ring modulation: the voice's loudness swung at ringHz by ringDepth (0..1).
+		float ringHz{ 70.0f };
+		float ringDepth{ 0.0f };
+		// Voices singing in unison (1..6), spread over +/- detuneCents and drifting a little, for a choir.
+		int unison{ 1 };
+		float detuneCents{ 12.0f };
+		// The source from buzzy (0: the glottal flow's slope) to round and soft (1: the flow itself).
+		float smooth{ 0.0f };
+		// A reverse reverb: the voice reverbed backwards and turned round again, so a swell rises into each sound.
+		// reverseMix is how loud the swell is (0 off), reverseRoom how long it rises (0..1). The swell before the first
+		// sound needs room: reverseLead seconds are rendered before it (RenderedVoice::lead).
+		float reverseMix{ 0.0f };
+		float reverseRoom{ 0.6f };
+		float reverseLead{ 0.35f };
 	};
 
 	struct RenderedVoice
 	{
 		// Mono samples at the requested rate.
 		std::vector<float> samples{};
-		// When each segment starts (seconds), and when the last ends.
+		// When each segment starts (seconds from the first segment), and when the last ends.
 		std::vector<float> starts{};
 		float seconds{};
 		float peak{};
+		// Seconds of sound before the first segment begins (a reverse reverb's lead-in): add it to `starts` to find
+		// them in `samples`.
+		float lead{};
 	};
 
 	// Renders the segments. Output never exceeds 1: anything louder is soft clipped.

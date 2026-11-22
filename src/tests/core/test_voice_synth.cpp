@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <memory>
+#include <numbers>
 #include <span>
 #include <vector>
 
@@ -176,4 +177,82 @@ TEST(VoiceSynth, PlayBufferPlaysOnceAndFrees)
 	EXPECT_FALSE(audio.is_playing(id));
 	audio.mix(out.data(), 256);
 	EXPECT_TRUE(watch.expired()) << "and lets it go once done";
+}
+
+
+TEST(VoiceSynth, PopsSoundAndTheExtraLayersNeverClip)
+{
+	VoiceSegment pop{};
+	pop.kind = VoiceSegmentKind::Pop;
+	pop.seconds = 0.03f;
+	pop.pitchStart = 900.0f;
+	pop.pitchEnd = 300.0f;
+	pop.ampStart = pop.ampEnd = 1.0f;
+	const auto popped{ render_voice({}, std::vector{ gap(0.02f), pop, gap(0.05f) }, s_rate, 10) };
+	EXPECT_GT(rms(window(popped, 0.02f, 0.05f)), 0.02f) << "a pop is heard";
+	EXPECT_LT(rms(window(popped, 0.07f, 0.1f)), 0.005f) << "and gone quickly";
+
+	VoiceTimbre alien{};
+	alien.wobbleDepth = 0.2f;
+	alien.wobblePitch = 0.1f;
+	alien.subharmonic = 1.0f;
+	alien.ringDepth = 1.0f;
+	const std::vector segments{ vowel(0.3f, 160.0f, 150.0f, 2.0f), pop, vowel(0.3f, 180.0f, 170.0f, 2.0f) };
+	const auto voice{ render_voice(alien, segments, s_rate, 11) };
+	for (const auto s : voice.samples) ASSERT_TRUE(std::isfinite(s) && std::abs(s) <= 1.0f);
+	const auto plain{ render_voice({}, segments, s_rate, 11) };
+	EXPECT_NE(voice.samples, plain.samples) << "the layers change the sound";
+}
+
+TEST(VoiceSynth, AUnisonChoirSoundsAndSmoothnessSoftens)
+{
+	const std::vector segments{ vowel(0.5f, 160.0f, 160.0f) };
+	VoiceTimbre choir{};
+	choir.unison = 5;
+	choir.detuneCents = 15.0f;
+	choir.smooth = 0.8f;
+	const auto sung{ render_voice(choir, segments, s_rate, 12) };
+	const auto plain{ render_voice({}, segments, s_rate, 12) };
+	for (const auto s : sung.samples) ASSERT_TRUE(std::isfinite(s) && std::abs(s) <= 1.0f);
+	EXPECT_NE(sung.samples, plain.samples);
+	EXPECT_GT(rms(window(sung, 0.1f, 0.4f)), 0.01f) << "the choir is heard";
+	// Smoothness softens the source.
+	VoiceTimbre soft{};
+	soft.smooth = 1.0f;
+	// Brightness as the share of energy above about 2 kHz: a one-pole high pass over the samples.
+	const auto bright = [](const RenderedVoice& voice)
+	{
+		double high{}, all{}, y{}, previous{};
+		const auto a{ std::exp(-2.0 * std::numbers::pi * 2000.0 / s_rate) };
+		for (const auto s : voice.samples)
+		{
+			y = a * (y + s - previous);
+			previous = s;
+			high += y * y;
+			all += static_cast<double>(s) * s;
+		}
+		return all > 0.0 ? high / all : 0.0;
+	};
+	EXPECT_LT(bright(render_voice(soft, segments, s_rate, 12)), bright(plain) * 0.8) << "smooth is less buzzy";
+	EXPECT_LT(bright(sung), bright(plain)) << "and so is the smooth choir";
+}
+
+TEST(VoiceSynth, AReverseReverbSwellsIntoEachSound)
+{
+	const std::vector segments{ gap(0.3f), vowel(0.3f, 160.0f, 160.0f) };
+	VoiceTimbre swell{};
+	swell.reverseMix = 0.5f;
+	swell.reverseLead = 0.25f;
+	const auto dry{ render_voice({}, segments, s_rate, 13) };
+	const auto wet{ render_voice(swell, segments, s_rate, 13) };
+	EXPECT_NEAR(wet.lead, 0.25f, 1.0f / s_rate);
+	EXPECT_EQ(wet.starts, dry.starts) << "the segments keep their times, counted from after the lead-in";
+	// Before the vowel (in the gap) the dry voice is silent; the reversed tail swells there, rising toward it.
+	const auto quiet{ rms(window(dry, 0.1f, 0.28f)) };
+	const auto early{ rms(window(wet, 0.25f + 0.02f, 0.25f + 0.12f)) };
+	const auto late{ rms(window(wet, 0.25f + 0.2f, 0.25f + 0.29f)) };
+	EXPECT_LT(quiet, 0.001f);
+	EXPECT_GT(late, 0.002f) << "a swell before the sound";
+	EXPECT_GT(late, early) << "rising into it";
+	for (const auto s : wet.samples) ASSERT_TRUE(std::isfinite(s) && std::abs(s) <= 1.0f);
 }

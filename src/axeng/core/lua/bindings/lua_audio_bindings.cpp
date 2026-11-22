@@ -31,6 +31,7 @@ namespace
 		std::shared_ptr<const std::vector<float>> samples{};
 		float seconds{};
 		float peak{};
+		float lead{};
 	};
 
 	std::uint64_t to_seed(double value) noexcept
@@ -334,6 +335,7 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 	state.new_usertype<VoiceBuffer>("AudioBuffer", sol::no_constructor,
 		"seconds", sol::readonly(&VoiceBuffer::seconds),
 		"peak", sol::readonly(&VoiceBuffer::peak),
+		"lead", sol::readonly(&VoiceBuffer::lead),
 		"frames", sol::property([](const VoiceBuffer& buffer) { return buffer.samples ? buffer.samples->size() : 0; }));
 
 	audio_table["render_voice"] =
@@ -354,6 +356,18 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 				timbre.smoothing = timbreTable->get_or("smoothing", timbre.smoothing);
 				timbre.gain = timbreTable->get_or("gain", timbre.gain);
 				timbre.tail = timbreTable->get_or("tail", timbre.tail);
+				timbre.wobbleRate = timbreTable->get_or("wobble_rate", timbre.wobbleRate);
+				timbre.wobbleDepth = timbreTable->get_or("wobble_depth", timbre.wobbleDepth);
+				timbre.wobblePitch = timbreTable->get_or("wobble_pitch", timbre.wobblePitch);
+				timbre.subharmonic = timbreTable->get_or("subharmonic", timbre.subharmonic);
+				timbre.ringHz = timbreTable->get_or("ring_hz", timbre.ringHz);
+				timbre.ringDepth = timbreTable->get_or("ring_depth", timbre.ringDepth);
+				timbre.unison = static_cast<int>(std::lround(timbreTable->get_or("unison", static_cast<double>(timbre.unison))));
+				timbre.detuneCents = timbreTable->get_or("detune_cents", timbre.detuneCents);
+				timbre.smooth = timbreTable->get_or("smooth", timbre.smooth);
+				timbre.reverseMix = timbreTable->get_or("reverse_mix", timbre.reverseMix);
+				timbre.reverseRoom = timbreTable->get_or("reverse_room", timbre.reverseRoom);
+				timbre.reverseLead = timbreTable->get_or("reverse_lead", timbre.reverseLead);
 			}
 			const auto pair{ [](const sol::table& table, const char* key, float fallback) -> std::pair<float, float>
 			{
@@ -379,7 +393,8 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 					ax::audio::VoiceSegment segment{};
 					const auto kind{ entry->get_or<std::string>("kind", "gap") };
 					segment.kind = kind == "voiced" ? ax::audio::VoiceSegmentKind::Voiced
-						: kind == "noise" ? ax::audio::VoiceSegmentKind::Noise : ax::audio::VoiceSegmentKind::Gap;
+						: kind == "noise" ? ax::audio::VoiceSegmentKind::Noise
+						: kind == "pop" ? ax::audio::VoiceSegmentKind::Pop : ax::audio::VoiceSegmentKind::Gap;
 					segment.seconds = std::clamp(entry->get_or("dur", segment.seconds), 0.0f, 10.0f);
 					std::tie(segment.pitchStart, segment.pitchEnd) = pair(*entry, "f0", segment.pitchStart);
 					std::tie(segment.ampStart, segment.ampEnd) = pair(*entry, "amp", 1.0f);
@@ -413,6 +428,7 @@ void ax::lua::bindings::setup_audio_bindings(ax::Application& app, sol::state& s
 			auto buffer{ std::make_shared<VoiceBuffer>() };
 			buffer->seconds = rendered.seconds;
 			buffer->peak = rendered.peak;
+			buffer->lead = rendered.lead;
 			buffer->samples = std::make_shared<const std::vector<float>>(std::move(rendered.samples));
 			return { sol::make_object(view, buffer), starts };
 		};
