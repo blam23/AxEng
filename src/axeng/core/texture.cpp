@@ -690,7 +690,7 @@ std::unique_ptr<ax::Texture> ax::TextureManager::create_temporary(const std::str
 	const auto textureWidth{ static_cast<uint32_t>(width) };
 	const auto textureHeight{ static_cast<uint32_t>(height) };
 	wgpu::Limits limits{};
-	if (!m_device->GetLimits(&limits) || textureWidth > limits.maxTextureDimension2D || textureHeight > limits.maxTextureDimension2D)
+	if (m_device->GetLimits(&limits) != wgpu::Status::Success || textureWidth > limits.maxTextureDimension2D || textureHeight > limits.maxTextureDimension2D)
 	{
 		spdlog::error("Failed to create temporary texture '{}', dimensions {}x{} exceed device limits.", name, textureWidth, textureHeight);
 		return nullptr;
