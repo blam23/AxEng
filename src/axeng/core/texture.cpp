@@ -10,8 +10,10 @@
 #include <mutex>
 #include <thread>
 
+#ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4505) // unused functions due to PNG only flag
+#endif
 #define STBI_ONLY_PNG
 #define STB_IMAGE_IMPLEMENTATION
 #include "axeng/external/stb_image.h"
@@ -20,7 +22,9 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_WRITE_NO_STDIO
 #include "axeng/external/stb_image_write.h"
+#ifdef _MSC_VER
 #pragma warning(pop)
+#endif
 
 #include <fstream>
 
@@ -686,7 +690,7 @@ std::unique_ptr<ax::Texture> ax::TextureManager::create_temporary(const std::str
 	const auto textureWidth{ static_cast<uint32_t>(width) };
 	const auto textureHeight{ static_cast<uint32_t>(height) };
 	wgpu::Limits limits{};
-	if (!m_device->GetLimits(&limits) || textureWidth > limits.maxTextureDimension2D || textureHeight > limits.maxTextureDimension2D)
+	if (m_device->GetLimits(&limits) != wgpu::Status::Success || textureWidth > limits.maxTextureDimension2D || textureHeight > limits.maxTextureDimension2D)
 	{
 		spdlog::error("Failed to create temporary texture '{}', dimensions {}x{} exceed device limits.", name, textureWidth, textureHeight);
 		return nullptr;

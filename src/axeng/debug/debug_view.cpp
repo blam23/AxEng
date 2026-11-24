@@ -266,7 +266,7 @@ static void gpu_memory_window()
 		ImGui::Text("Total: %s in %zu allocations", gpu::format_bytes(data.totalBytes).c_str(), data.allocations.size());
 		ImGui::Text("Buffers: %s   Textures: %s", gpu::format_bytes(data.bufferBytes).c_str(),
 			gpu::format_bytes(data.textureBytes).c_str());
-		ImGui::Text("Created: %llu   Released: %llu", data.totalCreated, data.totalReleased);
+		ImGui::Text("Created: %llu   Released: %llu", static_cast<unsigned long long>(data.totalCreated), static_cast<unsigned long long>(data.totalReleased));
 		ImGui::TextDisabled("Estimated from descriptors; ImGui backend and swap chain images are not tracked.");
 
 		ImGui::SetNextItemWidth(220.0f);
@@ -448,8 +448,8 @@ void ax::debug::ViewManager::debug_view_callback(Debugger& debugger, Application
 		allTimes /= deltaCount;
 		ImGui::Text("FPS Average: %.0f", 1000.0f / allTimes);
 		const auto& loop{ app.window()->loop_statistics() };
-		ImGui::Text("Application updates: %llu / frames: %llu", loop.updates, loop.frames);
-		ImGui::Text("Catch-up ticks: %llu / discarded time: %.3f s", loop.catchUpTicks, loop.discardedSeconds);
+		ImGui::Text("Application updates: %llu / frames: %llu", static_cast<unsigned long long>(loop.updates), static_cast<unsigned long long>(loop.frames));
+		ImGui::Text("Catch-up ticks: %llu / discarded time: %.3f s", static_cast<unsigned long long>(loop.catchUpTicks), loop.discardedSeconds);
 		ImGui::Text("Last update: %.2f ms / render: %.2f ms", loop.updateMilliseconds, loop.renderMilliseconds);
 
 		ImGui::SeparatorText(ICON_FA_CHART_BAR " Statistics");

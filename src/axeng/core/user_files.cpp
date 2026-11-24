@@ -96,7 +96,8 @@ ax::UserFileHandle* ax::UserFileManager::open_file(const std::string &filename, 
 
     const std::string openMode{ mode };
     const bool readMode{ openMode.find('r') != std::string::npos };
-    handle.file.open(filePath, std::ios::binary | (readMode ? std::ios::in : 0) | (openMode.find('w') != std::string::npos ? std::ios::out : 0));
+    const std::ios::openmode none{};
+    handle.file.open(filePath, std::ios::binary | (readMode ? std::ios::in : none) | (openMode.find('w') != std::string::npos ? std::ios::out : none));
     if (!handle.file.is_open())
     {
         if (!readMode || std::filesystem::exists(filePath))
