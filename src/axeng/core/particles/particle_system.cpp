@@ -608,7 +608,7 @@ void ax::ParticleSystem::initialise(wgpu::Device& device, wgpu::TextureFormat co
 
 void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
 	double delta, glm::vec4 cameraBounds, glm::vec2 viewport, float zoom,
-	wgpu::TextureFormat colourFormat, std::uint32_t sampleCount)
+	wgpu::TextureFormat colourFormat, std::uint32_t sampleCount, GpuPassTimer* timer)
 {
 	if (m_thread != std::this_thread::get_id())
 		throw std::runtime_error("Particle systems belong to the renderer thread");
@@ -762,6 +762,8 @@ void ax::ParticleSystem::encode_compute(wgpu::Device& device, wgpu::Queue& queue
 
 	wgpu::ComputePassDescriptor passDesc{};
 	passDesc.label = "ParticleSimulationAndCulling";
+	if (timer)
+		passDesc.timestampWrites = timer->pass("GPU ms: particle simulation");
 	auto pass{ encoder.BeginComputePass(&passDesc) };
 	pass.SetPipeline(m_computePipeline);
 	for (const auto& emitter : m_frameEmitters)

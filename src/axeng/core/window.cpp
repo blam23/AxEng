@@ -907,6 +907,7 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 
 	m_queue = m_device.GetQueue();
 	m_interfaceTimer.init(m_device);
+	m_frameTimer.init(m_device);
 
 	//
 	// Main Surface
@@ -2306,6 +2307,12 @@ bool ax::Window::init_imgui()
 void ax::Window::register_window_events()
 {
 	glfwSetWindowSizeCallback(m_window, &resize_event_handler);
+	// A resize before the callback was set (a script going fullscreen at start-up) went unseen: catch up with it, or the
+	// surface keeps its old size and is stretched over the window.
+	int width{}, height{};
+	glfwGetWindowSize(m_window, &width, &height);
+	if (width > 0 && height > 0 && (static_cast<std::uint32_t>(width) != m_width || static_cast<std::uint32_t>(height) != m_height))
+		resize_event_handler(m_window, width, height);
 #ifndef __EMSCRIPTEN__
 	glfwSetWindowCloseCallback(m_window, ax::Window::window_close_handler);
 #endif
@@ -2703,13 +2710,14 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		const auto halfWidth{ static_cast<float>(m_width) / (2.0f * zoom) };
 		const auto halfHeight{ static_cast<float>(m_height) / (2.0f * zoom) };
 		const auto cameraPosition{ m_camera.position() };
+		m_frameTimer.begin_frame();
 		{
 			ZoneScopedN("Window::particle-compute-encode");
 			m_particleSystem.encode_compute(m_device, m_queue, encoder, m_particleDeltaPending,
 				{ cameraPosition.x - halfWidth, cameraPosition.y - halfHeight,
 					cameraPosition.x + halfWidth, cameraPosition.y + halfHeight },
 				{ static_cast<float>(m_width), static_cast<float>(m_height) }, zoom,
-				m_surfaceFormat, m_sampleCount);
+				m_surfaceFormat, m_sampleCount, &m_frameTimer);
 			m_particleDeltaPending = 0.0;
 		}
 
@@ -2731,7 +2739,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			lightingActive = false;
 		m_lightingRan = lightingActive;
 
-		const auto beginScenePass{ [&](bool clear)
+		const auto beginScenePass{ [&](bool clear, const char* timing)
 		{
 			wgpu::RenderPassColorAttachment colorAttachment
 			{
@@ -2758,6 +2766,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			passDesc.colorAttachmentCount = 1;
 			passDesc.colorAttachments = &colorAttachment;
 			passDesc.depthStencilAttachment = &depthAttachment;
+			passDesc.timestampWrites = m_frameTimer.pass(timing);
 			return encoder.BeginRenderPass(&passDesc);
 		} };
 
@@ -2802,6 +2811,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			oitPassDesc.colorAttachmentCount = 2;
 			oitPassDesc.colorAttachments = oitColorAttachments;
 			oitPassDesc.depthStencilAttachment = &oitDepthAttachment;
+			oitPassDesc.timestampWrites = m_frameTimer.pass("GPU ms: transparency");
 			auto oitPass = encoder.BeginRenderPass(&oitPassDesc);
 			draw_transparent_sprites(oitPass, layer);
 			if (layer != SpriteLayer::Unlit)
@@ -2822,6 +2832,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			wgpu::RenderPassDescriptor compositePassDesc{};
 			compositePassDesc.colorAttachmentCount = 1;
 			compositePassDesc.colorAttachments = &compositeColorAttachment;
+			compositePassDesc.timestampWrites = m_frameTimer.pass("GPU ms: transparency");
 			auto compositePass = encoder.BeginRenderPass(&compositePassDesc);
 			compositePass.SetPipeline(m_compositePipeline);
 			compositePass.SetBindGroup(0, m_compositeBindGroup);
@@ -2859,6 +2870,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			overlayPassDesc.colorAttachmentCount = 1;
 			overlayPassDesc.colorAttachments = &overlayColorAttachment;
 			overlayPassDesc.depthStencilAttachment = &overlayDepthAttachment;
+			overlayPassDesc.timestampWrites = m_frameTimer.pass("GPU ms: overlay shapes");
 			auto overlayPass = encoder.BeginRenderPass(&overlayPassDesc);
 			for (const auto& mesh : statics)
 				ShapeRenderer::draw_static(overlayPass, *mesh);
@@ -2900,7 +2912,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 
 		{
 		ZoneScopedN("Window::scene-pass");
-		auto scenePass{ beginScenePass(true) };
+		auto scenePass{ beginScenePass(true, "GPU ms: scene") };
 		{
 			std::lock_guard lock{ m_pendingTextureMutex };
 			m_pendingTextures.swap(m_queuedTextures);
@@ -2951,7 +2963,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				m_width, m_height))
 			{
 				MaterialRenderer::set_backdrop(m_sceneCopy.view());
-				auto refractionPass{ beginScenePass(false) };
+				auto refractionPass{ beginScenePass(false, "GPU ms: refraction") };
 				drawMaterials(refractionPass, MaterialPass::Refraction);
 				refractionPass.End();
 				MaterialRenderer::set_backdrop({});
@@ -2960,7 +2972,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		if (!lightingActive && !interfaceActive && !m_screenSpaceSpriteGroupRanges.empty())
 		{
 			ZoneScopedN("Window::screen-space-sprites");
-			auto screenSpacePass{ beginScenePass(false) };
+			auto screenSpacePass{ beginScenePass(false, "GPU ms: screen sprites") };
 			draw_sprite_batches(screenSpacePass, m_screenSpacePipeline, m_sdfScreenSpacePipeline, SpriteLayer::ScreenSpace);
 			screenSpacePass.End();
 		}
@@ -2993,6 +3005,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			materialDesc.colorAttachmentCount = 1;
 			materialDesc.colorAttachments = &materialColour;
 			materialDesc.depthStencilAttachment = &materialDepth;
+			materialDesc.timestampWrites = m_frameTimer.pass("GPU ms: screen materials");
 			auto materialPass = encoder.BeginRenderPass(&materialDesc);
 			drawMaterials(materialPass, MaterialPass::Screen);
 			materialPass.End();
@@ -3147,7 +3160,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			{
 			ZoneScopedN("Window::unlit-scene-pass");
 			MaterialRenderer::set_light_map(m_lightRenderer.light_map_view());
-			auto unlitPass{ beginScenePass(false) };
+			auto unlitPass{ beginScenePass(false, "GPU ms: unlit scene") };
 			for (const auto& call : m_unlitShapes.calls())
 				ShapeRenderer::draw(unlitPass, call);
 			draw_sprite_batches(unlitPass, m_pipeline, m_sdfPipeline, SpriteLayer::Unlit);
@@ -3164,7 +3177,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 			if (!interfaceActive && !m_screenSpaceSpriteGroupRanges.empty())
 			{
 				ZoneScopedN("Window::screen-space-sprites");
-				auto screenSpacePass{ beginScenePass(false) };
+				auto screenSpacePass{ beginScenePass(false, "GPU ms: screen sprites") };
 				draw_sprite_batches(screenSpacePass, m_screenSpacePipeline, m_sdfScreenSpacePipeline, SpriteLayer::ScreenSpace);
 				screenSpacePass.End();
 			}
@@ -3263,12 +3276,14 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 		uiPassDesc.colorAttachmentCount = 1;
 		uiPassDesc.colorAttachments = &uiColorAttachment;
 		uiPassDesc.depthStencilAttachment = &uiDepthAttachment;
+		uiPassDesc.timestampWrites = m_frameTimer.pass("GPU ms: gui and resolve");
 		auto uiPass = encoder.BeginRenderPass(&uiPassDesc);
 		{
 			ZoneScopedN("Window::ui");
 			render_gui(uiPass, delta);
 		}
 		uiPass.End();
+		m_frameTimer.end_frame(encoder);
 
 		// Submit commands to GPU
 		{
@@ -3290,6 +3305,7 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 				// The GPU timings may now be read back.
 				m_lightRenderer.submitted();
 				m_interfaceTimer.submitted();
+				m_frameTimer.submitted();
 			}
 
 			std::vector<PendingDrawBatch> pendingBatches{};
@@ -3361,6 +3377,8 @@ std::vector<ax::GpuPassTimer::Timing> ax::Window::gpu_timings() const
 	auto timings{ m_lightRenderer.gpu_timings() };
 	const auto& interfaceTimings{ m_interfaceTimer.last() };
 	timings.insert(timings.end(), interfaceTimings.begin(), interfaceTimings.end());
+	const auto& frameTimings{ m_frameTimer.last() };
+	timings.insert(timings.end(), frameTimings.begin(), frameTimings.end());
 	return timings;
 }
 

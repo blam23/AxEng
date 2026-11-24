@@ -1,6 +1,7 @@
 #pragma once
 
 #include "axeng/debug/gpu_memory.h"
+#include "axeng/debug/gpu_pass_timer.h"
 #include "axeng/core/lighting/light_renderer.h"
 
 #include <webgpu/webgpu_cpp.h>
@@ -186,7 +187,7 @@ namespace ax
 		void resume_all();
 		void encode_compute(wgpu::Device& device, wgpu::Queue& queue, wgpu::CommandEncoder& encoder,
 			double delta, glm::vec4 cameraBounds, glm::vec2 viewport, float zoom,
-			wgpu::TextureFormat colourFormat, std::uint32_t sampleCount);
+			wgpu::TextureFormat colourFormat, std::uint32_t sampleCount, GpuPassTimer* timer = nullptr);
 		void draw(wgpu::RenderPassEncoder& pass);
 		// Emitter lights as of the last compute pass; submit them with the frame's other lights.
 		std::span<const Light2D> lights() const noexcept { return m_frameLights; }

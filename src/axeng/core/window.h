@@ -296,8 +296,9 @@ namespace ax
 		// Whether the most recent frame ran the lighting passes, and what they drew.
 		bool lighting_ran() const noexcept { return m_lightingRan; }
 		LightRenderer::Stats lighting_stats() const noexcept { return m_lightRenderer.last_stats(); }
-		// The GPU times of the latest frames' timed passes (GpuPassTimer), by category: the lighting's, then the
-		// interface's ("GPU ms: interface", "GPU ms: backdrop blur"). Empty where the GPU cannot time passes.
+		// The GPU times of the latest frames' timed passes (GpuPassTimer), by category: the lighting's, the interface's
+		// ("GPU ms: interface", "GPU ms: backdrop blur"), then the rest of the frame's (scene, transparency, overlay,
+		// particles, gui and so on). Empty where the GPU cannot time passes.
 		std::vector<GpuPassTimer::Timing> gpu_timings() const;
 		// How many sprites the latest frame drew as shadow occluders (sprite_flag_occluder), 0 when no shadows ran.
 		std::uint32_t occluder_sprites() const noexcept { return m_collectOccluders ? m_occluderSprites : 0u; }
@@ -575,6 +576,8 @@ namespace ax
 		ShapeList m_interfaceOverlayShapes;
 		BackdropBlur m_backdropBlur;
 		GpuPassTimer m_interfaceTimer{ "GPU ms: interface total" };
+		// Every other pass of the frame: the scene, transparency, overlays, particles and the gui.
+		GpuPassTimer m_frameTimer{ "GPU ms: other passes total" };
 		std::atomic<std::uint32_t> m_backdropLayerLimit{ 4 };
 		std::vector<float> m_queuedInterfaceSplits, m_frameInterfaceSplits;
 		// The view with a z window for each interface stretch (screen space sprites), and a draw for a stretch's share
