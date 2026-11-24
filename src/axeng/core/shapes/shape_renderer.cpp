@@ -857,7 +857,7 @@ bool ax::ShapeRenderer::init(const wgpu::Device& device, const ShapeRendererConf
 	state->config = config;
 
 	wgpu::Limits limits{};
-	if (device.GetLimits(&limits) && limits.maxBufferSize != wgpu::kLimitU64Undefined)
+	if (device.GetLimits(&limits) == wgpu::Status::Success && limits.maxBufferSize != wgpu::kLimitU64Undefined)
 		state->maxChunkSize = std::min(s_max_chunk_size, limits.maxBufferSize) & ~std::uint64_t{ 3 };
 
 	wgpu::ShaderSourceWGSL source{};

@@ -2,7 +2,7 @@ set_project("AxEng")
 set_version("0.1.0")
 set_xmakever("2.9.0")
 
-set_allowedplats("windows", "wasm")
+set_allowedplats("windows", "linux", "wasm")
 set_allowedarchs("x64", "wasm32")
 set_allowedmodes("debug", "release")
 -- The browser build uses Emscripten (xmake f -p wasm --emsdk=<emsdk directory>); see docs/wasm.md.
@@ -44,11 +44,12 @@ option_end()
 
 local vcpkg_debug = is_mode("debug")
 local vcpkg_wasm = is_plat("wasm")
-local vcpkg_triplet = vcpkg_wasm and "wasm32-emscripten" or "x64-windows-static-md"
+local vcpkg_linux = is_plat("linux")
+local vcpkg_triplet = vcpkg_wasm and "wasm32-emscripten" or (vcpkg_linux and "x64-linux" or "x64-windows-static-md")
 local vcpkg_install_name = vcpkg_wasm and "vcpkg_installed_wasm" or "vcpkg_installed"
 local vcpkg_triplet_dir = path.join(engine_root, "triplets")
 local vcpkg_config_dir = vcpkg_debug and "debug" or ""
-if not vcpkg_wasm then
+if not vcpkg_wasm and not vcpkg_linux then
     set_runtimes(vcpkg_debug and "MDd" or "MD")
     add_defines("_ITERATOR_DEBUG_LEVEL=" .. (vcpkg_debug and "2" or "0"))
 end
@@ -121,8 +122,16 @@ rule("vcpkg.manifest")
             end
         else
             target:add("sysincludedirs", path.join(prefix, "include", "tracy"), {public = true})
-            target:add("sysincludedirs", path.join(prefix, "include", "luajit"), {public = true})
-            for _, lib in ipairs(os.files(path.join(libdir, "*.lib"))) do
+            target:add("sysincludedirs", path.join(prefix, "include", vcpkg_linux and "luajit-2.1" or "luajit"), {public = true})
+            if vcpkg_linux then
+                -- Static archives can depend on each other in any order; group them so the linker resolves them all.
+                local archives = {}
+                for _, lib in ipairs(os.files(path.join(libdir, "lib*.a"))) do table.insert(archives, lib) end
+                target:add("ldflags", "-Wl,--start-group", {public = true, force = true})
+                target:add("ldflags", archives, {public = true, force = true})
+                target:add("ldflags", "-Wl,--end-group", {public = true, force = true})
+            end
+            for _, lib in ipairs(vcpkg_linux and {} or os.files(path.join(libdir, "*.lib"))) do
                 target:add("links", path.basename(lib), {public = true})
             end
         end
@@ -164,15 +173,15 @@ target("AxEngLib")
     add_rules("vcpkg.manifest")
     add_files(src .. "/axeng/**.cpp", src .. "/axeng/**.c")
     -- #embed is a Clang extension in C++ (it is not part of C++26)
-    add_files(src .. "/axeng/core/lua/external/lua_libs.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/axeng/core/font_data.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/axeng/core/shapes/shape_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/axeng/core/particles/particle_system.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/axeng/core/lighting/light_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/axeng/core/lighting/radiance_cascades.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/axeng/core/lighting/ambient_occlusion.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/axeng/core/lighting/mist.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/axeng/core/window.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
+    add_files(src .. "/axeng/core/lua/external/lua_libs.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/axeng/core/font_data.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/axeng/core/shapes/shape_renderer.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/axeng/core/particles/particle_system.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/axeng/core/lighting/light_renderer.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/axeng/core/lighting/radiance_cascades.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/axeng/core/lighting/ambient_occlusion.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/axeng/core/lighting/mist.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/axeng/core/window.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
     -- stb_image.h defines helpers that are only used on some code paths
     add_files(src .. "/axeng/core/texture.cpp", {force = {cxxflags = "-Wno-unused-function"}})
     -- Third-party single file implementations (miniaudio + stb_vorbis)
@@ -186,8 +195,12 @@ target("AxEngLib")
         if has_config("tracy") then
             add_defines("TRACY_ENABLE", "TRACY_ON_DEMAND", {public = true})
         end
+        if vcpkg_linux then
+            add_syslinks("X11", "Xrandr", "Xinerama", "Xcursor", "Xi", "dl", "pthread", "m", {public = true})
+        else
         add_cxflags("-Wa,-mbig-obj", {tools = {"clang"}})
         add_syslinks("bcrypt", "gdi32", "user32", "shell32", "advapi32", "kernel32", "onecore", "ole32", "comctl32", "dxgi", "dxguid", "d3d11", "d3d12", "d3dcompiler", "synchronization", {public = true})
+        end
     end
 
 target("AxEng")
@@ -203,11 +216,11 @@ target("Tests")
     add_rules("vcpkg.runtime_dlls", "copy.lua_tests")
     add_files(src .. "/tests/**.cpp")
     -- #embed is a Clang extension in C++ (it is not part of C++26)
-    add_files(src .. "/tests/core/test_sprite_shader.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/tests/core/test_native_tasks.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/tests/core/test_shape_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/tests/core/test_particle_system.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/tests/core/test_light_renderer.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
-    add_files(src .. "/tests/core/test_lua_resource_bindings.cpp", {force = {cxxflags = "-Wno-c23-extensions"}})
+    add_files(src .. "/tests/core/test_sprite_shader.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/tests/core/test_native_tasks.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/tests/core/test_shape_renderer.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/tests/core/test_particle_system.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/tests/core/test_light_renderer.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
+    add_files(src .. "/tests/core/test_lua_resource_bindings.cpp", {force = {cxxflags = {"-Wno-c23-extensions", "-Wno-c++26-extensions"}}})
     add_deps("AxEngLib")
     add_tests("default")
