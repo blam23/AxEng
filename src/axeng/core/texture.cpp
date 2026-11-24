@@ -10,8 +10,10 @@
 #include <mutex>
 #include <thread>
 
+#ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4505) // unused functions due to PNG only flag
+#endif
 #define STBI_ONLY_PNG
 #define STB_IMAGE_IMPLEMENTATION
 #include "axeng/external/stb_image.h"
@@ -20,7 +22,9 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STBI_WRITE_NO_STDIO
 #include "axeng/external/stb_image_write.h"
+#ifdef _MSC_VER
 #pragma warning(pop)
+#endif
 
 #include <fstream>
 

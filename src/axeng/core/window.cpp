@@ -743,15 +743,16 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 #else
 	// Dawn loads d3dcompiler_47.dll / vulkan-1.dll with LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, which only
 	// accepts absolute paths, so the system directory has to be given to it explicitly.
+	dawn::native::DawnInstanceDescriptor dawnDesc{};
+#ifdef _WIN32
 	char systemDir[MAX_PATH]{};
 	const UINT systemDirLen{ ::GetSystemDirectoryA(systemDir, MAX_PATH) };
 	std::string systemPath{ systemDir, systemDirLen };
 	systemPath += '\\';
 	const char* searchPaths[]{ systemPath.c_str() };
-
-	dawn::native::DawnInstanceDescriptor dawnDesc{};
 	dawnDesc.additionalRuntimeSearchPathsCount = 1;
 	dawnDesc.additionalRuntimeSearchPaths = searchPaths;
+#endif
 
 	wgpu::InstanceDescriptor instanceDesc
 	{
@@ -2383,6 +2384,14 @@ void ax::Window::run_loop()
 	struct FrameTimer
 	{
 		void wait(double) const { ax_wait_animation_frame(); }
+	} frameTimer;
+	register_window_events();
+	ImGui_ImplGlfw_InstallCallbacks(m_window);
+#elif !defined(_WIN32)
+	// Other desktop platforms: GLFW's timed wait, which also ends when an event arrives.
+	struct FrameTimer
+	{
+		void wait(double seconds) const { glfwWaitEventsTimeout(seconds); }
 	} frameTimer;
 	register_window_events();
 	ImGui_ImplGlfw_InstallCallbacks(m_window);

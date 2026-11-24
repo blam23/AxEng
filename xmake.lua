@@ -122,7 +122,7 @@ rule("vcpkg.manifest")
             end
         else
             target:add("sysincludedirs", path.join(prefix, "include", "tracy"), {public = true})
-            target:add("sysincludedirs", path.join(prefix, "include", "luajit"), {public = true})
+            target:add("sysincludedirs", path.join(prefix, "include", vcpkg_linux and "luajit-2.1" or "luajit"), {public = true})
             if vcpkg_linux then
                 -- Static archives can depend on each other in any order; group them so the linker resolves them all.
                 local archives = {}
