@@ -21,6 +21,9 @@ set_encodings("utf-8")
 set_warnings("all", "error")
 -- LuaJIT's protected calls need sol2 to convert C++ callback exceptions into Lua errors.
 add_defines("SOL_EXCEPTIONS_SAFE_PROPAGATION=0")
+-- Every platform reads a Lua number with a fraction as an integer the same way (sol2 rounds it), so peers on different
+-- platforms agree. LuaJIT scripts pass such numbers, and Lua 5.4 with sol2's precision check would refuse them.
+add_defines("SOL_NO_CHECK_NUMBER_PRECISION=1", {public = true})
 -- Windows headers without min/max macros or rarely used APIs (axeng/core/windows_include.h also drops near/far).
 if is_plat("windows") then add_defines("NOMINMAX", "WIN32_LEAN_AND_MEAN") end
 add_rules("mode.debug", "mode.release")
@@ -60,9 +63,6 @@ if vcpkg_wasm then
     add_cxflags(wasm_flags, {force = true})
     -- The sources carry MSVC warning pragmas, which clang-cl understands and clang does not.
     add_cxflags("-Wno-unknown-pragmas", {force = true})
-    -- LuaJIT, which the scripts were written for, converts a number with a fraction to an integer argument (sol2 rounds it);
-    -- Lua 5.4 would refuse it.
-    add_defines("SOL_NO_CHECK_NUMBER_PRECISION=1", {public = true})
     add_ldflags(wasm_flags, {force = true})
 end
 
