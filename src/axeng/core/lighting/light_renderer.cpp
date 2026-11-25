@@ -409,13 +409,16 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 		float reach{ radiance.aoStrength > 0.0f ? radiance.aoRange : 0.0f };
 		const auto anyGrid{ radiance_grid(view, radiance, 1.0f) };
 		// Marched lights (and shadowed ones that end up marched, outside the grid) need the distance field but not the
-		// cascades' reach.
+		// cascades' reach. Marched lights after an occluder count too: otherwise their shadows come and go with whether
+		// any light before the first occluder casts one.
 		bool marched{};
-		for (std::size_t index{}; index < firstOccluded; ++index)
+		for (std::size_t index{}; index < lights.size(); ++index)
 		{
-			if (radiance_traces(lights[index], anyGrid, radiance))
-				reach = std::max(reach, lights[index].radius);
-			marched = marched || (lights[index].shadows > 0.0f && lights[index].length <= 0.0f);
+			const auto& light{ lights[index] };
+			if (index < firstOccluded && radiance_traces(light, anyGrid, radiance))
+				reach = std::max(reach, light.radius);
+			const auto shadowed{ index < firstOccluded ? light.shadows > 0.0f : light.shadows >= Light2D::marched_shadows };
+			marched = marched || (shadowed && light.length <= 0.0f);
 		}
 		const bool wanted{ reach > 0.0f || marched || radiance.debugView != 0 };
 		const auto grid{ wanted ? radiance_grid(view, radiance, reach) : RadianceGrid{} };

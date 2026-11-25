@@ -1422,6 +1422,25 @@ TEST_F(LightRendererTest, RadianceMarchedLightIsExactInTheOpenAndShadowedBehindO
 	EXPECT_GT(shadowed.at(at(-17.0f), at(0.0f))[0], shadowed.at(at(-7.0f), at(0.0f))[0] + 30);
 }
 
+TEST_F(LightRendererTest, RadianceMarchedLightAfterAnOccluderIsShadowedWithNoLightBeforeIt)
+{
+	// A marched light drawn after an occluder, with no shadowed light before it, still has the distance field to march.
+	const std::array lights{ ax::Light2D{ .position = { -36.0f, 0.0f }, .radius = 80.0f, .intensity = 1.0f,
+		.falloff = 1.0f, .sourceRadius = 4.0f, .shadows = ax::Light2D::marched_shadows } };
+	const std::array circles{ ax::RadianceCircle{ .centre = { -12.0f, 0.0f }, .radius = 6.0f } };
+	const std::array occluders{ ax::LightOccluder2D{
+		.corners = { glm::vec2{ 60.0f, -70.0f }, glm::vec2{ 70.0f, -70.0f }, glm::vec2{ 70.0f, -60.0f },
+			glm::vec2{ 60.0f, -60.0f } },
+		.firstLight = 0 } };
+	auto plain{ radiance_settings() };
+	plain.radiance.enabled = false;
+	const auto analytic{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, plain, lights) };
+	const auto shadowed{ render({ 1.0f, 1.0f, 1.0f, 1.0f }, radiance_settings(), lights, {}, 1, centred_view(), {}, {},
+		nullptr, occluders, circles) };
+	EXPECT_LT(shadowed.at(at(20.0f), at(0.0f))[0], analytic.at(at(20.0f), at(0.0f))[0] / 4);
+	EXPECT_TRUE(close_to(shadowed.at(at(-36.0f), at(30.0f)), analytic.at(at(-36.0f), at(30.0f)), 2));
+}
+
 TEST_F(LightRendererTest, RadianceMarchedLightDoesNotCrawlAsItMoves)
 {
 	// The player's torch walking past a tree with marched shadows: its error against the plain light (the tree's shadow)
