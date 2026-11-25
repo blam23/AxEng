@@ -11,6 +11,11 @@
 #include <filesystem>
 #include <format>
 #include <string_view>
+#include <tuple>
+
+#ifdef __EMSCRIPTEN__
+#include <emscripten/html5.h>
+#endif
 
 namespace
 {
@@ -562,6 +567,22 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 		[&app](int width, int height)
 		{
 			glfwSetWindowSize(app.window()->glfw_handle(), std::max(width, 1), std::max(height, 1));
+		};
+	// The display scale the OS asks for (1 = 100%): the desktop's display scaling, or the browser's device pixel ratio.
+	// Returns the horizontal and vertical scale. Cheap enough to poll; it changes when the window moves to another
+	// monitor or the user changes the setting.
+	window_table["content_scale"] =
+		[&app]() -> std::tuple<float, float>
+		{
+#ifdef __EMSCRIPTEN__
+			static_cast<void>(app);
+			const auto ratio{ static_cast<float>(emscripten_get_device_pixel_ratio()) };
+			return { ratio, ratio };
+#else
+			float x{ 1.0f }, y{ 1.0f };
+			glfwGetWindowContentScale(app.window()->glfw_handle(), &x, &y);
+			return { x > 0.0f ? x : 1.0f, y > 0.0f ? y : 1.0f };
+#endif
 		};
 
 	window_table["set_msaa_enabled"] =
