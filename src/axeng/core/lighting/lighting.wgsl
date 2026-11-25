@@ -214,8 +214,13 @@ fn marched_visibility(world: vec2<f32>, light: vec2<f32>, source: f32) -> f32 {
 		if (seen <= -1.0) {
 			break;
 		}
-		// Inside a see-through disc only the body inside it can block, so on by the distance to where that may begin.
-		t += clamp(s.x, 0.5, 64.0);
+		// Inside a see-through disc only the body inside it can block, so on by the distance to where that may begin, or
+		// half the way to the box that holds it. Inside an occluder, on by the distance to its edge. Half a texel at a
+		// time, a march across a disc or body many texels wide (zoomed in) would run out of steps and count the light
+		// as seen.
+		let disc = max(s.x, select(0.0, 0.5 * s.y, s.y < 5000.0));
+		let step = select(select(s.x, -s.x, s.x < 0.0), disc, s.z >= 0.5);
+		t += clamp(step, 0.5, 64.0);
 	}
 	seen = max(seen, -1.0);
 	return inside * 0.25 * (1.0 + seen) * (1.0 + seen) * (2.0 - seen);
