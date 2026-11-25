@@ -261,7 +261,9 @@ std::expected<std::vector<uint8_t>, ax::ResourceLoadError> ax::ZipResourceLoader
 {
 	int err{ MZ_OK };
 
-	err = mz_zip_locate_entry(m_handle, path.data(), true);
+	// A path is a view and need not be null-terminated, so it is copied before it reaches the C API.
+	const std::string entry{ path };
+	err = mz_zip_locate_entry(m_handle, entry.c_str(), true);
 	if (err != MZ_OK)
 	{
 		spdlog::error("Unable to open path: '{}', err: {}", path, err);

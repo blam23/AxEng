@@ -280,6 +280,13 @@ TEST(ZipResourceLoaderTest, SetupLoadAndCleanupSucceeds)
     std::string loaded(data->begin(), data->end());
     EXPECT_EQ(loaded, contents);
 
+    // A path is a view and need not be null-terminated: only the viewed characters name the entry.
+    const std::string longer{ "data.txt.missing" };
+    auto viewed = loader.load(std::string_view{ longer }.substr(0, 8));
+    ASSERT_TRUE(viewed.has_value());
+    EXPECT_EQ(std::string(viewed->begin(), viewed->end()), contents);
+    EXPECT_TRUE(loader.contains(std::string_view{ longer }.substr(0, 8)));
+
     auto cleanupErr = loader.cleanup();
     EXPECT_FALSE(cleanupErr.has_value()) << "cleanup() returned error";
 
