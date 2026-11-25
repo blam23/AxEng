@@ -575,6 +575,7 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 		[&app]() -> std::tuple<float, float>
 		{
 #ifdef __EMSCRIPTEN__
+			static_cast<void>(app);
 			const auto ratio{ static_cast<float>(emscripten_get_device_pixel_ratio()) };
 			return { ratio, ratio };
 #else
