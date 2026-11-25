@@ -407,6 +407,8 @@ local function create_manifest(project, dir, source_scripts)
 
     local data = {
         NAME = project.name,
+        -- Window title shown to users; defaults to the name, which also names the user data directory.
+        TITLE = project.title or project.name,
         ENTRY_POINT = project.entry_point,
         ICON = project.icon or "null",
         HEADLESS = project.headless and tostring(project.headless) or false,
