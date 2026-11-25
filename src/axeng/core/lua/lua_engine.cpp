@@ -1,6 +1,7 @@
 #include "axeng/core/lua/lua_engine.h"
 #include "axeng/core/log_timer.h"
 #include "axeng/core/lua/script.h"
+#include "axeng/core/lua/line_coverage.h"
 #include <tracy/TracyLua.hpp>
 
 #ifdef _WIN32
@@ -435,6 +436,7 @@ ax::Error ax::lua::Manager::setup()
 		sol::lib::bit32
 	);
 	tracy::LuaRegister(m_state.lua_state());
+	line_coverage::attach(m_state.lua_state());
 #ifdef __EMSCRIPTEN__
 	// Lua 5.4 keeps the coroutine library apart and dropped functions the scripts, written for LuaJIT, still call.
 	m_state.open_libraries(sol::lib::coroutine, sol::lib::utf8);
