@@ -97,6 +97,11 @@ namespace ax
 			std::shared_ptr<Texture> targetLease{};
 			ShapeList shapes;
 			std::vector<SpriteDefinition> textures;
+			// Draws the shapes' height instead of their colour (ShapeRenderer::draw_height); sprites are not drawn.
+			bool height{ false };
+			// Run on the window thread once the batch has been drawn, in order with the other batches: for work that
+			// reads what earlier batches drew (a TextureFilter pass). A batch may have only this.
+			std::function<void(const wgpu::Device&, const wgpu::Queue&)> after{};
 		};
 
 		Window(const WindowDefinition&);

@@ -1555,7 +1555,7 @@ bool ax::Window::submit_pending_draw_batch(PendingDrawBatch batch)
 		return false;
 	}
 
-	if (batch.shapes.empty() && batch.textures.empty())
+	if (batch.shapes.empty() && batch.textures.empty() && !batch.after)
 		return true;
 
 	std::lock_guard lock{ m_pendingDrawMutex };
@@ -1658,8 +1658,18 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 		sprites.push_back(&sprite);
 	}
 
+	if (batch.height)
+		sprites.clear();
+	const auto runAfter = [&batch, this]
+	{
+		if (batch.after)
+			batch.after(m_device, m_queue);
+	};
 	if (batch.shapes.empty() && sprites.empty())
+	{
+		runAfter();
 		return;
+	}
 
 	std::optional<std::pair<bool, bool>> checked{};
 	for (const auto* sprite : sprites)
@@ -1757,7 +1767,12 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 	}
 
 	if (!batch.shapes.empty())
-		ShapeRenderer::draw(pass, batch.shapes);
+	{
+		if (batch.height)
+			ShapeRenderer::draw_height(pass, batch.shapes);
+		else
+			ShapeRenderer::draw(pass, batch.shapes);
+	}
 
 	pass.End();
 	wgpu::CommandBufferDescriptor commandDesc{};
@@ -1766,6 +1781,7 @@ void ax::Window::draw_pending_batch(const PendingDrawBatch& batch, const wgpu::T
 	m_queue.Submit(1, &command);
 	if (batch.target != nullptr)
 		batch.target->m_gpuModified = true;
+	runAfter();
 }
 
 void ax::Window::queue_texture(SpriteDefinition sprite)

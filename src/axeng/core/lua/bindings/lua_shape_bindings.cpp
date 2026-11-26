@@ -5,6 +5,8 @@
 
 #include <algorithm>
 #include <format>
+#include <initializer_list>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -15,6 +17,8 @@
 namespace
 {
 	using namespace std::string_view_literals;
+
+	constexpr const char* key_paint{ "paint" };
 
 	bool is_nil_type(sol::type type)
 	{
@@ -252,6 +256,14 @@ namespace
 			if (const auto clipRect{ opt_vec4("clip_rect") })
 				shape.clipRect = *clipRect;
 
+			const auto surface{ field("surface") };
+			if (!is_nil(surface))
+			{
+				if (surface.get_type() != sol::type::table)
+					fail("surface", "must be a table");
+				shape.surface = std::make_shared<const ax::ShapeSurface>(ShapeParser{ surface.as<sol::table>(), m_type }.surface());
+			}
+
 			if constexpr (requires { shape.segments; })
 			{
 				if (const auto segments{ opt_number("segments") })
@@ -261,6 +273,85 @@ namespace
 					shape.segments = static_cast<std::uint32_t>(*segments);
 				}
 			}
+		}
+
+		// A shape's surface table (ax::ShapeSurface): paint = "fill" | "linear" | "radial" | "pattern", colours (up to 4),
+		// stops, from, to, radius, pattern, scale, rotation, seed, contrast, values, unit, height, bevel,
+		// profile = "flat" | "pillow" | "chamfer" | "dome" | "recess", blend = "replace" | "add", bump, roughness, emissive.
+		ax::ShapeSurface surface() const
+		{
+			ax::ShapeSurface result{};
+			const auto choose = [this]<typename E>(const char* key, std::initializer_list<std::pair<std::string_view, E>> names, E fallback)
+			{
+				const auto o{ field(key) };
+				if (is_nil(o))
+					return fallback;
+				if (o.get_type() == sol::type::string)
+					for (const auto& [name, value] : names)
+						if (o.as<std::string_view>() == name)
+							return value;
+				fail(key, "is not one of its names");
+			};
+			using S = ax::ShapeSurface;
+			result.paint = choose(key_paint, { std::pair{ "fill"sv, S::Paint::Fill }, std::pair{ "linear"sv, S::Paint::Linear },
+				std::pair{ "radial"sv, S::Paint::Radial }, std::pair{ "pattern"sv, S::Paint::Pattern } }, S::Paint::Fill);
+			result.profile = choose("profile", { std::pair{ "flat"sv, S::Profile::Flat }, std::pair{ "pillow"sv, S::Profile::Pillow },
+				std::pair{ "chamfer"sv, S::Profile::Chamfer }, std::pair{ "dome"sv, S::Profile::Dome },
+				std::pair{ "recess"sv, S::Profile::Recess } }, S::Profile::Flat);
+			result.blend = choose("blend", { std::pair{ "replace"sv, S::Blend::Replace }, std::pair{ "add"sv, S::Blend::Add } },
+				S::Blend::Replace);
+
+			const auto colours{ field("colours") };
+			if (!is_nil(colours))
+			{
+				if (colours.get_type() != sol::type::table)
+					fail("colours", "must be an array of colours");
+				const auto list{ colours.as<sol::table>() };
+				const auto count{ std::min<std::size_t>(list.size(), 4) };
+				for (std::size_t i{}; i < count; ++i)
+					result.colours[i] = to_colour(list.get<sol::object>(i + 1), "colours");
+				result.stopCount = static_cast<std::uint32_t>(std::max<std::size_t>(count, 1));
+			}
+			const auto stops{ field("stops") };
+			if (!is_nil(stops))
+			{
+				if (stops.get_type() != sol::type::table)
+					fail("stops", "must be an array of numbers");
+				const auto list{ stops.as<sol::table>() };
+				for (std::size_t i{}; i < std::min<std::size_t>(list.size(), 4); ++i)
+					result.stops[i] = list.get_or(i + 1, 0.0f);
+			}
+			else if (result.stopCount > 1)
+				for (std::uint32_t i{}; i < result.stopCount; ++i)
+					result.stops[i] = static_cast<float>(i) / static_cast<float>(result.stopCount - 1);
+			if (const auto from{ opt_vec2("from") })
+				result.from = *from;
+			if (const auto to{ opt_vec2("to") })
+				result.to = *to;
+			if (const auto values{ opt_vec4("values") })
+				result.values = *values;
+			const auto number = [this](const char* key, float& out)
+			{
+				if (const auto value{ opt_number(key) })
+					out = *value;
+			};
+			float pattern{ static_cast<float>(result.pattern) };
+			number("pattern", pattern);
+			if (pattern < 0.0f)
+				fail("pattern", "must not be negative");
+			result.pattern = static_cast<std::uint32_t>(pattern);
+			number("radius", result.radius);
+			number("scale", result.scale);
+			number("rotation", result.rotation);
+			number("seed", result.seed);
+			number("contrast", result.contrast);
+			number("unit", result.unit);
+			number("height", result.height);
+			number("bevel", result.bevel);
+			number("bump", result.bump);
+			number("roughness", result.roughness);
+			number("emissive", result.emissive);
+			return result;
 		}
 
 		ax::LineCap cap() const

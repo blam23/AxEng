@@ -215,6 +215,7 @@ namespace ax
 		Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, wgpu::Device* device);
 		// A GPU-only render target in a non-default format.
 		Texture(Badge<LightRenderer>, const std::string& name, uint32_t width, uint32_t height, wgpu::TextureFormat format, wgpu::Device* device);
+		Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, wgpu::TextureFormat format, wgpu::Device* device);
 		~Texture();
 
 		// Calls the callback for every live texture, for the debug texture viewer. The registry is locked while the
@@ -241,6 +242,12 @@ namespace ax
 		const std::map<std::string, rectf>& regions() const { return m_regions; }
 
 		void add_region(const std::string& subTexture, const rectf& region);
+
+		// A texture laid out like this one whose texels describe the surface of the sprites drawn from it (see the
+		// window's surface pass): red and green a normal's x and y (0.5 flat), blue roughness, alpha 0 where there is
+		// nothing and from 0.5 up to 1 as emissive rises from 0 to 1. Null for none.
+		void set_surface(std::shared_ptr<Texture> surface) { m_surface = std::move(surface); }
+		Texture* surface() const { return m_surface.get(); }
 
 		// Distance field textures (e.g. the SDF font) are drawn by the distance-field sprite shader.
 		bool sdf() const { return m_sdf; }
@@ -277,6 +284,7 @@ namespace ax
 		void* m_stbiPtr{ nullptr };
 		std::vector<uint8_t> m_pixels{};
 		std::map<std::string, rectf> m_regions{};
+		std::shared_ptr<Texture> m_surface{};
 		bool m_gpuModified{ false };
 		bool m_sdf{ false };
 		bool m_msdf{ false };
@@ -299,6 +307,8 @@ namespace ax
 		// Sub-texture pixel regions can be queried with Texture::region(descriptor).
 		Error create_texture_atlas(const Texture::Descriptor& name, const std::vector<Texture::Descriptor>& textures, float minPadding = 2.0f);
 		std::unique_ptr<Texture> create_temporary(const std::string& name, std::vector<uint8_t> rgbaPixels, float width, float height);
+		// A GPU-only texture to draw into, in any format that can be rendered to and sampled (it is not kept by name).
+		std::unique_ptr<Texture> create_target(const std::string& name, uint32_t width, uint32_t height, wgpu::TextureFormat format);
 		// Decodes a PNG into a temporary texture. When the image is larger than maxWidth x maxHeight (0 = no limit)
 		// it is box-filtered down by the smallest whole factor that makes it fit.
 		std::unique_ptr<Texture> create_temporary_from_image(const std::string& name, const std::vector<uint8_t>& encoded, uint32_t maxWidth, uint32_t maxHeight);

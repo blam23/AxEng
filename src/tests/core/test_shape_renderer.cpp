@@ -610,6 +610,126 @@ TEST_F(ShapeRendererTest, RectangleBlendsBetweenItsCornerColours)
 	EXPECT_EQ(image.at(20, 64), to_pixel(s_black));
 }
 
+TEST_F(ShapeRendererTest, LinearSurfaceRunsAcrossTheShapesBounds)
+{
+	ax::ShapeSurface surface{};
+	surface.paint = ax::ShapeSurface::Paint::Linear;
+	surface.colours = { s_red, s_blue, s_blue, s_blue };
+	surface.stopCount = 2;
+	surface.from = { 0.0f, 0.5f };
+	surface.to = { 1.0f, 0.5f };
+	ax::Rectangle rectangle{ .position = { 32, 32 }, .size = { 64, 64 }, .fill = s_green, .screenSpace = true };
+	rectangle.surface = std::make_shared<const ax::ShapeSurface>(surface);
+	const auto image{ render({ rectangle }) };
+
+	const auto left{ image.at(33, 64) }, middle{ image.at(64, 64) }, right{ image.at(94, 64) };
+	EXPECT_GT(left[0], 220);
+	EXPECT_LT(left[2], 35);
+	EXPECT_GT(right[2], 220);
+	EXPECT_LT(right[0], 35);
+	EXPECT_NEAR(middle[0], 128, 12);
+	EXPECT_EQ(middle[1], 0);
+	EXPECT_EQ(image.at(20, 64), to_pixel(s_black));
+}
+
+TEST_F(ShapeRendererTest, RadialSurfaceFadesOutFromItsCentre)
+{
+	ax::ShapeSurface surface{};
+	surface.paint = ax::ShapeSurface::Paint::Radial;
+	surface.colours = { s_red, s_blue, s_blue, s_blue };
+	surface.from = { 0.5f, 0.5f };
+	surface.radius = 0.5f;
+	ax::Circle circle{ .position = { 64, 64 }, .radius = 32, .fill = s_green, .screenSpace = true };
+	circle.surface = std::make_shared<const ax::ShapeSurface>(surface);
+	const auto image{ render({ circle }) };
+
+	EXPECT_GT(image.at(64, 64)[0], 240);
+	EXPECT_GT(image.at(93, 64)[2], 200);
+	EXPECT_LT(image.at(93, 64)[0], 50);
+}
+
+TEST_F(ShapeRendererTest, PatternSurfaceMixesItsColoursInSurfaceUnits)
+{
+	// A checker of 16 pixel cells: unit 4 and scale 4.
+	ax::ShapeSurface surface{};
+	surface.paint = ax::ShapeSurface::Paint::Pattern;
+	surface.pattern = 5;
+	surface.colours = { s_red, s_blue, s_blue, s_blue };
+	surface.unit = 4.0f;
+	surface.scale = 4.0f;
+	ax::Rectangle rectangle{ .position = { 32, 32 }, .size = { 64, 64 }, .fill = s_green, .screenSpace = true };
+	rectangle.surface = std::make_shared<const ax::ShapeSurface>(surface);
+	const auto image{ render({ rectangle }) };
+
+	// Cells are measured from the rectangle's centre (64, 64).
+	EXPECT_PIXEL(image, 72, 72, s_red);
+	EXPECT_PIXEL(image, 56, 72, s_blue);
+	EXPECT_PIXEL(image, 72, 56, s_blue);
+	EXPECT_PIXEL(image, 56, 56, s_red);
+	EXPECT_PIXEL(image, 88, 72, s_blue);
+}
+
+TEST_F(ShapeRendererTest, OutlineOfAPaintedShapeKeepsItsColour)
+{
+	ax::ShapeSurface surface{};
+	surface.paint = ax::ShapeSurface::Paint::Pattern;
+	surface.pattern = 5;
+	surface.colours = { s_red, s_red, s_red, s_red };
+	ax::Rectangle rectangle{ .position = { 32, 32 }, .size = { 64, 64 }, .fill = s_green,
+		.outline = { .colour = s_blue, .thickness = 6.0f }, .screenSpace = true };
+	rectangle.surface = std::make_shared<const ax::ShapeSurface>(surface);
+	const auto image{ render({ rectangle }) };
+
+	EXPECT_PIXEL(image, 34, 64, s_blue);
+	EXPECT_PIXEL(image, 64, 64, s_red);
+}
+
+TEST_F(ShapeRendererTest, ReliefLightShadesARaisedShapeBySlope)
+{
+	// A chamfered square lit from the left: its left slope faces the light, its right one faces away, its top is flat.
+	ax::ShapeSurface surface{};
+	surface.height = 16.0f;
+	surface.bevel = 16.0f;
+	surface.profile = ax::ShapeSurface::Profile::Chamfer;
+	surface.paint = ax::ShapeSurface::Paint::Pattern;
+	surface.pattern = 5;
+	surface.scale = 1000.0f;
+	surface.colours = { glm::vec4{ 0.5f, 0.5f, 0.5f, 1.0f }, glm::vec4{ 0.5f, 0.5f, 0.5f, 1.0f }, s_red, s_red };
+	ax::Rectangle rectangle{ .position = { 16, 16 }, .size = { 96, 96 }, .fill = s_green, .screenSpace = true };
+	rectangle.surface = std::make_shared<const ax::ShapeSurface>(surface);
+	ax::ShapeRenderer::set_relief_light({ -1.0f, 0.0f, 1.0f }, 1.0f);
+	const auto image{ render({ rectangle }) };
+	ax::ShapeRenderer::set_relief_light({}, 0.0f);
+
+	const auto lit{ image.at(24, 64) }, flat{ image.at(64, 64) }, shaded{ image.at(104, 64) };
+	EXPECT_NEAR(flat[0], 128, 3);
+	EXPECT_GT(lit[0], flat[0] + 20);
+	EXPECT_LT(shaded[0], flat[0] - 20);
+}
+
+TEST_F(ShapeRendererTest, HeightDrawsOnlyRaisedShapesAndAddsOrReplaces)
+{
+	ax::ShapeSurface base{};
+	base.height = 0.25f;
+	ax::ShapeSurface bump{};
+	bump.height = 0.25f;
+	bump.blend = ax::ShapeSurface::Blend::Add;
+	ax::Rectangle plate{ .position = { 16, 16 }, .size = { 96, 96 }, .fill = s_green, .screenSpace = true };
+	plate.surface = std::make_shared<const ax::ShapeSurface>(base);
+	ax::Circle rivet{ .position = { 40, 64 }, .radius = 8, .fill = s_green, .z = 1.0f, .screenSpace = true };
+	rivet.surface = std::make_shared<const ax::ShapeSurface>(bump);
+	ax::Rectangle flat{ .position = { 80, 56 }, .size = { 16, 16 }, .fill = s_red, .z = 2.0f, .screenSpace = true };
+	const auto image{ render_pass([&](wgpu::RenderPassEncoder& pass) { ax::ShapeRenderer::draw_height(pass, { plate, rivet, flat }); }) };
+
+	// Cleared to opaque black; the plate replaces it with height 0.25 (red), roughness 0.5 (green).
+	EXPECT_NEAR(image.at(64, 64)[0], 64, 2);
+	EXPECT_NEAR(image.at(64, 64)[1], 128, 2);
+	EXPECT_NEAR(image.at(40, 64)[0], 128, 2);
+	// A shape with no surface draws no height.
+	EXPECT_NEAR(image.at(88, 64)[0], 64, 2);
+	EXPECT_EQ(image.at(8, 8), to_pixel(s_black));
+}
+
 TEST_F(ShapeRendererTest, CircleOutline)
 {
 	const auto image{ render({ ax::Circle{
