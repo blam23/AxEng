@@ -108,6 +108,36 @@ fn pattern_noise(p: vec2<f32>, seed: f32) -> f32 {
 		u.y);
 }
 
+// Value noise repeating every `period` cells (a whole number), so a tile of it meets its neighbours seamlessly.
+fn pattern_noise_wrapped(p: vec2<f32>, seed: f32, period: f32) -> f32 {
+	let i = floor(p);
+	let f = fract(p);
+	let u = f * f * (3.0 - 2.0 * f);
+	let a = i - period * floor(i / period);
+	let b = (i + vec2<f32>(1.0)) - period * floor((i + vec2<f32>(1.0)) / period);
+	return mix(
+		mix(pattern_hash(a, seed), pattern_hash(vec2<f32>(b.x, a.y), seed), u.x),
+		mix(pattern_hash(vec2<f32>(a.x, b.y), seed), pattern_hash(b, seed), u.x),
+		u.y);
+}
+
+// fbm repeating every `period` cells: each octave doubles the frequency and the period with it.
+fn pattern_fbm_wrapped(p: vec2<f32>, seed: f32, octaves: i32, period: f32) -> f32 {
+	var sum = 0.0;
+	var amplitude = 0.5;
+	var total = 0.0;
+	var q = p;
+	var repeat = period;
+	for (var i = 0; i < octaves; i = i + 1) {
+		sum = sum + pattern_noise_wrapped(q, seed + f32(i) * 7.0, repeat) * amplitude;
+		total = total + amplitude;
+		q = q * 2.0;
+		repeat = repeat * 2.0;
+		amplitude = amplitude * 0.5;
+	}
+	return sum / total;
+}
+
 fn pattern_fbm(p: vec2<f32>, seed: f32, octaves: i32) -> f32 {
 	var sum = 0.0;
 	var amplitude = 0.5;
@@ -143,7 +173,8 @@ fn pattern_edge(distance: f32, aa: f32) -> f32 {
 }
 
 // Built-in patterns, by id:
-//   1 value noise      2 fbm (values.x octaves, 4 if 0)     3 cells (values.x jitter, 1 if 0)
+//   1 value noise      2 fbm (values.x octaves, 4 if 0; values.y repeats it every that many cells, for seamless tiles)
+//   3 cells (values.x jitter, 1 if 0)
 //   4 stripes (values.x the second colour's share)          5 checker
 //   6 grid lines (values.x line width in cells)             7 dots (values.x radius in cells)
 //   8 brushed (values.x stretch, 12 if 0)                   9 bricks (values.x mortar width in cells)
@@ -157,6 +188,9 @@ fn builtin_pattern(id: u32, p: vec2<f32>, values: vec4<f32>, seed: f32, aa: f32)
 		case 1u: { return pattern_noise(p, seed); }
 		case 2u: {
 			let octaves = select(i32(values.x), 4, values.x <= 0.0);
+			if (values.y >= 1.0) {
+				return pattern_fbm_wrapped(p, seed, clamp(octaves, 1, 8), floor(values.y));
+			}
 			return pattern_fbm(p, seed, clamp(octaves, 1, 8));
 		}
 		case 3u: { return clamp(pattern_cells(p, seed, select(values.x, 1.0, values.x <= 0.0)), 0.0, 1.0); }
