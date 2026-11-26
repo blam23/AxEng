@@ -276,7 +276,7 @@ namespace
 		}
 
 		// A shape's surface table (ax::ShapeSurface): paint = "fill" | "linear" | "radial" | "pattern", colours (up to 4),
-		// stops, from, to, radius, pattern, scale, rotation, seed, contrast, values, unit, height, bevel,
+		// stops, from, to, radius, pattern, scale, rotation, seed, contrast, values, ramp, unit, height, bevel,
 		// profile = "flat" | "pillow" | "chamfer" | "dome" | "recess", blend = "replace" | "add", bump, roughness, emissive.
 		ax::ShapeSurface surface() const
 		{
@@ -330,6 +330,8 @@ namespace
 				result.to = *to;
 			if (const auto values{ opt_vec4("values") })
 				result.values = *values;
+			if (const auto ramp{ opt_vec2("ramp") })
+				result.ramp = *ramp;
 			const auto number = [this](const char* key, float& out)
 			{
 				if (const auto value{ opt_number(key) })

@@ -290,7 +290,13 @@ fn surface_colour(index: u32, local: vec2<f32>, fill: vec4<f32>, footprint: f32)
 		return gradient_colour(index, length(local - centre) / radius);
 	}
 	if (paint == PAINT_PATTERN) {
-		return mix(surfaces[index].colours[0], surfaces[index].colours[1], shape_pattern(index, local, footprint));
+		let colour = mix(surfaces[index].colours[0], surfaces[index].colours[1], shape_pattern(index, local, footprint));
+		// Its ramp (stops.xy): brightness from `from` to `to` across the shape's bounds.
+		let uv = (local - frame.xy) / max(frame.zw, vec2<f32>(1e-6));
+		let d = gradient.zw - gradient.xy;
+		let t = clamp(dot(uv - gradient.xy, d) / max(dot(d, d), 1e-8), 0.0, 1.0);
+		let ramp = mix(surfaces[index].stops.x, surfaces[index].stops.y, t);
+		return vec4<f32>(clamp(colour.rgb * ramp, vec3<f32>(0.0), vec3<f32>(1.0)), colour.a);
 	}
 	return fill;
 }

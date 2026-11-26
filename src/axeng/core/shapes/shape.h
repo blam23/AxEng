@@ -62,6 +62,8 @@ namespace ax
         float seed{ 0.0f };
         float contrast{ 1.0f };
         glm::vec4 values{ 0.0f };
+        // Patterns: their colour scaled from ramp.x at `from` to ramp.y at `to` (a light falling across the shape).
+        glm::vec2 ramp{ 1.0f, 1.0f };
         // Shape coordinates per surface unit.
         float unit{ 1.0f };
 

@@ -735,7 +735,10 @@ namespace
 		gpu.stopCount = std::clamp<std::uint32_t>(surface.stopCount, 1, 4);
 		for (std::size_t i{}; i < 4; ++i)
 			gpu.colours[i] = surface.colours[i];
-		gpu.stops = { surface.stops[0], surface.stops[1], surface.stops[2], surface.stops[3] };
+		// A pattern has no stops: it keeps its ramp there.
+		gpu.stops = surface.paint == ax::ShapeSurface::Paint::Pattern
+			? glm::vec4{ surface.ramp, 0.0f, 0.0f }
+			: glm::vec4{ surface.stops[0], surface.stops[1], surface.stops[2], surface.stops[3] };
 		gpu.gradient = { surface.from, surface.to };
 		gpu.patternSettings = { surface.scale, surface.rotation, surface.seed, surface.contrast };
 		gpu.values = surface.values;
