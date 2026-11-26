@@ -385,6 +385,7 @@ fn profile_height(t: f32, profile: u32) -> f32 {
 		case 2u: { return t; }
 		case 3u: { return sqrt(max(1.0 - (1.0 - t) * (1.0 - t), 0.0)); }
 		case 4u: { return -t; }
+		case 5u: { return t * t * (3.0 - 2.0 * t); }
 		default: { return 1.0; }
 	}
 }

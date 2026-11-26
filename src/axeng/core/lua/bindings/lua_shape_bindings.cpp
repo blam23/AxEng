@@ -277,7 +277,7 @@ namespace
 
 		// A shape's surface table (ax::ShapeSurface): paint = "fill" | "linear" | "radial" | "pattern", colours (up to 4),
 		// stops, from, to, radius, pattern, scale, rotation, seed, contrast, values, ramp, unit, height, bevel,
-		// profile = "flat" | "pillow" | "chamfer" | "dome" | "recess", blend = "replace" | "add", bump, roughness, emissive.
+		// profile = "flat" | "pillow" | "chamfer" | "dome" | "recess" | "smooth", blend = "replace" | "add", bump, roughness, emissive.
 		ax::ShapeSurface surface() const
 		{
 			ax::ShapeSurface result{};
@@ -297,7 +297,7 @@ namespace
 				std::pair{ "radial"sv, S::Paint::Radial }, std::pair{ "pattern"sv, S::Paint::Pattern } }, S::Paint::Fill);
 			result.profile = choose("profile", { std::pair{ "flat"sv, S::Profile::Flat }, std::pair{ "pillow"sv, S::Profile::Pillow },
 				std::pair{ "chamfer"sv, S::Profile::Chamfer }, std::pair{ "dome"sv, S::Profile::Dome },
-				std::pair{ "recess"sv, S::Profile::Recess } }, S::Profile::Flat);
+				std::pair{ "recess"sv, S::Profile::Recess }, std::pair{ "smooth"sv, S::Profile::Smooth } }, S::Profile::Flat);
 			result.blend = choose("blend", { std::pair{ "replace"sv, S::Blend::Replace }, std::pair{ "add"sv, S::Blend::Add } },
 				S::Blend::Replace);
 

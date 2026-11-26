@@ -37,6 +37,7 @@ namespace ax
             Chamfer, // A straight slope near the edge.
             Dome,    // A quarter circle near the edge.
             Recess,  // Sunk by the height, sloping down from the edge.
+            Smooth,  // An S curve: flat at the edge and at the top, steepest between.
         };
         enum class Blend : std::uint8_t
         {
