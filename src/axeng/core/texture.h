@@ -75,6 +75,26 @@ namespace ax
 	// are lighter over it (AmbientOcclusion2D::selfDarkness).
 	inline constexpr std::uint32_t sprite_flag_ao_silhouette{ 128u };
 
+	// Wear on a world sprite, worked out in the sprite shader over the sprite itself (so it moves and turns with it), seeded
+	// so neighbours differ. All zero leaves the sprite as drawn.
+	struct SpriteWear
+	{
+		// 0..1: picks this sprite's own variation.
+		float seed{ 0.0f };
+		// 0..1: how far its colour drifts (brightness and hue) from the next one's.
+		float jitter{ 0.0f };
+		// 0..1: dark patches of grime.
+		float grime{ 0.0f };
+		// 0..1: patches of coatColour settled over it (dust, salt, frost, ash...).
+		float coat{ 0.0f };
+		glm::vec3 coatColour{ 1.0f };
+		// 0..1: a light baked into the sprite from its top (brighter by half this at the top, darker by half at the
+		// bottom), turned back to fall from the screen's top however far the sprite is turned.
+		float bakedLight{ 0.0f };
+
+		bool operator==(const SpriteWear&) const = default;
+	};
+
 	// A sprite as the engine and scripts author it. Sprites are packed into SpriteGpuData for the GPU.
 	struct SpriteData
 	{
@@ -90,6 +110,7 @@ namespace ax
 		std::uint32_t screenSpace{ 0 };
 		// Screen pixels; a max below the min disables clipping.
 		glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
+		SpriteWear wear{};
 	};
 
 	// Distance-field effect of one sprite.
@@ -118,8 +139,11 @@ namespace ax
 		glm::uvec2 clip{ 0u, 0xFFFFFFFFu };
 		float z{ 0.0f };
 		float rotation{ 0.0f };
+		// SpriteWear as bytes: seed | jitter << 8 | grime << 16 | coat << 24, and the coat's colour r | g << 8 | b << 16 with
+		// the baked light << 24.
+		glm::uvec2 wear{ 0u, 0u };
 
-		static constexpr std::size_t gpuDataSize{ 48 };
+		static constexpr std::size_t gpuDataSize{ 56 };
 	};
 
 	struct SdfSpriteGpuData : SpriteGpuData
@@ -132,7 +156,7 @@ namespace ax
 		std::uint32_t effectOffset{ 0 };
 		std::uint32_t reserved{ 0 };
 
-		static constexpr std::size_t gpuDataSize{ 64 };
+		static constexpr std::size_t gpuDataSize{ 72 };
 	};
 
 	inline std::uint32_t pack_u16_pair(float low, float high) noexcept
@@ -156,6 +180,11 @@ namespace ax
 		result.tint = { glm::packHalf2x16({ data.tint.r, data.tint.g }), glm::packHalf2x16({ data.tint.b, data.tint.a }) };
 		if (data.clipRect.z >= data.clipRect.x && data.clipRect.w >= data.clipRect.y)
 			result.clip = { pack_u16_pair(data.clipRect.x, data.clipRect.y), pack_u16_pair(data.clipRect.z, data.clipRect.w) };
+		const auto byte = [](float value) { return static_cast<std::uint32_t>(std::clamp(std::lround(value * 255.0f), 0l, 255l)); };
+		const auto& wear{ data.wear };
+		if (wear.jitter > 0.0f || wear.grime > 0.0f || wear.coat > 0.0f || wear.bakedLight > 0.0f)
+			result.wear = { byte(wear.seed) | byte(wear.jitter) << 8 | byte(wear.grime) << 16 | byte(wear.coat) << 24,
+				byte(wear.coatColour.r) | byte(wear.coatColour.g) << 8 | byte(wear.coatColour.b) << 16 | byte(wear.bakedLight) << 24 };
 		return result;
 	}
 
@@ -215,6 +244,7 @@ namespace ax
 		Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, wgpu::Device* device);
 		// A GPU-only render target in a non-default format.
 		Texture(Badge<LightRenderer>, const std::string& name, uint32_t width, uint32_t height, wgpu::TextureFormat format, wgpu::Device* device);
+		Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, wgpu::TextureFormat format, wgpu::Device* device);
 		~Texture();
 
 		// Calls the callback for every live texture, for the debug texture viewer. The registry is locked while the
@@ -241,6 +271,12 @@ namespace ax
 		const std::map<std::string, rectf>& regions() const { return m_regions; }
 
 		void add_region(const std::string& subTexture, const rectf& region);
+
+		// A texture laid out like this one whose texels describe the surface of the sprites drawn from it (see the
+		// window's surface pass): red and green a normal's x and y (0.5 flat), blue roughness, alpha 0 where there is
+		// nothing and from 0.5 up to 1 as emissive rises from 0 to 1. Null for none.
+		void set_surface(std::shared_ptr<Texture> surface) { m_surface = std::move(surface); }
+		Texture* surface() const { return m_surface.get(); }
 
 		// Distance field textures (e.g. the SDF font) are drawn by the distance-field sprite shader.
 		bool sdf() const { return m_sdf; }
@@ -277,6 +313,7 @@ namespace ax
 		void* m_stbiPtr{ nullptr };
 		std::vector<uint8_t> m_pixels{};
 		std::map<std::string, rectf> m_regions{};
+		std::shared_ptr<Texture> m_surface{};
 		bool m_gpuModified{ false };
 		bool m_sdf{ false };
 		bool m_msdf{ false };
@@ -299,6 +336,8 @@ namespace ax
 		// Sub-texture pixel regions can be queried with Texture::region(descriptor).
 		Error create_texture_atlas(const Texture::Descriptor& name, const std::vector<Texture::Descriptor>& textures, float minPadding = 2.0f);
 		std::unique_ptr<Texture> create_temporary(const std::string& name, std::vector<uint8_t> rgbaPixels, float width, float height);
+		// A GPU-only texture to draw into, in any format that can be rendered to and sampled (it is not kept by name).
+		std::unique_ptr<Texture> create_target(const std::string& name, uint32_t width, uint32_t height, wgpu::TextureFormat format);
 		// Decodes a PNG into a temporary texture. When the image is larger than maxWidth x maxHeight (0 = no limit)
 		// it is box-filtered down by the smallest whole factor that makes it fit.
 		std::unique_ptr<Texture> create_temporary_from_image(const std::string& name, const std::vector<uint8_t>& encoded, uint32_t maxWidth, uint32_t maxHeight);

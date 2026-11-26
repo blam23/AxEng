@@ -182,6 +182,25 @@ ax::Texture::Texture(Badge<LightRenderer>, const std::string& name, uint32_t wid
 	m_loaded = true;
 }
 
+ax::Texture::Texture(Badge<TextureManager>, const std::string& name, uint32_t width, uint32_t height, wgpu::TextureFormat format, wgpu::Device* device)
+	: Asset{ name }, m_format{ format }, m_width{ width }, m_height{ height }
+{
+	register_live();
+	if (width == 0 || height == 0 || device == nullptr)
+	{
+		spdlog::error("Failed to create render target '{}', invalid dimensions or device.", name);
+		return;
+	}
+
+	upload(name, nullptr, 0, *device);
+	if (m_texture.Get() == nullptr || m_view.Get() == nullptr)
+	{
+		spdlog::error("Failed to create render target '{}'.", name);
+		return;
+	}
+	m_loaded = true;
+}
+
 void ax::Texture::register_live()
 {
 	std::lock_guard lock{ s_liveMutex };
@@ -702,6 +721,25 @@ std::unique_ptr<ax::Texture> ax::TextureManager::create_temporary(const std::str
 	else
 		texture = std::make_unique<Texture>(Badge<TextureManager>{}, name, textureWidth, textureHeight, std::move(rgbaPixels), m_device);
 
+	if (!texture->is_loaded())
+		return nullptr;
+	return texture;
+}
+
+std::unique_ptr<ax::Texture> ax::TextureManager::create_target(const std::string& name, uint32_t width, uint32_t height, wgpu::TextureFormat format)
+{
+	if (m_device == nullptr || width == 0 || height == 0)
+	{
+		spdlog::error("Failed to create render target '{}', invalid dimensions or device.", name);
+		return nullptr;
+	}
+	wgpu::Limits limits{};
+	if (m_device->GetLimits(&limits) != wgpu::Status::Success || width > limits.maxTextureDimension2D || height > limits.maxTextureDimension2D)
+	{
+		spdlog::error("Failed to create render target '{}', dimensions {}x{} exceed device limits.", name, width, height);
+		return nullptr;
+	}
+	auto texture{ std::make_unique<Texture>(Badge<TextureManager>{}, name, width, height, format, m_device) };
 	if (!texture->is_loaded())
 		return nullptr;
 	return texture;

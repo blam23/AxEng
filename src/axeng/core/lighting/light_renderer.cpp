@@ -135,8 +135,9 @@ bool ax::lighting_active(const LightingSettings& settings, std::size_t lights, s
 	const bool tonemapShows{ glm::any(glm::greaterThan(glm::abs(mapped - glm::vec3{ 1.0f }), glm::vec3{ 0.001f })) };
 	// Lights only show below the exposure limit, so a fully lit scene with no glows is left untouched (unless only the
 	// light is wanted). A curve that brings full ambient below 1 leaves room for them.
+	// Surfaces are shaded by the sun even in full light.
 	return settings.lightOnly || !fullAmbient || tonemapShows || (settings.maxExposure > 1.0f && lights > 0) || hasShadows
-		|| glows > 0;
+		|| glows > 0 || settings.surfaces.enabled;
 }
 
 bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat targetFormat, std::uint32_t sampleCount)
@@ -188,6 +189,24 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	applyLayoutDesc.entryCount = applyEntries.size();
 	applyLayoutDesc.entries = applyEntries.data();
 	m_applyLayout = device.CreateBindGroupLayout(&applyLayoutDesc);
+
+	// Surface shading reads the surfaces' normal and emissive targets and its uniforms (group 1, bindings 10 to 12).
+	std::array<wgpu::BindGroupLayoutEntry, 3> surfaceEntries{};
+	for (std::uint32_t i{}; i < 2; ++i)
+	{
+		surfaceEntries[i].binding = 10 + i;
+		surfaceEntries[i].visibility = wgpu::ShaderStage::Fragment;
+		surfaceEntries[i].texture.sampleType = wgpu::TextureSampleType::UnfilterableFloat;
+		surfaceEntries[i].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+	}
+	surfaceEntries[2].binding = 12;
+	surfaceEntries[2].visibility = wgpu::ShaderStage::Fragment;
+	surfaceEntries[2].buffer.type = wgpu::BufferBindingType::Uniform;
+	surfaceEntries[2].buffer.minBindingSize = sizeof(glm::vec4) * 3;
+	wgpu::BindGroupLayoutDescriptor surfaceLayoutDesc{};
+	surfaceLayoutDesc.entryCount = surfaceEntries.size();
+	surfaceLayoutDesc.entries = surfaceEntries.data();
+	m_surfaceLayout = device.CreateBindGroupLayout(&surfaceLayoutDesc);
 
 	// Lights with marched shadows read the radiance cascades' distance field and scene (group 1).
 	std::array<wgpu::BindGroupLayoutEntry, 3> marchEntries{};
@@ -257,6 +276,24 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	lightOnly.color = { wgpu::BlendOperation::Add, wgpu::BlendFactor::One, wgpu::BlendFactor::Zero };
 	lightOnly.alpha = { wgpu::BlendOperation::Add, wgpu::BlendFactor::Zero, wgpu::BlendFactor::One };
 	m_lightOnlyPipeline = pipeline(m_applyLayout, "vs_apply", "fs_apply", targetFormat, sampleCount, lightOnly);
+	// Surfaces: their shading multiplies the lit scene (doubled, so it can brighten a side facing the light), then their
+	// glints and glow are added.
+	m_surfaceShadePipeline = pipeline(m_applyLayout, "vs_apply", "fs_surface_shade", targetFormat, sampleCount, doubled, false,
+		m_surfaceLayout);
+	wgpu::BlendState add{};
+	add.color = { wgpu::BlendOperation::Add, wgpu::BlendFactor::One, wgpu::BlendFactor::One };
+	add.alpha = { wgpu::BlendOperation::Add, wgpu::BlendFactor::Zero, wgpu::BlendFactor::One };
+	m_surfaceAddPipeline = pipeline(m_applyLayout, "vs_apply", "fs_surface_add", targetFormat, sampleCount, add, false,
+		m_surfaceLayout);
+	{
+		wgpu::BufferDescriptor surfaceUniformDesc{};
+		surfaceUniformDesc.size = sizeof(glm::vec4) * 3;
+		surfaceUniformDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
+		surfaceUniformDesc.label = "Lighting surface uniforms";
+		m_surfaceUniforms = gpu::create_buffer(device, surfaceUniformDesc, "Lighting");
+	}
+	m_surfaceNormal = {};
+	m_surfaceGroup = {};
 	// Mist over the lit scene: blended by its density, keeping the target's alpha.
 	if (m_mist.init(device))
 	{
@@ -314,6 +351,46 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 		m_lightPipeline = {};
 		return false;
 	}
+	return true;
+}
+
+bool ax::LightRenderer::ensure_surface_targets(const wgpu::Device& device, std::uint32_t width, std::uint32_t height)
+{
+	if (m_surfaceNormal && m_surfaceNormal.GetWidth() == width && m_surfaceNormal.GetHeight() == height)
+		return true;
+	const auto make = [&](wgpu::TextureFormat format, const char* label)
+	{
+		wgpu::TextureDescriptor desc{};
+		desc.label = label;
+		desc.size = { width, height, 1 };
+		desc.format = format;
+		desc.usage = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
+		return gpu::create_texture(device, desc, "Lighting");
+	};
+	m_surfaceNormal = make(surface_format, "Surface normals");
+	m_surfaceEmissive = make(surface_format, "Surface emissive");
+	m_surfaceDepth = make(surface_depth_format, "Surface depth");
+	if (!m_surfaceNormal || !m_surfaceEmissive || !m_surfaceDepth)
+	{
+		m_surfaceNormal = {};
+		return false;
+	}
+	m_surfaceNormalView = m_surfaceNormal.CreateView();
+	m_surfaceEmissiveView = m_surfaceEmissive.CreateView();
+	m_surfaceDepthView = m_surfaceDepth.CreateView();
+	std::array<wgpu::BindGroupEntry, 3> entries{};
+	entries[0].binding = 10;
+	entries[0].textureView = m_surfaceNormalView;
+	entries[1].binding = 11;
+	entries[1].textureView = m_surfaceEmissiveView;
+	entries[2].binding = 12;
+	entries[2].buffer = m_surfaceUniforms;
+	entries[2].size = sizeof(glm::vec4) * 3;
+	wgpu::BindGroupDescriptor groupDesc{};
+	groupDesc.layout = m_surfaceLayout;
+	groupDesc.entryCount = entries.size();
+	groupDesc.entries = entries.data();
+	m_surfaceGroup = device.CreateBindGroup(&groupDesc);
 	return true;
 }
 
@@ -384,7 +461,8 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 	const std::function<void(wgpu::RenderPassEncoder&, std::uint32_t)>& extraLights, const NoiseShadow2D* noiseShadow,
 	std::span<const LightOccluder2D> occluders, std::span<const RadianceCircle> radianceCircles,
 	const RadianceCascades::OccluderDraw& radianceOccluders, std::uint64_t radianceOccluderSignature,
-	const AmbientOcclusion2D* ambientOcclusion, const AmbientOcclusion::CasterDraw& aoCasters, const MistFrame* mist)
+	const AmbientOcclusion2D* ambientOcclusion, const AmbientOcclusion::CasterDraw& aoCasters, const MistFrame* mist,
+	const SurfaceDraw& surfaces)
 {
 	ZoneScopedN("LightRenderer::encode");
 	m_stats = {};
@@ -624,6 +702,42 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 			tallDraw, &m_timer);
 	}
 
+	// The surfaces' normals and glow, for shading the lit scene by.
+	const auto& surfaceSettings{ settings.surfaces };
+	const bool surfaced{ surfaceSettings.enabled && surfaces && !settings.lightOnly && m_surfaceShadePipeline
+		&& m_surfaceAddPipeline && ensure_surface_targets(device, width, height) };
+	if (surfaced)
+	{
+		ZoneScopedN("LightRenderer::surfaces");
+		const glm::vec4 data[3]{ { surfaceSettings.sun, std::clamp(surfaceSettings.sunShare, 0.0f, 1.0f) },
+			{ std::max(surfaceSettings.lightHeight, 0.05f), std::clamp(surfaceSettings.strength, 0.0f, 1.0f),
+				std::max(surfaceSettings.specular, 0.0f), std::max(surfaceSettings.tilt, 0.0f) },
+			{ std::max(surfaceSettings.bands, 0.0f), 0.0f, 0.0f, 0.0f } };
+		queue.WriteBuffer(m_surfaceUniforms, 0, data, sizeof(data));
+		std::array<wgpu::RenderPassColorAttachment, 2> attachments{};
+		for (std::size_t i{}; i < attachments.size(); ++i)
+		{
+			attachments[i].view = i == 0 ? m_surfaceNormalView : m_surfaceEmissiveView;
+			attachments[i].depthSlice = wgpu::kDepthSliceUndefined;
+			attachments[i].loadOp = wgpu::LoadOp::Clear;
+			attachments[i].storeOp = wgpu::StoreOp::Store;
+			attachments[i].clearValue = { 0.0, 0.0, 0.0, 0.0 };
+		}
+		wgpu::RenderPassDepthStencilAttachment depth{};
+		depth.view = m_surfaceDepthView;
+		depth.depthLoadOp = wgpu::LoadOp::Clear;
+		depth.depthStoreOp = wgpu::StoreOp::Discard;
+		depth.depthClearValue = 0.0f;
+		wgpu::RenderPassDescriptor passDesc{};
+		passDesc.colorAttachmentCount = attachments.size();
+		passDesc.colorAttachments = attachments.data();
+		passDesc.depthStencilAttachment = &depth;
+		passDesc.timestampWrites = m_timer.pass("GPU ms: surfaces");
+		auto pass{ encoder.BeginRenderPass(&passDesc) };
+		surfaces(pass);
+		pass.End();
+	}
+
 	{
 		ZoneScopedN("LightRenderer::apply");
 		wgpu::RenderPassColorAttachment attachment{};
@@ -640,6 +754,15 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 			: settings.maxExposure > 1.0f ? m_brightApplyPipeline : m_applyPipeline);
 		pass.SetBindGroup(0, m_applyBindGroup);
 		pass.Draw(3);
+		if (surfaced)
+		{
+			pass.SetPipeline(m_surfaceShadePipeline);
+			pass.SetBindGroup(0, m_applyBindGroup);
+			pass.SetBindGroup(1, m_surfaceGroup);
+			pass.Draw(3);
+			pass.SetPipeline(m_surfaceAddPipeline);
+			pass.Draw(3);
+		}
 		if (misted)
 		{
 			pass.SetPipeline(m_mistPipeline);

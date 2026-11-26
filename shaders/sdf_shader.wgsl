@@ -9,6 +9,7 @@ struct Uniforms {
 	clip: vec2<u32>, // min x | y << 16 and max x | y << 16 in screen pixels
 	z_idx: f32,
 	rotation: f32,
+	wear: vec2<u32>, // SpriteWear: seed | jitter << 8 | grime << 16 | coat << 24, coat colour r | g << 8 | b << 16
 	flags: u32, // bit 0: MSDF (distance edge at 0.5 in the median of rgb, otherwise in alpha); bits 1-2: effect kind
 	effect: u32, // half floats: thickness, softness
 	effect_offset: u32, // half floats: screen pixels x, y

@@ -11,6 +11,8 @@
 #include <limits>
 #include <memory>
 #include <numbers>
+#include <string>
+#include <type_traits>
 #include <numeric>
 #include <utility>
 
@@ -21,6 +23,11 @@ namespace
 #embed "shapes.wgsl"
 	};
 
+	// The vertex's surface when it has none.
+	constexpr std::uint32_t s_no_surface{ 0xFFFFFFFFu };
+	// Set on an outline's surface index: it keeps its colour but stands up with the shape (shapes.wgsl).
+	constexpr std::uint32_t s_outline_flag{ 0x40000000u };
+
 	struct ShapeVertex
 	{
 		glm::vec2 pos;
@@ -28,8 +35,33 @@ namespace
 		std::uint32_t screenSpace;
 		std::uint32_t colour; // RGBA8, unorm8x4
 		glm::vec4 clipRect;
+		glm::vec2 local; // in the shape's own coordinates, for its surface
+		std::uint32_t surface; // index into the draw's surfaces, s_no_surface for none
 	};
-	static_assert(sizeof(ShapeVertex) == 36);
+	static_assert(sizeof(ShapeVertex) == 48);
+
+	// A ShapeSurface as shapes.wgsl reads it (struct Surface).
+	struct SurfaceGpu
+	{
+		std::uint32_t paint, pattern, stopCount, geometryKind;
+		glm::vec4 colours[4];
+		glm::vec4 stops;
+		glm::vec4 gradient;
+		glm::vec4 patternSettings;
+		glm::vec4 values;
+		glm::vec4 relief;
+		glm::vec4 relief2;
+		glm::vec4 frame;
+		glm::vec4 geometry;
+		glm::vec4 extra;
+	};
+	static_assert(sizeof(SurfaceGpu) == 224);
+
+	// What a draw makes of each shape: its colour, or its height (draw_height).
+	enum class Output { Colour, Height };
+
+	constexpr const char* s_default_pattern_source{
+		"fn user_pattern(id: u32, p: vec2<f32>, values: vec4<f32>, seed: f32, aa: f32) -> f32 { return 0.0; }\n" };
 
 	struct ElementRange
 	{
@@ -69,8 +101,19 @@ namespace
 		ax::ShapeRendererConfig config;
 		wgpu::RenderPipeline opaquePipeline;
 		wgpu::RenderPipeline translucentPipeline;
+		wgpu::RenderPipeline heightPipeline;
 		ax::gpu::TrackedBuffer viewBuffer;
 		wgpu::BindGroup viewBindGroup;
+		// Group 1: the draw's surfaces and the polygon points their edges are measured from.
+		wgpu::BindGroupLayout surfaceLayout;
+		wgpu::BindGroup emptySurfaceGroup;
+		ax::gpu::TrackedBuffer emptySurfaceBuffer;
+		wgpu::BindGroup surfaceGroup;
+		std::vector<SurfaceGpu> surfaces;
+		std::vector<glm::vec2> surfacePoints;
+		// Off while tessellating a static mesh, which keeps no surfaces.
+		bool keepSurfaces{ true };
+		Output output{ Output::Colour };
 
 		ax::gpu::TrackedBuffer arena;
 		std::uint64_t arenaCapacity{ 0 };
@@ -83,6 +126,7 @@ namespace
 		// Reused between calls to avoid reallocating every frame.
 		Mesh opaque;
 		Mesh translucent;
+		Mesh height;
 		std::vector<std::size_t> order;
 		// Each ordered shape's z with its index, sorted without visiting the shapes again.
 		std::vector<std::pair<float, std::size_t>> depths;
@@ -99,6 +143,8 @@ namespace
 	};
 
 	std::unique_ptr<State> s_state{};
+	std::string s_pattern_source{ s_default_pattern_source };
+	glm::vec4 s_relief_light{ 0.0f };
 	ax::UnlitShapeCapture* s_unlit_capture{};
 	ax::UnlitShapeCapture* s_screen_capture{};
 
@@ -571,29 +617,69 @@ namespace
 		e.indexCount = static_cast<std::uint32_t>(mesh.indices.size()) - e.firstIndex;
 	}
 
-	void append_vertices(Mesh& mesh, const Loop& loop, const ShapeParams& p, std::uint32_t colour)
+	// Where a shape's own coordinates sit: its pivot and turn (see ShapeSurface).
+	struct Frame
 	{
-		for (const auto& pos : loop)
-			mesh.vertices.push_back({ pos, p.z, p.screenSpace ? 1u : 0u, colour, p.clipRect });
+		glm::vec2 pivot{};
+		float c{ 1.0f }, s{ 0.0f };
+		glm::vec2 local(const glm::vec2& p) const
+		{
+			const auto d{ p - pivot };
+			return { d.x * c + d.y * s, -d.x * s + d.y * c };
+		}
+	};
+
+	Frame frame_of(const ax::Shape& shape)
+	{
+		const auto [pivot, rotation] = std::visit([](const auto& s) -> std::pair<glm::vec2, float>
+		{
+			using T = std::decay_t<decltype(s)>;
+			if constexpr (std::is_same_v<T, ax::Rectangle>)
+				return { s.position + s.size * 0.5f, s.rotation };
+			else if constexpr (std::is_same_v<T, ax::Line>)
+				return { (s.start + s.end) * 0.5f, s.rotation };
+			else
+				return { s.position, s.rotation };
+		}, shape);
+		return { pivot, std::cos(rotation), std::sin(rotation) };
 	}
 
-	void emit_fill(Mesh& mesh, const Loop& loop, const std::vector<std::uint32_t>& triangles, const ShapeParams& p, std::uint32_t colour)
+	// The vertices' surface: which entry, and the frame their local coordinates are in.
+	struct VertexSurface
+	{
+		std::uint32_t index{ s_no_surface };
+		Frame frame{};
+	};
+
+	void append_vertices(Mesh& mesh, const Loop& loop, const ShapeParams& p, std::uint32_t colour, const VertexSurface& surface = {})
+	{
+		for (const auto& pos : loop)
+			mesh.vertices.push_back({ pos, p.z, p.screenSpace ? 1u : 0u, colour, p.clipRect,
+				surface.index == s_no_surface ? glm::vec2{} : surface.frame.local(pos), surface.index });
+	}
+
+	void emit_fill(Mesh& mesh, const Loop& loop, const std::vector<std::uint32_t>& triangles, const ShapeParams& p, std::uint32_t colour,
+		const VertexSurface& surface = {})
 	{
 		begin_element(mesh);
 		const auto base{ static_cast<std::uint32_t>(mesh.vertices.size()) };
-		append_vertices(mesh, loop, p, colour);
+		append_vertices(mesh, loop, p, colour, surface);
 		for (const auto idx : triangles)
 			mesh.indices.push_back(base + idx);
 		end_element(mesh);
 	}
 
-	void emit_ring(Mesh& mesh, const Loop& outer, const Loop& inner, const ShapeParams& p, std::uint32_t colour)
+	void emit_ring(Mesh& mesh, const Loop& outer, const Loop& inner, const ShapeParams& p, std::uint32_t colour,
+		const VertexSurface& surface = {})
 	{
 		begin_element(mesh);
 		const auto base{ static_cast<std::uint32_t>(mesh.vertices.size()) };
 		const auto count{ static_cast<std::uint32_t>(outer.size()) };
-		append_vertices(mesh, outer, p, colour);
-		append_vertices(mesh, inner, p, colour);
+		auto ring{ surface };
+		if (ring.index != s_no_surface)
+			ring.index |= s_outline_flag;
+		append_vertices(mesh, outer, p, colour, ring);
+		append_vertices(mesh, inner, p, colour, ring);
 		for (std::uint32_t i = 0; i < count; ++i)
 		{
 			const auto j{ (i + 1) % count };
@@ -632,16 +718,100 @@ namespace
 				+ (colours[2] * (1.0f - u) + colours[3] * u) * v };
 			const auto local{ corner * size };
 			const glm::vec2 position{ centre.x + local.x * c - local.y * s, centre.y + local.x * s + local.y * c };
-			mesh.vertices.push_back({ position, params.z, params.screenSpace ? 1u : 0u, pack_colour(colour), params.clipRect });
+			mesh.vertices.push_back({ position, params.z, params.screenSpace ? 1u : 0u, pack_colour(colour), params.clipRect,
+				glm::vec2{}, s_no_surface });
 		}
 		mesh.indices.insert(mesh.indices.end(), { base, base + 1, base + 2, base, base + 2, base + 3 });
 		end_element(mesh);
+	}
+
+	// Adds the shape's surface to the draw's: its paint, height and the geometry its edge distance is measured from.
+	std::uint32_t add_surface(State& state, const ax::Shape& shape, const ax::ShapeSurface& surface, const Frame& frame,
+		const Loop& outer)
+	{
+		SurfaceGpu gpu{};
+		gpu.paint = static_cast<std::uint32_t>(surface.paint);
+		gpu.pattern = surface.pattern;
+		gpu.stopCount = std::clamp<std::uint32_t>(surface.stopCount, 1, 4);
+		for (std::size_t i{}; i < 4; ++i)
+			gpu.colours[i] = surface.colours[i];
+		// A pattern has no stops: it keeps its ramp there.
+		gpu.stops = surface.paint == ax::ShapeSurface::Paint::Pattern
+			? glm::vec4{ surface.ramp, 0.0f, 0.0f }
+			: glm::vec4{ surface.stops[0], surface.stops[1], surface.stops[2], surface.stops[3] };
+		gpu.gradient = { surface.from, surface.to };
+		gpu.patternSettings = { surface.scale, surface.rotation, surface.seed, surface.contrast };
+		gpu.values = surface.values;
+		gpu.relief = { surface.height, std::max(surface.bevel, 0.0f), static_cast<float>(surface.profile),
+			static_cast<float>(surface.blend) };
+		gpu.relief2 = { surface.bump, surface.roughness, surface.emissive, surface.radius };
+		glm::vec2 low{ std::numeric_limits<float>::max() }, high{ std::numeric_limits<float>::lowest() };
+		for (const auto& point : outer)
+		{
+			const auto local{ frame.local(point) };
+			low = glm::min(low, local);
+			high = glm::max(high, local);
+		}
+		gpu.frame = { low, high - low };
+		gpu.extra = { std::max(surface.unit, 1e-6f), 0.0f, 0.0f, 0.0f };
+		std::visit([&gpu, &state](const auto& s)
+		{
+			using T = std::decay_t<decltype(s)>;
+			if constexpr (std::is_same_v<T, ax::Rectangle>)
+			{
+				const glm::vec2 half{ glm::abs(s.size) * 0.5f };
+				gpu.geometryKind = 1;
+				gpu.geometry = { half, std::clamp(s.cornerRadius, 0.0f, std::min(half.x, half.y)), 0.0f };
+			}
+			else if constexpr (std::is_same_v<T, ax::Circle>)
+			{
+				gpu.geometryKind = 2;
+				gpu.geometry = { std::abs(s.radius), std::abs(s.radius), 0.0f, 0.0f };
+			}
+			else if constexpr (std::is_same_v<T, ax::Ellipse>)
+			{
+				gpu.geometryKind = 2;
+				gpu.geometry = { glm::abs(s.radii), 0.0f, 0.0f };
+			}
+			else if constexpr (std::is_same_v<T, ax::Line>)
+			{
+				const auto mid{ (s.start + s.end) * 0.5f };
+				gpu.geometryKind = 3;
+				gpu.geometry = { s.start - mid, s.end - mid };
+				gpu.extra.w = std::abs(s.thickness) * 0.5f;
+			}
+			else
+			{
+				gpu.geometryKind = 4;
+				gpu.extra.y = static_cast<float>(state.surfacePoints.size());
+				gpu.extra.z = static_cast<float>(s.points.size());
+				for (const auto& point : s.points)
+					state.surfacePoints.push_back(point * s.scale);
+			}
+		}, shape);
+		state.surfaces.push_back(gpu);
+		return static_cast<std::uint32_t>(state.surfaces.size() - 1);
+	}
+
+	// Whether any colour the surface paints is translucent.
+	bool surface_translucent(const ax::ShapeSurface& surface)
+	{
+		const auto count{ surface.paint == ax::ShapeSurface::Paint::Pattern ? 2u
+			: std::clamp<std::uint32_t>(surface.stopCount, 1, 4) };
+		for (std::uint32_t i{}; i < count; ++i)
+			if (surface.colours[i].a < 1.0f)
+				return true;
+		return false;
 	}
 
 	void tessellate(State& state, const ax::Shape& shape)
 	{
 		const auto params{ params_of(shape) };
 		const float pixelScale{ params.screenSpace ? 1.0f : std::max(state.view.zoom, 1e-3f) };
+		const auto* surface{ state.keepSurfaces ? ax::shape_surface(shape) : nullptr };
+		const bool height{ state.output == Output::Height };
+		if (height && (!surface || !surface->raised()))
+			return;
 
 		state.outer.clear();
 		std::visit(LoopBuilder{ pixelScale, state.outer, state }, shape);
@@ -653,18 +823,39 @@ namespace
 		const bool hasOutline{ params.outline.thickness > 0.0f && alpha_of(outlineColour) > 0 };
 		const bool convex{ is_convex(state.outer) };
 
+		// A painted shape (or any raised one, drawing height) carries its surface; others draw as they always have.
+		VertexSurface vertexSurface{};
+		bool painted{};
+		if (surface && (height || surface->paint != ax::ShapeSurface::Paint::Fill))
+		{
+			vertexSurface.frame = frame_of(shape);
+			vertexSurface.index = add_surface(state, shape, *surface, vertexSurface.frame, state.outer);
+			painted = !height && surface->paint != ax::ShapeSurface::Paint::Fill;
+		}
+		const auto meshFor = [&](std::uint32_t colour, bool fill) -> Mesh&
+		{
+			if (height)
+				return state.height;
+			if (fill && painted)
+				return surface_translucent(*surface) ? state.translucent : state.opaque;
+			return mesh_for(state, colour);
+		};
+		// A painted fill is drawn even where its own fill colour is clear (the paint gives the colour), and so is any
+		// raised shape's when drawing height (its geometry gives the coverage).
+		const bool fillVisible{ alpha_of(fillColour) > 0 || painted || height };
+
 		if (!hasOutline)
 		{
 			if (const auto* rectangle{ std::get_if<ax::Rectangle>(&shape) };
-				rectangle && rectangle->cornerColours && rectangle->cornerRadius <= 0.0f)
+				!height && !painted && rectangle && rectangle->cornerColours && rectangle->cornerRadius <= 0.0f)
 			{
 				emit_gradient(state, *rectangle, params);
 				return;
 			}
-			if (alpha_of(fillColour) == 0)
+			if (!fillVisible)
 				return;
 			triangulate(state.outer, convex, state.triangulation);
-			emit_fill(mesh_for(state, fillColour), state.outer, state.triangulation, params, fillColour);
+			emit_fill(meshFor(fillColour, true), state.outer, state.triangulation, params, fillColour, vertexSurface);
 			return;
 		}
 
@@ -676,19 +867,23 @@ namespace
 		{
 			if (!convex || !clamp_inset(state.outer, params.outline.thickness, state.inner, state.innerFill))
 			{
+				// The outline covers it: drawn in the outline colour, but still standing up with the shape.
+				auto covering{ vertexSurface };
+				if (covering.index != s_no_surface)
+					covering.index |= s_outline_flag;
 				triangulate(state.outer, convex, state.triangulation);
-				emit_fill(mesh_for(state, outlineColour), state.outer, state.triangulation, params, outlineColour);
+				emit_fill(meshFor(outlineColour, false), state.outer, state.triangulation, params, outlineColour, covering);
 				return;
 			}
 			fillLoop = &state.innerFill;
 		}
 
-		if (alpha_of(fillColour) > 0)
+		if (fillVisible)
 		{
 			triangulate(*fillLoop, convex, state.triangulation);
-			emit_fill(mesh_for(state, fillColour), *fillLoop, state.triangulation, params, fillColour);
+			emit_fill(meshFor(fillColour, true), *fillLoop, state.triangulation, params, fillColour, vertexSurface);
 		}
-		emit_ring(mesh_for(state, outlineColour), state.outer, state.inner, params, outlineColour);
+		emit_ring(meshFor(outlineColour, false), state.outer, state.inner, params, outlineColour, vertexSurface);
 	}
 
 	// Returns the offset in the arena that has room for size bytes.
@@ -747,6 +942,41 @@ namespace
 		state.stats.indices += indexCount;
 	}
 
+	// Puts the draw's surfaces on the GPU in buffers of their own (only painted and raised shapes have them), bound as
+	// group 1 for the draw.
+	void upload_surfaces(State& state)
+	{
+		state.surfaceGroup = nullptr;
+		if (state.surfaces.empty())
+			return;
+		if (state.surfacePoints.empty())
+			state.surfacePoints.emplace_back();
+		const auto make = [&state](const void* data, std::uint64_t size, const char* label)
+		{
+			wgpu::BufferDescriptor desc{};
+			desc.label = label;
+			desc.size = (size + 15) & ~std::uint64_t{ 15 };
+			desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
+			auto buffer{ ax::gpu::create_buffer(state.device, desc, "Shapes") };
+			state.queue.WriteBuffer(buffer, 0, data, size);
+			return buffer;
+		};
+		const auto surfaces{ make(state.surfaces.data(), state.surfaces.size() * sizeof(SurfaceGpu), "ShapeSurfaces") };
+		const auto points{ make(state.surfacePoints.data(), state.surfacePoints.size() * sizeof(glm::vec2), "ShapeSurfacePoints") };
+		wgpu::BindGroupEntry entries[2]{};
+		entries[0].binding = 0;
+		entries[0].buffer = surfaces;
+		entries[0].size = state.surfaces.size() * sizeof(SurfaceGpu);
+		entries[1].binding = 1;
+		entries[1].buffer = points;
+		entries[1].size = state.surfacePoints.size() * sizeof(glm::vec2);
+		wgpu::BindGroupDescriptor desc{};
+		desc.layout = state.surfaceLayout;
+		desc.entryCount = 2;
+		desc.entries = entries;
+		state.surfaceGroup = state.device.CreateBindGroup(&desc);
+	}
+
 	void draw_mesh(State& state, wgpu::RenderPassEncoder& pass, const Mesh& mesh, const wgpu::RenderPipeline& pipeline)
 	{
 		if (mesh.elements.empty())
@@ -754,6 +984,7 @@ namespace
 
 		pass.SetPipeline(pipeline);
 		pass.SetBindGroup(0, state.viewBindGroup);
+		pass.SetBindGroup(1, state.surfaceGroup ? state.surfaceGroup : state.emptySurfaceGroup);
 
 		// Split at element boundaries so a single upload never exceeds the device buffer limit.
 		std::size_t chunkStart{ 0 };
@@ -783,19 +1014,22 @@ namespace
 			draw_chunk(state, pass, mesh, chunkStart, mesh.elements.size());
 	}
 
-	wgpu::RenderPipeline create_pipeline(State& state, const wgpu::ShaderModule& shader, const wgpu::PipelineLayout& layout, bool translucent)
+	wgpu::RenderPipeline create_pipeline(State& state, const wgpu::ShaderModule& shader, const wgpu::PipelineLayout& layout, bool translucent,
+		Output output = Output::Colour)
 	{
-		wgpu::VertexAttribute attributes[5]{};
+		wgpu::VertexAttribute attributes[7]{};
 		attributes[0] = { .format = wgpu::VertexFormat::Float32x2, .offset = offsetof(ShapeVertex, pos), .shaderLocation = 0 };
 		attributes[1] = { .format = wgpu::VertexFormat::Float32, .offset = offsetof(ShapeVertex, z), .shaderLocation = 1 };
 		attributes[2] = { .format = wgpu::VertexFormat::Uint32, .offset = offsetof(ShapeVertex, screenSpace), .shaderLocation = 2 };
 		attributes[3] = { .format = wgpu::VertexFormat::Unorm8x4, .offset = offsetof(ShapeVertex, colour), .shaderLocation = 3 };
 		attributes[4] = { .format = wgpu::VertexFormat::Float32x4, .offset = offsetof(ShapeVertex, clipRect), .shaderLocation = 4 };
+		attributes[5] = { .format = wgpu::VertexFormat::Float32x2, .offset = offsetof(ShapeVertex, local), .shaderLocation = 5 };
+		attributes[6] = { .format = wgpu::VertexFormat::Uint32, .offset = offsetof(ShapeVertex, surface), .shaderLocation = 6 };
 
 		wgpu::VertexBufferLayout vertexLayout{};
 		vertexLayout.stepMode = wgpu::VertexStepMode::Vertex;
 		vertexLayout.arrayStride = sizeof(ShapeVertex);
-		vertexLayout.attributeCount = 5;
+		vertexLayout.attributeCount = 7;
 		vertexLayout.attributes = attributes;
 
 		wgpu::BlendState blend{};
@@ -806,25 +1040,33 @@ namespace
 		blend.alpha.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
 		blend.alpha.operation = wgpu::BlendOperation::Add;
 
+		// Height is premultiplied: a covering shape replaces what is beneath, an adding one (alpha 0) adds to it.
+		wgpu::BlendState premultiplied{};
+		premultiplied.color.srcFactor = wgpu::BlendFactor::One;
+		premultiplied.color.dstFactor = wgpu::BlendFactor::OneMinusSrcAlpha;
+		premultiplied.color.operation = wgpu::BlendOperation::Add;
+		premultiplied.alpha = premultiplied.color;
+		const bool height{ output == Output::Height };
+
 		wgpu::ColorTargetState colourTarget{};
 		colourTarget.format = state.config.colourFormat;
-		colourTarget.blend = translucent ? &blend : nullptr;
+		colourTarget.blend = height ? &premultiplied : translucent ? &blend : nullptr;
 		colourTarget.writeMask = wgpu::ColorWriteMask::All;
 
 		wgpu::FragmentState fragment{};
 		fragment.module = shader;
-		fragment.entryPoint = "fs_main";
+		fragment.entryPoint = height ? "fs_height" : "fs_main";
 		fragment.targetCount = 1;
 		fragment.targets = &colourTarget;
 
 		// Reverse depth like the sprite pipeline; GreaterEqual lets later shapes win ties.
 		wgpu::DepthStencilState depth{};
 		depth.format = state.config.depthFormat;
-		depth.depthWriteEnabled = translucent ? wgpu::OptionalBool::False : wgpu::OptionalBool::True;
+		depth.depthWriteEnabled = translucent || height ? wgpu::OptionalBool::False : wgpu::OptionalBool::True;
 		depth.depthCompare = wgpu::CompareFunction::GreaterEqual;
 
 		wgpu::RenderPipelineDescriptor desc{};
-		desc.label = translucent ? "ShapeTranslucent" : "ShapeOpaque";
+		desc.label = height ? "ShapeHeight" : translucent ? "ShapeTranslucent" : "ShapeOpaque";
 		desc.layout = layout;
 		desc.vertex.module = shader;
 		desc.vertex.entryPoint = "vs_main";
@@ -860,8 +1102,11 @@ bool ax::ShapeRenderer::init(const wgpu::Device& device, const ShapeRendererConf
 	if (device.GetLimits(&limits) == wgpu::Status::Success && limits.maxBufferSize != wgpu::kLimitU64Undefined)
 		state->maxChunkSize = std::min(s_max_chunk_size, limits.maxBufferSize) & ~std::uint64_t{ 3 };
 
+	std::string code{ reinterpret_cast<const char*>(s_shape_shader), sizeof(s_shape_shader) };
+	code += "\n";
+	code += s_pattern_source;
 	wgpu::ShaderSourceWGSL source{};
-	source.code = { reinterpret_cast<const char*>(s_shape_shader), sizeof(s_shape_shader) };
+	source.code = { code.data(), code.size() };
 	wgpu::ShaderModuleDescriptor shaderDesc{};
 	shaderDesc.nextInChain = &source;
 	shaderDesc.label = "ShapeShader";
@@ -869,22 +1114,42 @@ bool ax::ShapeRenderer::init(const wgpu::Device& device, const ShapeRendererConf
 
 	wgpu::BindGroupLayoutEntry viewEntry{};
 	viewEntry.binding = 0;
-	viewEntry.visibility = wgpu::ShaderStage::Vertex;
+	viewEntry.visibility = wgpu::ShaderStage::Vertex | wgpu::ShaderStage::Fragment;
 	viewEntry.buffer.type = wgpu::BufferBindingType::Uniform;
-	viewEntry.buffer.minBindingSize = 8 * sizeof(float);
+	viewEntry.buffer.minBindingSize = 12 * sizeof(float);
 	wgpu::BindGroupLayoutDescriptor groupLayoutDesc{};
 	groupLayoutDesc.entryCount = 1;
 	groupLayoutDesc.entries = &viewEntry;
 	const auto groupLayout{ device.CreateBindGroupLayout(&groupLayoutDesc) };
 
+	wgpu::BindGroupLayoutEntry surfaceEntries[2]{};
+	for (std::uint32_t i{}; i < 2; ++i)
+	{
+		surfaceEntries[i].binding = i;
+		surfaceEntries[i].visibility = wgpu::ShaderStage::Fragment;
+		surfaceEntries[i].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+	}
+	wgpu::BindGroupLayoutDescriptor surfaceLayoutDesc{};
+	surfaceLayoutDesc.entryCount = 2;
+	surfaceLayoutDesc.entries = surfaceEntries;
+	state->surfaceLayout = device.CreateBindGroupLayout(&surfaceLayoutDesc);
+
+	const wgpu::BindGroupLayout groupLayouts[2]{ groupLayout, state->surfaceLayout };
 	wgpu::PipelineLayoutDescriptor layoutDesc{};
-	layoutDesc.bindGroupLayoutCount = 1;
-	layoutDesc.bindGroupLayouts = &groupLayout;
+	layoutDesc.bindGroupLayoutCount = 2;
+	layoutDesc.bindGroupLayouts = groupLayouts;
 	const auto layout{ device.CreatePipelineLayout(&layoutDesc) };
+
+	// Draws without surfaces still bind group 1: a buffer of one empty surface, which no vertex points at.
+	wgpu::BufferDescriptor emptyDesc{};
+	emptyDesc.label = "ShapeNoSurfaces";
+	emptyDesc.size = sizeof(SurfaceGpu);
+	emptyDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Storage;
+	state->emptySurfaceBuffer = ax::gpu::create_buffer(device, emptyDesc, "Shapes");
 
 	wgpu::BufferDescriptor viewDesc{};
 	viewDesc.label = "ShapeView";
-	viewDesc.size = 8 * sizeof(float);
+	viewDesc.size = 12 * sizeof(float);
 	viewDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
 	state->viewBuffer = ax::gpu::create_buffer(device, viewDesc, "Shapes");
 
@@ -898,8 +1163,24 @@ bool ax::ShapeRenderer::init(const wgpu::Device& device, const ShapeRendererConf
 	bindDesc.entries = &viewBinding;
 	state->viewBindGroup = device.CreateBindGroup(&bindDesc);
 
+	{
+		wgpu::BindGroupEntry entries[2]{};
+		for (std::uint32_t i{}; i < 2; ++i)
+		{
+			entries[i].binding = i;
+			entries[i].buffer = state->emptySurfaceBuffer;
+			entries[i].size = sizeof(SurfaceGpu);
+		}
+		wgpu::BindGroupDescriptor emptyGroupDesc{};
+		emptyGroupDesc.layout = state->surfaceLayout;
+		emptyGroupDesc.entryCount = 2;
+		emptyGroupDesc.entries = entries;
+		state->emptySurfaceGroup = device.CreateBindGroup(&emptyGroupDesc);
+	}
+
 	state->opaquePipeline = create_pipeline(*state, shader, layout, false);
 	state->translucentPipeline = create_pipeline(*state, shader, layout, true);
+	state->heightPipeline = create_pipeline(*state, shader, layout, true, Output::Height);
 
 	// Keep the current view so re-initialising (e.g. on resize) mid-frame keeps working.
 	if (s_state)
@@ -932,9 +1213,10 @@ void ax::ShapeRenderer::begin_frame(const ShapeView& view)
 	s_state->hasView = true;
 	s_state->arenaOffset = 0;
 
-	const float data[8]{
+	const float data[12]{
 		view.viewport.x, view.viewport.y, 0.0f, 0.0f,
 		view.cameraPosition.x, view.cameraPosition.y, view.zoom, 0.0f,
+		s_relief_light.x, s_relief_light.y, s_relief_light.z, s_relief_light.w,
 	};
 	s_state->queue.WriteBuffer(s_state->viewBuffer, 0, data, sizeof(data));
 }
@@ -1020,16 +1302,68 @@ void ax::ShapeRenderer::draw(wgpu::RenderPassEncoder& pass, const ShapeList& sha
 
 	state.opaque.clear();
 	state.translucent.clear();
+	state.height.clear();
+	state.surfaces.clear();
+	state.surfacePoints.clear();
 	{
 		ZoneScopedN("Shapes tessellate");
 		for (const auto i : state.order)
 			tessellate(state, shapes[i]);
 	}
 
-	// Opaque first so translucent geometry can blend over it regardless of submission order.
 	ZoneNamedN(drawZone, "Shapes upload and draw", true);
-	draw_mesh(state, pass, state.opaque, state.opaquePipeline);
-	draw_mesh(state, pass, state.translucent, state.translucentPipeline);
+	upload_surfaces(state);
+	if (state.output == Output::Height)
+		draw_mesh(state, pass, state.height, state.heightPipeline);
+	else
+	{
+		// Opaque first so translucent geometry can blend over it regardless of submission order.
+		draw_mesh(state, pass, state.opaque, state.opaquePipeline);
+		draw_mesh(state, pass, state.translucent, state.translucentPipeline);
+	}
+	state.surfaceGroup = nullptr;
+}
+
+void ax::ShapeRenderer::draw_height(wgpu::RenderPassEncoder& pass, const ShapeList& shapes)
+{
+	if (!s_state)
+		return;
+	s_state->output = Output::Height;
+	struct Restore
+	{
+		~Restore()
+		{
+			if (s_state)
+				s_state->output = Output::Colour;
+		}
+	} restore{};
+	draw(pass, shapes);
+}
+
+bool ax::ShapeRenderer::set_pattern_source(std::string source)
+{
+	if (source.empty())
+		source = s_default_pattern_source;
+	if (source == s_pattern_source)
+		return true;
+	s_pattern_source = std::move(source);
+	// The pipelines are built again with it.
+	if (!s_state)
+		return true;
+	const auto device{ s_state->device };
+	const auto config{ s_state->config };
+	s_state.reset();
+	return init(device, config);
+}
+
+const std::string& ax::ShapeRenderer::pattern_source()
+{
+	return s_pattern_source;
+}
+
+void ax::ShapeRenderer::set_relief_light(glm::vec3 direction, float strength)
+{
+	s_relief_light = { direction, std::max(strength, 0.0f) };
 }
 
 ax::ShapeList& ax::UnlitShapeCapture::next_call()
@@ -1100,9 +1434,11 @@ std::shared_ptr<const ax::StaticShapeMesh> ax::ShapeRenderer::build_static(const
 	state.opaque.clear();
 	state.translucent.clear();
 	state.view.zoom = pixelScale;
+	state.keepSurfaces = false;
 	for (const auto i : order)
 		if (!ax::shape_screen_space(shapes[i]))
 			tessellate(state, shapes[i]);
+	state.keepSurfaces = true;
 	const auto opaque{ std::move(state.opaque) }, translucent{ std::move(state.translucent) };
 	state.opaque = std::move(frameOpaque);
 	state.translucent = std::move(frameTranslucent);
@@ -1151,6 +1487,7 @@ void ax::ShapeRenderer::draw_static(wgpu::RenderPassEncoder& pass, const StaticS
 			return;
 		pass.SetPipeline(pipeline);
 		pass.SetBindGroup(0, state.viewBindGroup);
+		pass.SetBindGroup(1, state.emptySurfaceGroup);
 		pass.SetVertexBuffer(0, mesh.buffer, part.vertexOffset, part.vertexBytes);
 		pass.SetIndexBuffer(mesh.buffer, wgpu::IndexFormat::Uint32, part.indexOffset, part.indexBytes);
 		pass.DrawIndexed(part.indexCount);

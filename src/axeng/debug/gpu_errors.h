@@ -19,4 +19,8 @@ namespace ax::gpu
 
 	// The errors since the last call, which starts the count again.
 	ErrorStats take_errors();
+
+	// Whether the device has been lost (other than destroyed on purpose): nothing drawn reaches the screen again.
+	void set_device_lost(bool lost);
+	bool device_lost();
 }
