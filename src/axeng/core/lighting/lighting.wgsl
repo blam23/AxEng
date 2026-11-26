@@ -435,7 +435,7 @@ fn surface_shade(position: vec2<f32>) -> SurfaceShade {
 	if (!out.covered) {
 		return out;
 	}
-	// Tilted further than drawn: buildings are low, seen from straight above, and their relief should still read.
+	// Tilted further than drawn: seen from straight above, low relief should still read.
 	let xy = texel.xy * 2.0 - vec2<f32>(1.0);
 	let normal = normalize(vec3<f32>(xy * 2.5, sqrt(max(1.0 - dot(xy, xy), 0.04))));
 	let roughness = texel.b;
