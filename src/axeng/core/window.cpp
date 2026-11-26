@@ -1146,6 +1146,43 @@ void ax::Window::reload_pipeline()
 		occluderFragment.entryPoint = "fs_ao_silhouette";
 		occluderDesc.label = "Ambient occlusion caster sprites";
 		m_aoCasterPipeline = m_device.CreateRenderPipeline(&occluderDesc);
+		{
+			// Surfaces: normals and glow into the lighting's two surface targets, depth tested among themselves.
+			wgpu::BindGroupLayoutEntry surfaceEntry{};
+			surfaceEntry.binding = 1;
+			surfaceEntry.visibility = wgpu::ShaderStage::Fragment;
+			surfaceEntry.texture.sampleType = wgpu::TextureSampleType::Float;
+			surfaceEntry.texture.viewDimension = wgpu::TextureViewDimension::e2D;
+			wgpu::BindGroupLayoutDescriptor surfaceLayoutDesc{};
+			surfaceLayoutDesc.entryCount = 1;
+			surfaceLayoutDesc.entries = &surfaceEntry;
+			m_surfaceTextureLayout = m_device.CreateBindGroupLayout(&surfaceLayoutDesc);
+			const wgpu::BindGroupLayout surfaceLayouts[3]{ m_groupLayout, m_globalLayout, m_surfaceTextureLayout };
+			wgpu::PipelineLayoutDescriptor surfacePipelineLayoutDesc{};
+			surfacePipelineLayoutDesc.bindGroupLayoutCount = 3;
+			surfacePipelineLayoutDesc.bindGroupLayouts = surfaceLayouts;
+			auto surfaceDesc{ pipelineDesc };
+			surfaceDesc.layout = m_device.CreatePipelineLayout(&surfacePipelineLayoutDesc);
+			std::array<wgpu::ColorTargetState, 2> surfaceTargets{};
+			for (auto& target : surfaceTargets)
+			{
+				target.format = LightRenderer::surface_format;
+				target.writeMask = wgpu::ColorWriteMask::All;
+			}
+			auto surfaceFragment{ fragmentState };
+			surfaceFragment.entryPoint = "fs_surface";
+			surfaceFragment.targetCount = surfaceTargets.size();
+			surfaceFragment.targets = surfaceTargets.data();
+			surfaceDesc.fragment = &surfaceFragment;
+			wgpu::DepthStencilState surfaceDepth{};
+			surfaceDepth.format = LightRenderer::surface_depth_format;
+			surfaceDepth.depthWriteEnabled = wgpu::OptionalBool::True;
+			surfaceDepth.depthCompare = wgpu::CompareFunction::GreaterEqual;
+			surfaceDesc.depthStencil = &surfaceDepth;
+			surfaceDesc.multisample.count = 1;
+			surfaceDesc.label = "Sprite surfaces";
+			m_surfacePipeline = m_device.CreateRenderPipeline(&surfaceDesc);
+		}
 		vpDesc.label = "RadianceViewportUBO";
 		m_radianceViewportBuffer = gpu::create_buffer(m_device, vpDesc, "Window");
 		auto radianceEntries{ vpEntries };
@@ -1544,6 +1581,28 @@ void ax::Window::invalidate_texture_bind_group(Texture* texture)
 
 	std::lock_guard lock{ m_textureBindGroupsMutex };
 	m_textureBindGroups.erase(texture);
+	m_surfaceBindGroups.erase(texture);
+}
+
+wgpu::BindGroup ax::Window::surface_bind_group(Texture* texture)
+{
+	if (texture == nullptr || texture->surface() == nullptr || !m_surfaceTextureLayout)
+		return {};
+	std::lock_guard lock{ m_textureBindGroupsMutex };
+	auto& entry{ m_surfaceBindGroups[texture] };
+	const auto serial{ texture->surface()->serial() };
+	if (entry.group && entry.serial == serial)
+		return entry.group;
+	wgpu::BindGroupEntry binding{};
+	binding.binding = 1;
+	binding.textureView = texture->surface()->view();
+	wgpu::BindGroupDescriptor desc{};
+	desc.layout = m_surfaceTextureLayout;
+	desc.entryCount = 1;
+	desc.entries = &binding;
+	entry.group = m_device.CreateBindGroup(&desc);
+	entry.serial = serial;
+	return entry.group;
 }
 
 bool ax::Window::submit_pending_draw_batch(PendingDrawBatch batch)
@@ -3180,7 +3239,28 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 						pass.SetVertexBuffer(0, batch->buffer, 0, static_cast<std::uint64_t>(batch->count) * sizeof(glm::vec3));
 						pass.Draw(6, batch->count);
 					}
-				}, frameMist ? &*frameMist : nullptr);
+				}, frameMist ? &*frameMist : nullptr,
+				[this](wgpu::RenderPassEncoder& pass)
+				{
+					// The lit sprites with surfaces, as the scene pass drew them.
+					if (!m_surfacePipeline) return;
+					bool bound{};
+					for (const auto& range : m_spriteGroupRanges)
+					{
+						if (range.distanceField || range.tex == nullptr || range.tex->surface() == nullptr) continue;
+						const auto group{ surface_bind_group(range.tex) };
+						if (!group) continue;
+						if (!bound)
+						{
+							pass.SetPipeline(m_surfacePipeline);
+							pass.SetBindGroup(1, m_viewportBindGroup);
+							bound = true;
+						}
+						pass.SetBindGroup(0, get_texture_bind_group(range.tex));
+						pass.SetBindGroup(2, group);
+						pass.Draw(6, range.count, 0, range.start);
+					}
+				});
 
 			{
 			ZoneScopedN("Window::unlit-scene-pass");

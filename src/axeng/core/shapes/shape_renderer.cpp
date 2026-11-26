@@ -837,8 +837,9 @@ namespace
 				return surface_translucent(*surface) ? state.translucent : state.opaque;
 			return mesh_for(state, colour);
 		};
-		// A painted fill is drawn even where its own fill colour is clear: the paint gives the colour.
-		const bool fillVisible{ alpha_of(fillColour) > 0 || painted };
+		// A painted fill is drawn even where its own fill colour is clear (the paint gives the colour), and so is any
+		// raised shape's when drawing height (its geometry gives the coverage).
+		const bool fillVisible{ alpha_of(fillColour) > 0 || painted || height };
 
 		if (!hasOutline)
 		{

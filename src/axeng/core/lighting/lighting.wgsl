@@ -406,6 +406,89 @@ fn fs_apply_bright(in_: FullscreenOut) -> @location(0) vec4<f32> {
 	return vec4<f32>(applied_light(in_.pos.xy) * 0.5, 0.5);
 }
 
+// Surfaces (SurfaceLighting): the normals of the sprites drawn into the surface targets shade the lit scene.
+struct SurfaceLight {
+	sun: vec4<f32>, // towards the sun xyz, the share of the ambient light it gives
+	params: vec4<f32>, // light height, strength, specular
+};
+@group(1) @binding(10) var surfaceNormal: texture_2d<f32>;
+@group(1) @binding(11) var surfaceEmissive: texture_2d<f32>;
+@group(1) @binding(12) var<uniform> surfaceLight: SurfaceLight;
+
+fn luminance(c: vec3<f32>) -> f32 {
+	return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
+}
+
+struct SurfaceShade {
+	diffuse: f32,
+	specular: vec3<f32>,
+	covered: bool,
+};
+
+// How the surface at a screen pixel takes the light: its brightness against a flat one, and its glint.
+fn surface_shade(position: vec2<f32>) -> SurfaceShade {
+	var out: SurfaceShade;
+	out.diffuse = 1.0;
+	out.specular = vec3<f32>(0.0);
+	let texel = textureLoad(surfaceNormal, vec2<i32>(position), 0);
+	out.covered = texel.a > 0.5;
+	if (!out.covered) {
+		return out;
+	}
+	// Tilted further than drawn: buildings are low, seen from straight above, and their relief should still read.
+	let xy = texel.xy * 2.0 - vec2<f32>(1.0);
+	let normal = normalize(vec3<f32>(xy * 2.5, sqrt(max(1.0 - dot(xy, xy), 0.04))));
+	let roughness = texel.b;
+	let uv = position / u.viewport.xy;
+	let light = textureSampleLevel(lightMap, lightSampler, uv, 0.0).rgb;
+	let ambient = luminance(u.ambient.rgb);
+	let lights = max(luminance(light) - ambient, 0.0);
+	// Lights: from where the light map grows brighter, as steep as its slope against what the light gives.
+	let step = vec2<f32>(6.0) / u.viewport.xy;
+	let gx = luminance(textureSampleLevel(lightMap, lightSampler, uv + vec2<f32>(step.x, 0.0), 0.0).rgb)
+		- luminance(textureSampleLevel(lightMap, lightSampler, uv - vec2<f32>(step.x, 0.0), 0.0).rgb);
+	let gy = luminance(textureSampleLevel(lightMap, lightSampler, uv + vec2<f32>(0.0, step.y), 0.0).rgb)
+		- luminance(textureSampleLevel(lightMap, lightSampler, uv - vec2<f32>(0.0, step.y), 0.0).rgb);
+	let slope = vec2<f32>(gx, gy);
+	let steepness = clamp(length(slope) * 6.0 / max(lights, 0.02), 0.0, 1.0);
+	let towards = normalize(vec3<f32>(normalize(slope + vec2<f32>(1e-6)) * steepness, surfaceLight.params.x));
+	let lit = max(dot(normal, towards), 0.0) / max(towards.z, 0.05);
+	// The ambient light: its sun's share from the sun, the rest from everywhere.
+	// A sun right overhead still lights a little from its side of the sky, so relief reads at noon.
+	let sun = normalize(surfaceLight.sun.xyz + vec3<f32>(normalize(surfaceLight.sun.xy + vec2<f32>(-0.3, -0.4)) * 0.35, 0.0));
+	let sunLit = max(dot(normal, sun), 0.0) / max(sun.z, 0.1);
+	let ambientLit = mix(1.0, sunLit, surfaceLight.sun.w);
+	let total = max(ambient + lights, 1e-4);
+	out.diffuse = mix(1.0, (ambient * ambientLit + lights * lit) / total, surfaceLight.params.y);
+	if (surfaceLight.params.z > 0.0) {
+		let shine = 1.0 - roughness;
+		let power = mix(6.0, 48.0, shine);
+		let eye = vec3<f32>(0.0, 0.0, 1.0);
+		let fromLights = pow(max(dot(normal, normalize(towards + eye)), 0.0), power) * lights * steepness;
+		let fromSun = pow(max(dot(normal, normalize(sun + eye)), 0.0), power) * ambient * surfaceLight.sun.w;
+		let tint = light / max(luminance(light), 1e-4);
+		out.specular = tint * (fromLights + fromSun * 0.5) * shine * surfaceLight.params.z;
+	}
+	return out;
+}
+
+// Multiplies the lit scene by the surface's shading (halved: the blend doubles it).
+@fragment
+fn fs_surface_shade(in_: FullscreenOut) -> @location(0) vec4<f32> {
+	let shade = surface_shade(in_.pos.xy);
+	return vec4<f32>(vec3<f32>(clamp(shade.diffuse, 0.0, 2.0) * 0.5), 0.5);
+}
+
+// Adds the surface's glints, and its glow where the light leaves it dark.
+@fragment
+fn fs_surface_add(in_: FullscreenOut) -> @location(0) vec4<f32> {
+	let shade = surface_shade(in_.pos.xy);
+	let emissive = textureLoad(surfaceEmissive, vec2<i32>(in_.pos.xy), 0);
+	let lit = applied_light(in_.pos.xy);
+	let glow = emissive.rgb * max(vec3<f32>(1.0) - lit, vec3<f32>(0.0));
+	return vec4<f32>(select(vec3<f32>(0.0), shade.specular * lit, shade.covered) + glow, 0.0);
+}
+
 // Mist (mist.wgsl draws its density and halos): over the lit scene, lit by the same light, brighter round
 // bright lights where light scatters in it, its sides facing a low sun brighter, and thinner over things that stand up.
 struct MistComposite {

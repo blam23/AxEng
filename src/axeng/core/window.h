@@ -495,6 +495,11 @@ namespace ax
 		wgpu::BindGroup m_radianceViewportBindGroup;
 		// The ambient occlusion caster views (AmbientOcclusion::CasterDraw's slots), each with a camera buffer of its own.
 		wgpu::RenderPipeline m_aoCasterPipeline;
+		// Lit sprites' surfaces for the lighting's surface pass (basic_shader.wgsl's fs_surface), their textures' surface
+		// textures in group 2.
+		wgpu::RenderPipeline m_surfacePipeline;
+		wgpu::BindGroupLayout m_surfaceTextureLayout;
+		wgpu::BindGroup surface_bind_group(Texture* texture);
 		std::array<gpu::TrackedBuffer, 4> m_aoViewportBuffers;
 		std::array<wgpu::BindGroup, 4> m_aoViewportBindGroups;
 		// The disc stand-ins (submit_ao_discs): their pipeline, and a camera (with the sweep) for each of their two slots.
@@ -516,6 +521,8 @@ namespace ax
 			wgpu::BindGroup group{};
 		};
 		std::unordered_map<Texture*, TextureBindGroup> m_textureBindGroups;
+		// By texture: its surface texture (Texture::surface), for the surface pipeline.
+		std::unordered_map<Texture*, TextureBindGroup> m_surfaceBindGroups;
 		std::mutex m_textureBindGroupsMutex{};
 		std::map<std::tuple<wgpu::TextureFormat, bool, bool>, wgpu::RenderPipeline> m_pendingPipelines;
 

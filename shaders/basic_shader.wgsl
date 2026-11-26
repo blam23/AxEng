@@ -31,6 +31,8 @@ struct VSOut {
 	@location(3) @interpolate(flat) clip_rect : vec4<f32>,
 	// Where it is in the world, in pixels (in the view's world: the ambient occlusion masks' may be shifted).
 	@location(4) world : vec2<f32>,
+	// Its turn, for turning its surface's normals (fs_surface).
+	@location(5) @interpolate(flat) rotation : f32,
 };
 
 // Ambient occlusion cuts (AmbientOcclusionCut2D): areas hiding the casters beneath them. Only the ambient occlusion
@@ -130,6 +132,7 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	}
 	out.uv = uv;
 	out.world = worldPos;
+	out.rotation = u.rotation;
 	out.tint = vec4<f32>(unpack2x16float(u.tint.x), unpack2x16float(u.tint.y));
 	out.clip_rect = vec4<f32>(
 		f32(u.clip.x & 0xFFFFu), f32(u.clip.x >> 16u), f32(u.clip.y & 0xFFFFu), f32(u.clip.y >> 16u));
@@ -209,6 +212,37 @@ fn fs_ao_silhouette(in_: VSOut) -> @location(0) vec4<f32> {
 		discard;
 	}
 	return vec4<f32>(1.0);
+}
+
+// The texture's surface texture (Texture::surface), laid out like it: only the surface pipeline binds group 2's
+// binding 1.
+@group(2) @binding(1) var surfaceTex : texture_2d<f32>;
+
+struct SurfaceOut {
+	@location(0) normal: vec4<f32>,
+	@location(1) emissive: vec4<f32>,
+};
+
+// A lit sprite's surface for the lighting's surface pass: its normal (turned with it) and roughness, and its colour
+// where it glows. Where its colour is under half opaque, or its surface empty, it leaves what is beneath.
+@fragment
+fn fs_surface(in_: VSOut) -> SurfaceOut {
+	let col = sprite_color(in_);
+	let size = vec2<f32>(textureDimensions(surfaceTex, 0));
+	let texel = clamp(vec2<i32>(floor(in_.uv * size)), vec2<i32>(in_.texelBounds.xy), vec2<i32>(in_.texelBounds.zw));
+	let surface = textureLoad(surfaceTex, texel, 0);
+	if (col.a < 0.5 || surface.a < 0.25) {
+		discard;
+	}
+	let n = surface.xy * 2.0 - vec2<f32>(1.0);
+	let c = cos(in_.rotation);
+	let s = sin(in_.rotation);
+	let turned = vec2<f32>(n.x * c - n.y * s, n.x * s + n.y * c);
+	let emissive = clamp((surface.a - 0.5) * 2.0, 0.0, 1.0);
+	var out: SurfaceOut;
+	out.normal = vec4<f32>(turned * 0.5 + vec2<f32>(0.5), surface.b, 1.0);
+	out.emissive = vec4<f32>(col.rgb * emissive, emissive);
+	return out;
 }
 
 @fragment

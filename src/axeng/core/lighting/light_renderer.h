@@ -133,6 +133,26 @@ namespace ax
 	// The tonemapped light (what fs_apply multiplies the target by, before ambient occlusion), as the shader does it.
 	glm::vec3 tonemap_light(const Tonemap&, glm::vec3 light, float maxExposure) noexcept;
 
+	// Lighting by surfaces: sprites whose textures name a surface texture (Texture::surface) are drawn into a normal and
+	// emissive target (LightRenderer::encode's surfaces callback), and the lit scene is then shaded by those normals:
+	// lit from the direction the light map brightens towards, and the ambient share of the light from `sun`.
+	struct SurfaceLighting
+	{
+		bool enabled{};
+		// Towards the sun or moon (screen axes, z up out of the screen), and how much of the ambient light comes from it
+		// (0 none: the ambient light lights every side alike).
+		glm::vec3 sun{ -0.45f, -0.6f, 0.66f };
+		float sunShare{ 1.0f };
+		// How high lights stand over what they light, against the light map's slope (higher is flatter).
+		float lightHeight{ 0.7f };
+		// 0 flat, 1 full shading.
+		float strength{ 1.0f };
+		// Glints: how bright, 0 for none.
+		float specular{ 0.0f };
+
+		bool operator==(const SurfaceLighting&) const = default;
+	};
+
 	struct LightingSettings
 	{
 		// When disabled, or when ambient is full white with nothing to light, frames render exactly as without
@@ -153,6 +173,8 @@ namespace ax
 		bool particleLights{ true };
 		// Shadows from radiance cascades (radiance_cascades.h).
 		RadianceSettings radiance{};
+		// Shading by sprites' surfaces (normals, roughness, emissive).
+		SurfaceLighting surfaces{};
 
 		bool operator==(const LightingSettings&) const = default;
 	};
@@ -165,6 +187,13 @@ namespace ax
 	class LightRenderer
 	{
 	public:
+		// Draws the surfaces (with LightingSettings::surfaces): into a pass of two targets, the normal (rg, as x and y
+		// mapped to 0..1, b roughness, a 1 where there is a surface) and the emissive colour (rgb, premultiplied by how
+		// emissive, a), single sampled, with a depth buffer of their own (Depth24Plus, cleared to 0, greater wins).
+		using SurfaceDraw = std::function<void(wgpu::RenderPassEncoder&)>;
+		static constexpr wgpu::TextureFormat surface_format{ wgpu::TextureFormat::RGBA8Unorm };
+		static constexpr wgpu::TextureFormat surface_depth_format{ wgpu::TextureFormat::Depth24Plus };
+
 		// Creates the pipelines for drawing onto targets of this format and sample count. Calling again with the
 		// same arguments is a no-op.
 		bool init(const wgpu::Device&, wgpu::TextureFormat targetFormat, std::uint32_t sampleCount);
@@ -181,7 +210,7 @@ namespace ax
 			std::span<const LightOccluder2D> occluders = {}, std::span<const RadianceCircle> radianceCircles = {},
 			const RadianceCascades::OccluderDraw& radianceOccluders = {}, std::uint64_t radianceOccluderSignature = 0,
 			const AmbientOcclusion2D* ambientOcclusion = nullptr, const AmbientOcclusion::CasterDraw& aoCasters = {},
-			const MistFrame* mist = nullptr);
+			const MistFrame* mist = nullptr, const SurfaceDraw& surfaces = {});
 
 		struct Stats
 		{
@@ -218,7 +247,14 @@ namespace ax
 		wgpu::TextureFormat m_targetFormat{ wgpu::TextureFormat::Undefined };
 		std::uint32_t m_sampleCount{};
 		wgpu::RenderPipeline m_lightPipeline{}, m_shadowPipeline{}, m_occluderPipeline{}, m_applyPipeline{}, m_brightApplyPipeline{}, m_glowPipeline{},
-			m_lightOnlyPipeline{}, m_mistPipeline{};
+			m_lightOnlyPipeline{}, m_mistPipeline{}, m_surfaceShadePipeline{}, m_surfaceAddPipeline{};
+		// The surfaces' targets, their uniforms and the group that reads them in the apply pass.
+		wgpu::BindGroupLayout m_surfaceLayout{};
+		gpu::TrackedTexture m_surfaceNormal{}, m_surfaceEmissive{}, m_surfaceDepth{};
+		wgpu::TextureView m_surfaceNormalView{}, m_surfaceEmissiveView{}, m_surfaceDepthView{};
+		gpu::TrackedBuffer m_surfaceUniforms{};
+		wgpu::BindGroup m_surfaceGroup{};
+		bool ensure_surface_targets(const wgpu::Device&, std::uint32_t width, std::uint32_t height);
 		wgpu::BindGroupLayout m_instanceLayout{}, m_applyLayout{}, m_marchLayout{};
 		gpu::TrackedBuffer m_uniforms{}, m_marchUniforms{};
 		wgpu::BindGroup m_marchGroup{};
