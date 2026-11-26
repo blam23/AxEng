@@ -1112,9 +1112,8 @@ void ax::Window::reload_pipeline()
 		occluderDesc.fragment = &occluderFragment;
 		occluderDesc.depthStencil = nullptr;
 		occluderDesc.multisample.count = 1;
-		occluderDesc.label = "Radiance occluder sprites";
-		m_radianceOccluderPipeline = m_device.CreateRenderPipeline(&occluderDesc);
-		// And for ambient occlusion: coverage only, into its single channel masks, with the cuts in group 2.
+		// The cuts in group 2: what is drawn beneath one casts no ambient occlusion, blocks no traced light and shows no
+		// surface.
 		wgpu::BindGroupLayoutEntry cutEntry{};
 		cutEntry.binding = 0;
 		cutEntry.visibility = wgpu::ShaderStage::Fragment;
@@ -1146,20 +1145,25 @@ void ax::Window::reload_pipeline()
 		aoLayoutDesc.bindGroupLayoutCount = 3;
 		aoLayoutDesc.bindGroupLayouts = aoLayouts;
 		occluderDesc.layout = m_device.CreatePipelineLayout(&aoLayoutDesc);
+		occluderDesc.label = "Radiance occluder sprites";
+		m_radianceOccluderPipeline = m_device.CreateRenderPipeline(&occluderDesc);
+		// And for ambient occlusion: coverage only, into its single channel masks.
 		occluderTarget.format = ao_mask_format;
 		occluderFragment.entryPoint = "fs_ao_silhouette";
 		occluderDesc.label = "Ambient occlusion caster sprites";
 		m_aoCasterPipeline = m_device.CreateRenderPipeline(&occluderDesc);
 		{
-			// Surfaces: normals and glow into the lighting's two surface targets, depth tested among themselves.
-			wgpu::BindGroupLayoutEntry surfaceEntry{};
+			// Surfaces: normals and glow into the lighting's two surface targets, depth tested among themselves, with the
+			// cuts beside the surface texture.
+			std::array<wgpu::BindGroupLayoutEntry, 2> surfaceEntries{ cutEntry, {} };
+			auto& surfaceEntry{ surfaceEntries[1] };
 			surfaceEntry.binding = 1;
 			surfaceEntry.visibility = wgpu::ShaderStage::Fragment;
 			surfaceEntry.texture.sampleType = wgpu::TextureSampleType::Float;
 			surfaceEntry.texture.viewDimension = wgpu::TextureViewDimension::e2D;
 			wgpu::BindGroupLayoutDescriptor surfaceLayoutDesc{};
-			surfaceLayoutDesc.entryCount = 1;
-			surfaceLayoutDesc.entries = &surfaceEntry;
+			surfaceLayoutDesc.entryCount = surfaceEntries.size();
+			surfaceLayoutDesc.entries = surfaceEntries.data();
 			m_surfaceTextureLayout = m_device.CreateBindGroupLayout(&surfaceLayoutDesc);
 			const wgpu::BindGroupLayout surfaceLayouts[3]{ m_groupLayout, m_globalLayout, m_surfaceTextureLayout };
 			wgpu::PipelineLayoutDescriptor surfacePipelineLayoutDesc{};
@@ -1597,13 +1601,17 @@ wgpu::BindGroup ax::Window::surface_bind_group(Texture* texture)
 	const auto serial{ texture->surface()->serial() };
 	if (entry.group && entry.serial == serial)
 		return entry.group;
-	wgpu::BindGroupEntry binding{};
-	binding.binding = 1;
-	binding.textureView = texture->surface()->view();
+	// The cuts where things stand (not shifted along the shadows' offset), and the surface texture.
+	std::array<wgpu::BindGroupEntry, 2> bindings{};
+	bindings[0].binding = 0;
+	bindings[0].buffer = m_aoCutBuffers[1];
+	bindings[0].size = s_ao_cuts_bytes;
+	bindings[1].binding = 1;
+	bindings[1].textureView = texture->surface()->view();
 	wgpu::BindGroupDescriptor desc{};
 	desc.layout = m_surfaceTextureLayout;
-	desc.entryCount = 1;
-	desc.entries = &binding;
+	desc.entryCount = bindings.size();
+	desc.entries = bindings.data();
 	entry.group = m_device.CreateBindGroup(&desc);
 	entry.serial = serial;
 	return entry.group;
@@ -3198,6 +3206,8 @@ bool ax::Window::run_wgpu_render_pass(double delta, std::future<wgpu::SurfaceTex
 					m_queue.WriteBuffer(m_radianceViewportBuffer, 0, vp, sizeof(vp));
 					pass.SetPipeline(m_radianceOccluderPipeline);
 					pass.SetBindGroup(1, m_radianceViewportBindGroup);
+					// The cuts where things stand: nothing beneath one blocks light.
+					pass.SetBindGroup(2, m_aoCutBindGroups[1]);
 					for (const auto& range : m_occluderSpriteGroupRanges)
 					{
 						pass.SetBindGroup(0, get_texture_bind_group(range.tex));

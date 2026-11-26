@@ -249,11 +249,11 @@ fn fs_main(in_: VSOut) -> @location(0) vec4<f32> {
 }
 
 // The silhouette of an occluder sprite for the radiance cascades' scene: its colour as albedo where it is at least
-// half opaque.
+// half opaque, and not hidden beneath a cut (something standing over it).
 @fragment
 fn fs_radiance_occluder(in_: VSOut) -> @location(0) vec4<f32> {
 	let col = sprite_color(in_);
-	if (col.a < 0.5) {
+	if (col.a < 0.5 || ao_cut(in_.world, in_.pos.z)) {
 		discard;
 	}
 	return vec4<f32>(col.rgb, 1.0);
@@ -279,14 +279,15 @@ struct SurfaceOut {
 };
 
 // A lit sprite's surface for the lighting's surface pass: its normal (turned with it) and roughness, and its colour
-// where it glows. Where its colour is under half opaque, or its surface empty, it leaves what is beneath.
+// where it glows. Where its colour is under half opaque, its surface empty or it lies beneath a cut, it leaves what
+// is beneath.
 @fragment
 fn fs_surface(in_: VSOut) -> SurfaceOut {
 	let col = sprite_color(in_);
 	let size = vec2<f32>(textureDimensions(surfaceTex, 0));
 	let texel = clamp(vec2<i32>(floor(in_.uv * size)), vec2<i32>(in_.texelBounds.xy), vec2<i32>(in_.texelBounds.zw));
 	let surface = textureLoad(surfaceTex, texel, 0);
-	if (col.a < 0.5 || surface.a < 0.25) {
+	if (col.a < 0.5 || surface.a < 0.25 || ao_cut(in_.world, in_.pos.z)) {
 		discard;
 	}
 	let n = surface.xy * 2.0 - vec2<f32>(1.0);

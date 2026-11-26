@@ -37,6 +37,7 @@ namespace ax
 	// Something standing over the ground at height z, its corners in world pixels in order round it:
 	// casters lower than z (sprite z, the stand-in discs at 0) cast no shadow inside it, nor mark where they stand,
 	// being hidden beneath it, as a LightOccluder2D hides the lights before it. Casters at z or above are untouched.
+	// Beneath it, sprites block no traced light (radiance occluders) and show no surface (SurfaceLighting) either.
 	struct AmbientOcclusionCut2D
 	{
 		std::array<glm::vec2, 4> corners{};
