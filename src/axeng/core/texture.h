@@ -75,6 +75,25 @@ namespace ax
 	// are lighter over it (AmbientOcclusion2D::selfDarkness).
 	inline constexpr std::uint32_t sprite_flag_ao_silhouette{ 128u };
 
+	// Wear on a world sprite, worked out in the sprite shader over world space so neighbours differ and it stays put as
+	// the sprite moves. All zero leaves the sprite as drawn.
+	struct SpriteWear
+	{
+		// 0..1: picks this sprite's own variation.
+		float seed{ 0.0f };
+		// 0..1: how far its colour drifts (brightness and hue) from the next one's.
+		float jitter{ 0.0f };
+		// 0..1: dark patches of grime.
+		float grime{ 0.0f };
+		// 0..1: patches of coatColour settled over it (dust, salt, frost, ash...).
+		float coat{ 0.0f };
+		glm::vec3 coatColour{ 1.0f };
+		// Keeps SpriteData a whole number of pointers long (SpriteDefinition's layout).
+		float reserved{ 0.0f };
+
+		bool operator==(const SpriteWear&) const = default;
+	};
+
 	// A sprite as the engine and scripts author it. Sprites are packed into SpriteGpuData for the GPU.
 	struct SpriteData
 	{
@@ -90,6 +109,7 @@ namespace ax
 		std::uint32_t screenSpace{ 0 };
 		// Screen pixels; a max below the min disables clipping.
 		glm::vec4 clipRect{ 0.0f, 0.0f, -1.0f, -1.0f };
+		SpriteWear wear{};
 	};
 
 	// Distance-field effect of one sprite.
@@ -118,8 +138,10 @@ namespace ax
 		glm::uvec2 clip{ 0u, 0xFFFFFFFFu };
 		float z{ 0.0f };
 		float rotation{ 0.0f };
+		// SpriteWear as bytes: seed | jitter << 8 | grime << 16 | coat << 24, and the coat's colour r | g << 8 | b << 16.
+		glm::uvec2 wear{ 0u, 0u };
 
-		static constexpr std::size_t gpuDataSize{ 48 };
+		static constexpr std::size_t gpuDataSize{ 56 };
 	};
 
 	struct SdfSpriteGpuData : SpriteGpuData
@@ -132,7 +154,7 @@ namespace ax
 		std::uint32_t effectOffset{ 0 };
 		std::uint32_t reserved{ 0 };
 
-		static constexpr std::size_t gpuDataSize{ 64 };
+		static constexpr std::size_t gpuDataSize{ 72 };
 	};
 
 	inline std::uint32_t pack_u16_pair(float low, float high) noexcept
@@ -156,6 +178,11 @@ namespace ax
 		result.tint = { glm::packHalf2x16({ data.tint.r, data.tint.g }), glm::packHalf2x16({ data.tint.b, data.tint.a }) };
 		if (data.clipRect.z >= data.clipRect.x && data.clipRect.w >= data.clipRect.y)
 			result.clip = { pack_u16_pair(data.clipRect.x, data.clipRect.y), pack_u16_pair(data.clipRect.z, data.clipRect.w) };
+		const auto byte = [](float value) { return static_cast<std::uint32_t>(std::clamp(std::lround(value * 255.0f), 0l, 255l)); };
+		const auto& wear{ data.wear };
+		if (wear.jitter > 0.0f || wear.grime > 0.0f || wear.coat > 0.0f)
+			result.wear = { byte(wear.seed) | byte(wear.jitter) << 8 | byte(wear.grime) << 16 | byte(wear.coat) << 24,
+				byte(wear.coatColour.r) | byte(wear.coatColour.g) << 8 | byte(wear.coatColour.b) << 16 };
 		return result;
 	}
 
