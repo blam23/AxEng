@@ -149,6 +149,10 @@ namespace ax
 		float strength{ 1.0f };
 		// Glints: how bright, 0 for none.
 		float specular{ 0.0f };
+		// How far normals are tilted beyond what was drawn (1 as drawn), so low relief still reads from above.
+		float tilt{ 2.5f };
+		// Hard steps of light (cel shading): how many per unit of brightness, 0 for smooth.
+		float bands{ 0.0f };
 
 		bool operator==(const SurfaceLighting&) const = default;
 	};

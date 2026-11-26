@@ -409,11 +409,21 @@ fn fs_apply_bright(in_: FullscreenOut) -> @location(0) vec4<f32> {
 // Surfaces (SurfaceLighting): the normals of the sprites drawn into the surface targets shade the lit scene.
 struct SurfaceLight {
 	sun: vec4<f32>, // towards the sun xyz, the share of the ambient light it gives
-	params: vec4<f32>, // light height, strength, specular
+	params: vec4<f32>, // light height, strength, specular, tilt
+	style: vec4<f32>, // bands
 };
 @group(1) @binding(10) var surfaceNormal: texture_2d<f32>;
 @group(1) @binding(11) var surfaceEmissive: texture_2d<f32>;
 @group(1) @binding(12) var<uniform> surfaceLight: SurfaceLight;
+
+// Light in hard steps (SurfaceLighting::bands), or as it is.
+fn banded(x: f32) -> f32 {
+	let bands = surfaceLight.style.x;
+	if (bands <= 0.0) {
+		return x;
+	}
+	return floor(x * bands + 0.5) / bands;
+}
 
 fn luminance(c: vec3<f32>) -> f32 {
 	return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
@@ -437,7 +447,7 @@ fn surface_shade(position: vec2<f32>) -> SurfaceShade {
 	}
 	// Tilted further than drawn: seen from straight above, low relief should still read.
 	let xy = texel.xy * 2.0 - vec2<f32>(1.0);
-	let normal = normalize(vec3<f32>(xy * 2.5, sqrt(max(1.0 - dot(xy, xy), 0.04))));
+	let normal = normalize(vec3<f32>(xy * surfaceLight.params.w, sqrt(max(1.0 - dot(xy, xy), 0.04))));
 	let roughness = texel.b;
 	let uv = position / u.viewport.xy;
 	let light = textureSampleLevel(lightMap, lightSampler, uv, 0.0).rgb;
@@ -452,11 +462,11 @@ fn surface_shade(position: vec2<f32>) -> SurfaceShade {
 	let slope = vec2<f32>(gx, gy);
 	let steepness = clamp(length(slope) * 6.0 / max(lights, 0.02), 0.0, 1.0);
 	let towards = normalize(vec3<f32>(normalize(slope + vec2<f32>(1e-6)) * steepness, surfaceLight.params.x));
-	let lit = max(dot(normal, towards), 0.0) / max(towards.z, 0.05);
+	let lit = banded(max(dot(normal, towards), 0.0) / max(towards.z, 0.05));
 	// The ambient light: its sun's share from the sun, the rest from everywhere.
 	// A sun right overhead still lights a little from its side of the sky, so relief reads at noon.
 	let sun = normalize(surfaceLight.sun.xyz + vec3<f32>(normalize(surfaceLight.sun.xy + vec2<f32>(-0.3, -0.4)) * 0.35, 0.0));
-	let sunLit = max(dot(normal, sun), 0.0) / max(sun.z, 0.1);
+	let sunLit = banded(max(dot(normal, sun), 0.0) / max(sun.z, 0.1));
 	let ambientLit = mix(1.0, sunLit, surfaceLight.sun.w);
 	let total = max(ambient + lights, 1e-4);
 	out.diffuse = mix(1.0, (ambient * ambientLit + lights * lit) / total, surfaceLight.params.y);

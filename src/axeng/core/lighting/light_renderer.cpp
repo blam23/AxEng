@@ -202,7 +202,7 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 	surfaceEntries[2].binding = 12;
 	surfaceEntries[2].visibility = wgpu::ShaderStage::Fragment;
 	surfaceEntries[2].buffer.type = wgpu::BufferBindingType::Uniform;
-	surfaceEntries[2].buffer.minBindingSize = sizeof(glm::vec4) * 2;
+	surfaceEntries[2].buffer.minBindingSize = sizeof(glm::vec4) * 3;
 	wgpu::BindGroupLayoutDescriptor surfaceLayoutDesc{};
 	surfaceLayoutDesc.entryCount = surfaceEntries.size();
 	surfaceLayoutDesc.entries = surfaceEntries.data();
@@ -287,7 +287,7 @@ bool ax::LightRenderer::init(const wgpu::Device& device, wgpu::TextureFormat tar
 		m_surfaceLayout);
 	{
 		wgpu::BufferDescriptor surfaceUniformDesc{};
-		surfaceUniformDesc.size = sizeof(glm::vec4) * 2;
+		surfaceUniformDesc.size = sizeof(glm::vec4) * 3;
 		surfaceUniformDesc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::Uniform;
 		surfaceUniformDesc.label = "Lighting surface uniforms";
 		m_surfaceUniforms = gpu::create_buffer(device, surfaceUniformDesc, "Lighting");
@@ -385,7 +385,7 @@ bool ax::LightRenderer::ensure_surface_targets(const wgpu::Device& device, std::
 	entries[1].textureView = m_surfaceEmissiveView;
 	entries[2].binding = 12;
 	entries[2].buffer = m_surfaceUniforms;
-	entries[2].size = sizeof(glm::vec4) * 2;
+	entries[2].size = sizeof(glm::vec4) * 3;
 	wgpu::BindGroupDescriptor groupDesc{};
 	groupDesc.layout = m_surfaceLayout;
 	groupDesc.entryCount = entries.size();
@@ -709,9 +709,10 @@ void ax::LightRenderer::encode(const wgpu::Device& device, const wgpu::Queue& qu
 	if (surfaced)
 	{
 		ZoneScopedN("LightRenderer::surfaces");
-		const glm::vec4 data[2]{ { surfaceSettings.sun, std::clamp(surfaceSettings.sunShare, 0.0f, 1.0f) },
+		const glm::vec4 data[3]{ { surfaceSettings.sun, std::clamp(surfaceSettings.sunShare, 0.0f, 1.0f) },
 			{ std::max(surfaceSettings.lightHeight, 0.05f), std::clamp(surfaceSettings.strength, 0.0f, 1.0f),
-				std::max(surfaceSettings.specular, 0.0f), 0.0f } };
+				std::max(surfaceSettings.specular, 0.0f), std::max(surfaceSettings.tilt, 0.0f) },
+			{ std::max(surfaceSettings.bands, 0.0f), 0.0f, 0.0f, 0.0f } };
 		queue.WriteBuffer(m_surfaceUniforms, 0, data, sizeof(data));
 		std::array<wgpu::RenderPassColorAttachment, 2> attachments{};
 		for (std::size_t i{}; i < attachments.size(); ++i)
