@@ -643,6 +643,14 @@ void ax::lua::bindings::setup_window_bindings(Application& app, sol::state& stat
 			return texture != nullptr && app.window()->compare_next_frame(*texture, keepAlive);
 		};
 
+#ifndef __EMSCRIPTEN__
+	// Loses the GPU device as a driver reset would, to test that the app survives it. Not in a browser (no such call).
+	window_table["force_device_loss"] = [&app]()
+	{
+		app.window()->device().ForceLoss(wgpu::DeviceLostReason::Unknown, "forced device loss");
+	};
+#endif
+
 	if (app.has_permission(lua::Permission::IO))
 	{
 		window_table["capture_next_frame_io"] =

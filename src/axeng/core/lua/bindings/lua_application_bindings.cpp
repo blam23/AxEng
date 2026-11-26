@@ -3,6 +3,7 @@
 #include "axeng/core/application.h"
 #include "axeng/core/build_info.h"
 #include "axeng/core/event.h"
+#include "axeng/core/relaunch.h"
 #include "axeng/core/lua/bindings/lua_audio_bindings.h"
 #include "axeng/core/lua/bindings/lua_particle_bindings.h"
 #include "axeng/core/lua/bindings/lua_resource_bindings.h"
@@ -42,6 +43,24 @@ void ax::lua::bindings::setup_application_bindings(ax::Application& app, sol::st
 		auto errors{ ax::gpu::take_errors() };
 		return std::make_tuple(errors.count, std::move(errors.first));
 	};
+
+	// Whether the GPU device has been lost (a driver reset, the browser dropping it): nothing drawn shows from then on.
+	app_table["gpu_device_lost"] = []() { return ax::gpu::device_lost(); };
+	// Marks the device lost or not, without losing it: tests of what an application does about a loss.
+	app_table["simulate_gpu_device_lost"] = [](bool lost) { ax::gpu::set_device_lost(lost); };
+
+	// Starts the application again with these environment variables ({ NAME = "value" }) set: see ax::relaunch. The
+	// caller quits this run once it returns true.
+	if (app.has_permission(lua::Permission::OS))
+		app_table["relaunch"] = [](sol::optional<sol::table> variables)
+		{
+			std::vector<std::pair<std::string, std::string>> environment{};
+			if (variables)
+				for (const auto& [name, value] : *variables)
+					if (name.is<std::string>() && value.is<std::string>())
+						environment.emplace_back(name.as<std::string>(), value.as<std::string>());
+			return ax::relaunch(environment);
+		};
 
 	// The platform the engine was built for: "web", "windows", "linux" or "macos" (see ax::build::platform).
 	app_table["current_platform"] = []() { return std::string{ ax::build::platform }; };
