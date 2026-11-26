@@ -75,8 +75,8 @@ namespace ax
 	// are lighter over it (AmbientOcclusion2D::selfDarkness).
 	inline constexpr std::uint32_t sprite_flag_ao_silhouette{ 128u };
 
-	// Wear on a world sprite, worked out in the sprite shader over world space so neighbours differ and it stays put as
-	// the sprite moves. All zero leaves the sprite as drawn.
+	// Wear on a world sprite, worked out in the sprite shader over the sprite itself (so it moves and turns with it), seeded
+	// so neighbours differ. All zero leaves the sprite as drawn.
 	struct SpriteWear
 	{
 		// 0..1: picks this sprite's own variation.
@@ -88,8 +88,9 @@ namespace ax
 		// 0..1: patches of coatColour settled over it (dust, salt, frost, ash...).
 		float coat{ 0.0f };
 		glm::vec3 coatColour{ 1.0f };
-		// Keeps SpriteData a whole number of pointers long (SpriteDefinition's layout).
-		float reserved{ 0.0f };
+		// 0..1: a light baked into the sprite from its top (brighter by half this at the top, darker by half at the
+		// bottom), turned back to fall from the screen's top however far the sprite is turned.
+		float bakedLight{ 0.0f };
 
 		bool operator==(const SpriteWear&) const = default;
 	};
@@ -138,7 +139,8 @@ namespace ax
 		glm::uvec2 clip{ 0u, 0xFFFFFFFFu };
 		float z{ 0.0f };
 		float rotation{ 0.0f };
-		// SpriteWear as bytes: seed | jitter << 8 | grime << 16 | coat << 24, and the coat's colour r | g << 8 | b << 16.
+		// SpriteWear as bytes: seed | jitter << 8 | grime << 16 | coat << 24, and the coat's colour r | g << 8 | b << 16 with
+		// the baked light << 24.
 		glm::uvec2 wear{ 0u, 0u };
 
 		static constexpr std::size_t gpuDataSize{ 56 };
@@ -180,9 +182,9 @@ namespace ax
 			result.clip = { pack_u16_pair(data.clipRect.x, data.clipRect.y), pack_u16_pair(data.clipRect.z, data.clipRect.w) };
 		const auto byte = [](float value) { return static_cast<std::uint32_t>(std::clamp(std::lround(value * 255.0f), 0l, 255l)); };
 		const auto& wear{ data.wear };
-		if (wear.jitter > 0.0f || wear.grime > 0.0f || wear.coat > 0.0f)
+		if (wear.jitter > 0.0f || wear.grime > 0.0f || wear.coat > 0.0f || wear.bakedLight > 0.0f)
 			result.wear = { byte(wear.seed) | byte(wear.jitter) << 8 | byte(wear.grime) << 16 | byte(wear.coat) << 24,
-				byte(wear.coatColour.r) | byte(wear.coatColour.g) << 8 | byte(wear.coatColour.b) << 16 };
+				byte(wear.coatColour.r) | byte(wear.coatColour.g) << 8 | byte(wear.coatColour.b) << 16 | byte(wear.bakedLight) << 24 };
 		return result;
 	}
 

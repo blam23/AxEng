@@ -35,6 +35,10 @@ struct VSOut {
 	// Its turn, for turning its surface's normals (fs_surface).
 	@location(5) @interpolate(flat) rotation : f32,
 	@location(6) @interpolate(flat) wear : vec2<u32>,
+	// Where it is on the sprite, in world pixels from its centre before it turns: wear stays on the sprite as it moves.
+	@location(7) wearAt : vec2<f32>,
+	// How far down the sprite (0 top, 1 bottom) a point is in the sprite and on the screen: for turning a baked light.
+	@location(8) downs : vec2<f32>,
 };
 
 // Ambient occlusion cuts (AmbientOcclusionCut2D): areas hiding the casters beneath them. Only the ambient occlusion
@@ -136,6 +140,9 @@ fn vs_main(@builtin(vertex_index) in_idx: u32, @builtin(instance_index) instance
 	out.world = worldPos;
 	out.rotation = u.rotation;
 	out.wear = u.wear;
+	out.wearAt = offset;
+	let reach = abs(size.x * s) + abs(size.y * c);
+	out.downs = vec2<f32>(localPos.y, rotatedOffset.y / max(reach, 1e-4) + 0.5);
 	out.tint = vec4<f32>(unpack2x16float(u.tint.x), unpack2x16float(u.tint.y));
 	out.clip_rect = vec4<f32>(
 		f32(u.clip.x & 0xFFFFu), f32(u.clip.x >> 16u), f32(u.clip.y & 0xFFFFu), f32(u.clip.y >> 16u));
@@ -181,17 +188,25 @@ fn wear_noise(p: vec2<f32>) -> f32 {
 		mix(wear_hash(i + vec2<f32>(0.0, 1.0)), wear_hash(i + vec2<f32>(1.0, 1.0)), u.x), u.y);
 }
 
-// Wear (SpriteWear) over world space: a drift of colour of its own, dark patches and a settled coat.
-fn worn(col: vec4<f32>, wear: vec2<u32>, world: vec2<f32>) -> vec4<f32> {
-	if (wear.x == 0u || col.a <= 0.0) {
+// Wear (SpriteWear) over the sprite (at: world pixels from its centre, unturned): a drift of colour of its own, dark
+// patches and a settled coat.
+fn worn(col: vec4<f32>, wear: vec2<u32>, world: vec2<f32>, downs: vec2<f32>) -> vec4<f32> {
+	// (`world` is the place on the sprite, not in the world: see wearAt.)
+	if ((wear.x == 0u && wear.y == 0u) || col.a <= 0.0) {
 		return col;
+	}
+	// A light baked in from the sprite's top, turned back to fall from the screen's top.
+	let baked = f32(wear.y >> 24u) / 255.0;
+	var lit = col.rgb;
+	if (baked > 0.0) {
+		lit = lit * (1.0 + baked * (0.5 - downs.y)) / max(1.0 + baked * (0.5 - downs.x), 0.05);
 	}
 	let seed = f32(wear.x & 0xFFu) / 255.0;
 	let jitter = f32((wear.x >> 8u) & 0xFFu) / 255.0;
 	let grime = f32((wear.x >> 16u) & 0xFFu) / 255.0;
 	let coat = f32(wear.x >> 24u) / 255.0;
 	let coatColour = vec3<f32>(f32(wear.y & 0xFFu), f32((wear.y >> 8u) & 0xFFu), f32((wear.y >> 16u) & 0xFFu)) / 255.0;
-	var rgb = col.rgb;
+	var rgb = lit;
 	let drift = vec3<f32>(fract(seed * 7.13 + 0.1), fract(seed * 3.71 + 0.5), fract(seed * 5.29 + 0.3)) - vec3<f32>(0.5);
 	rgb = rgb * (vec3<f32>(1.0) + jitter * (drift * 0.08 + vec3<f32>(drift.x * 0.1)));
 	let offset = vec2<f32>(seed * 97.0, seed * 61.0);
@@ -217,7 +232,7 @@ fn sprite_color(in_: VSOut) -> vec4<f32> {
 	if (pixel.a > 0.0) {
 		rgb = pixel.rgb / pixel.a;
 	}
-	return worn(vec4<f32>(rgb, pixel.a) * in_.tint, in_.wear, in_.world);
+	return worn(vec4<f32>(rgb, pixel.a) * in_.tint, in_.wear, in_.wearAt, in_.downs);
 }
 
 @fragment
