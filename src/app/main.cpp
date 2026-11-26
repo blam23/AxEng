@@ -340,7 +340,7 @@ int main(int argc, char* argv[])
 			return RET(err);
 	}
 
-	if (run)
+	if (run) try
 	{
 		doneSomething = true;
 
@@ -382,6 +382,13 @@ int main(int argc, char* argv[])
 			if (err != ax::Error::Success)
 				return RET(err);
 		}
+	}
+	catch (const std::exception& error)
+	{
+		// Named before it goes on up: a browser reports an uncaught exception without its message.
+		spdlog::critical("Uncaught exception: {}", error.what());
+		spdlog::default_logger()->flush();
+		throw;
 	}
 
 	if (!doneSomething)
