@@ -882,10 +882,10 @@ bool ax::Window::init_webgpu(wgpu::BackendType backendType)
 		wgpu::CallbackMode::AllowSpontaneous,
 		[](const wgpu::Device&, wgpu::DeviceLostReason reason, wgpu::StringView message)
 		{
-			spdlog::error("Device Lost: {} - message: {}", (uint32_t)reason, message.data);
 			// Destroying the device at shutdown reports a loss too; that one is expected.
 			if (reason != wgpu::DeviceLostReason::Destroyed)
 			{
+				spdlog::error("Device Lost: {} - message: {}", (uint32_t)reason, message.data);
 				ax::gpu::record_error("device lost: " + std::string{ message.data, message.length });
 				ax::gpu::set_device_lost(true);
 			}
